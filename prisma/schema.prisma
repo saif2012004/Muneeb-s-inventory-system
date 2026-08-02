@@ -1,0 +1,208 @@
+// Prisma 6.x — see the "Prisma version conventions" guardrail in CLAUDE.md.
+// Do NOT add an `output` field, a driver adapter, or a prisma.config.ts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled (Supavisor transaction mode, :6543)
+  directUrl = env("DIRECT_URL") // direct/session mode (:5432), migrations only
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+model Category {
+  id            String        @id @default(cuid())
+  name          String // "Beverages" | "Bakery" | "Milk Shop"
+  subCategories SubCategory[]
+  createdAt     DateTime      @default(now())
+}
+
+model SubCategory {
+  id         String    @id @default(cuid())
+  name       String // e.g. "Pepsi", "Cake Rusk", "Juices"
+  categoryId String
+  category   Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  products   Product[]
+}
+
+model Product {
+  id              String      @id @default(cuid())
+  name            String // e.g. "Pepsi 1.5L", "Premium Cake Rusk"
+  subCategoryId   String
+  subCategory     SubCategory @relation(fields: [subCategoryId], references: [id])
+  price           Decimal     @db.Decimal(10, 2)
+  size            String? // "half_litre" | "1L" | "1.5L" | "2.25L" | "large" | "small" | null
+  discountPercent Int? // 0 | 20 | 30 | 60
+  qualityTier     String? // "premium" | "simple" | null
+  shape           String? // "circle" | "rectangular_round" | null (russ)
+  unit            String? // "cotton" (eggs) | "piece" | "bottle" | null
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // REQUIRED back-relations (do not remove, migration fails without them)
+  beverageSaleItems BeverageSaleItem[]
+  bakerySaleItems   BakerySaleItem[]
+}
+
+// ---------------------------------------------------------------------------
+// Customers (shared across all sales) + Receivables
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id            String            @id @default(cuid())
+  name          String
+  phone         String?
+  type          String // "hotel" | "individual" | "shop"
+  isActive      Boolean           @default(true)
+  beverageSales BeverageSale[]
+  bakerySales   BakerySale[]
+  milkSales     MilkSale[]
+  payments      CustomerPayment[]
+  createdAt     DateTime          @default(now())
+}
+
+// Tracks money the customer has PAID. Outstanding balance is computed:
+// (sum of all their sales) - (sum of their payments).
+model CustomerPayment {
+  id          String   @id @default(cuid())
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  paymentDate DateTime @default(now())
+  amount      Decimal  @db.Decimal(10, 2)
+  method      String? // "cash" | "transfer" | null
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Beverages
+// ---------------------------------------------------------------------------
+
+model BeverageSale {
+  id          String             @id @default(cuid())
+  customerId  String
+  customer    Customer           @relation(fields: [customerId], references: [id])
+  saleDate    DateTime           @default(now())
+  totalAmount Decimal            @db.Decimal(10, 2)
+  notes       String?
+  items       BeverageSaleItem[]
+  createdAt   DateTime           @default(now())
+
+  @@index([customerId, saleDate])
+}
+
+model BeverageSaleItem {
+  id        String       @id @default(cuid())
+  saleId    String
+  sale      BeverageSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product      @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal      @db.Decimal(10, 2) // snapshot at time of sale
+  lineTotal Decimal      @db.Decimal(10, 2)
+}
+
+// ---------------------------------------------------------------------------
+// Bakery
+// ---------------------------------------------------------------------------
+
+model BakerySale {
+  id          String           @id @default(cuid())
+  customerId  String
+  customer    Customer         @relation(fields: [customerId], references: [id])
+  saleDate    DateTime         @default(now())
+  totalAmount Decimal          @db.Decimal(10, 2)
+  notes       String?
+  items       BakerySaleItem[]
+  createdAt   DateTime         @default(now())
+
+  @@index([customerId, saleDate])
+}
+
+model BakerySaleItem {
+  id        String     @id @default(cuid())
+  saleId    String
+  sale      BakerySale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product    @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal    @db.Decimal(10, 2) // snapshot at time of sale
+  lineTotal Decimal    @db.Decimal(10, 2)
+}
+
+// ---------------------------------------------------------------------------
+// Milk Shop
+// ---------------------------------------------------------------------------
+
+model Farmer {
+  id         String           @id @default(cuid())
+  name       String
+  phone      String?
+  address    String?
+  isActive   Boolean          @default(true)
+  deliveries MilkDelivery[]
+  purchases  FarmerPurchase[]
+  createdAt  DateTime         @default(now())
+}
+
+model MilkDelivery {
+  id            String   @id @default(cuid())
+  farmerId      String
+  farmer        Farmer   @relation(fields: [farmerId], references: [id])
+  deliveryDate  DateTime
+  morningLiters Decimal? @db.Decimal(8, 2) // null if no morning delivery
+  eveningLiters Decimal? @db.Decimal(8, 2) // null if no evening delivery
+  ratePerLiter  Decimal  @db.Decimal(8, 2)
+  totalLiters   Decimal  @db.Decimal(8, 2) // computed: (morning ?? 0) + (evening ?? 0)
+  totalAmount   Decimal  @db.Decimal(10, 2) // computed: totalLiters * ratePerLiter
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([farmerId, deliveryDate])
+}
+
+model FarmerPurchase {
+  id              String   @id @default(cuid())
+  farmerId        String
+  farmer          Farmer   @relation(fields: [farmerId], references: [id])
+  purchaseDate    DateTime @default(now())
+  itemDescription String // "Cow food" | "Milk" | "Yogurt" | "Tea powder" | custom
+  amount          Decimal  @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  @@index([farmerId, purchaseDate])
+}
+
+// Milk SOLD to hotels/shops/individuals (owner's outbound milk sales)
+model MilkSale {
+  id           String   @id @default(cuid())
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id])
+  saleDate     DateTime @default(now())
+  liters       Decimal  @db.Decimal(8, 2)
+  ratePerLiter Decimal  @db.Decimal(8, 2)
+  totalAmount  Decimal  @db.Decimal(10, 2) // liters * ratePerLiter
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  @@index([customerId, saleDate])
+}
+
+// ---------------------------------------------------------------------------
+// User (auth)
+// ---------------------------------------------------------------------------
+
+model User {
+  id        String   @id @default(cuid())
+  name      String?
+  email     String   @unique
+  password  String // bcrypt hash
+  createdAt DateTime @default(now())
+}

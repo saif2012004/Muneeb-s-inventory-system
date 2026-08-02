@@ -88,6 +88,15 @@ bcryptjs and the Prisma client cannot run on Edge. Use the split-config pattern:
 - `/lib/auth.ts` - full Node config that extends auth.config, does the bcrypt compare and Prisma user lookup in the `authorize` function. Imported by server components and route handlers.
 - In v5 you get the session with `auth()`, NOT `getServerSession()`. There is no `getServerSession` in v5.
 - `export const runtime = "nodejs"` on any route that touches Prisma or bcrypt.
+- Middleware protects everything except `/login`, `/api/auth`, and static assets — not a
+  `/dashboard` prefix. The app is served at the root, so prefix-gating would leave it open.
+  See the Authentication section.
+- `trustHost: true` must stay set in auth.config. v5 ignores `NEXTAUTH_URL` for host trust;
+  without the flag, production outside Vercel fails with `UntrustedHost` **inside middleware**,
+  so every request silently reads as signed out. See the Authentication section.
+- To verify the split actually holds, grep the built Edge bundle — it must contain none of
+  `@prisma/client`, `PrismaClient`, `bcryptjs`, `.prisma`:
+  `Select-String -Path .next/server/middleware.js -Pattern '@prisma/client|bcryptjs'`
 
 ### 4. Dates must be handled in Asia/Karachi, not server UTC
 Vercel serverless functions run in UTC. The owner logs morning and evening deliveries in Pakistan time. A delivery logged near midnight PKT can land on the wrong calendar day if you use `new Date()` server-side.
@@ -140,13 +149,27 @@ The frontend must feel calm, fast, and legible for a shop owner using a cheap An
 
 ## Folder Structure
 
+### URL layout (decided, do not change without a reason)
+
+**The app is served at the root.** `(dashboard)` is a parenthesised route group, so it
+contributes a shared layout and contributes NOTHING to the URL. There is no literal
+`/dashboard` folder and none should be added.
+
+| Page | URL |
+|---|---|
+| Dashboard home | `/` |
+| Modules | `/beverages`, `/bakery`, `/milk`, `/customers`, `/catalog`, `/reports` |
+| Login | `/login` — **the only unauthenticated page** |
+
+`DEFAULT_LOGIN_REDIRECT` is `"/"`. Route constants live in `/lib/routes.ts`.
+
 ```
 /app
   /api                     → Route Handlers (serverless). runtime="nodejs" where Prisma/bcrypt used.
-  /(auth)/login            → Owner login page
-  /(dashboard)
+  /(auth)/login            → Owner login page → /login
+  /(dashboard)             → layout group ONLY, adds nothing to the URL
     /layout.tsx            → Protected layout with nav
-    /page.tsx             → Dashboard home (summary + charts)
+    /page.tsx             → Dashboard home (summary + charts) → /
     /beverages/           → Beverages module
     /bakery/              → Bakery module
     /milk/                → Milk shop module (deliveries, purchases, sales, balances)
@@ -161,6 +184,7 @@ The frontend must feel calm, fast, and legible for a shop owner using a cheap An
   /prisma.ts              → Prisma client singleton
   /auth.ts                → Full NextAuth (Node) config
   /auth.config.ts         → Edge-safe NextAuth config for middleware
+  /routes.ts              → Route constants (dependency-free, client+edge safe)
   /serialize.ts           → Decimal → number serializers (money/liters)
   /format.ts              → formatPKR(), formatDate(), Karachi date helpers
   /utils.ts               → misc helpers
@@ -415,8 +439,74 @@ outstanding      = totalBilled - totalPaid
 ## Authentication
 - Single owner, NextAuth v5 credentials provider, JWT session (no DB sessions).
 - Password hashed with bcryptjs (12 rounds), stored in `User`.
-- Split config (see Gotcha 3). Middleware protects all `/dashboard` routes.
-- One-time `/scripts/create-owner.ts` seeds the owner account.
+- Split config (see Gotcha 3).
+- **Middleware protects everything except `/login`, `/api/auth`, and static assets.**
+  This is a single-owner app: the entire site is authenticated, and `/login` is the only
+  public page. Do not narrow this to a path prefix — the app is served at the root
+  (see URL layout above), so prefix-gating would leave the whole app open.
+- **`trustHost: true` is set explicitly in `/lib/auth.config.ts` and is the source of
+  truth for host trust.** Auth.js v5 does NOT read `NEXTAUTH_URL` for this; it only
+  auto-trusts when `AUTH_URL` / `AUTH_TRUST_HOST` / `VERCEL` is set, or when
+  `NODE_ENV !== "production"`. Without the explicit flag, a production build outside
+  Vercel throws `UntrustedHost` inside middleware and every request reads as signed out
+  — dev and Vercel both mask it. No env-var rename is needed; keep `NEXTAUTH_SECRET`
+  and `NEXTAUTH_URL` as named in the env contract below.
+- `callbackUrl` from the query string is attacker-controlled. Resolve it against our own
+  origin and drop anything off-site, or the login page becomes an open redirect.
+- One-time `/scripts/create-owner.ts` seeds the owner account:
+  `npm run create-owner -- <email> "<password>"` (upsert, so it doubles as a reset).
+- No database adapter. Credentials + JWT sessions don't use one, and the Credentials
+  provider is incompatible with DB sessions. `@auth/prisma-adapter` is NOT a dependency.
+
+---
+
+## Database security (READ BEFORE TOUCHING RLS)
+
+**Row Level Security is ENABLED on all 15 tables in `public`, with ZERO policies. This is
+deliberate and correct. Do not "fix" it.**
+
+Migration: `prisma/migrations/20260803000000_enable_rls/`.
+
+### Why it looks wrong but isn't
+
+Supabase exposes every `public` table through PostgREST, and **the anon key is public by
+design** — it ships to browsers. Without RLS, anyone with that key could read or write every
+customer, sale and payment row at `https://<ref>.supabase.co/rest/v1/...` with no login.
+
+RLS with no policies = **default deny** for `anon` and `authenticated`. That is the entire
+point. The usual warning that "enabling RLS without policies blocks all access" does not
+apply here, because nothing in this app authenticates as those roles:
+
+- The app does **not** use Supabase Auth. Auth is NextAuth v5 + the `User` table (see Authentication).
+- The app does **not** use the anon key or the Supabase Data API. `@supabase/supabase-js` is
+  installed but unused for data access.
+- **All** database access is Prisma, over a direct Postgres connection, as the `postgres` role.
+  That role has `rolbypassrls = true` **and** owns all 15 tables — two independent reasons RLS
+  never applies to it. Verified: reads, creates, updates, deletes and FK-joined writes all pass
+  with RLS on.
+
+### Rules
+
+- **Do NOT create `anon` or `authenticated` policies.** There is no legitimate caller for them.
+- **Do NOT disable RLS**, and do not drop the migration above.
+- **Do NOT add `FORCE ROW LEVEL SECURITY`** — that would make RLS apply to the table owner too
+  and would break Prisma. (`relforcerowsecurity` is 0 on every table; keep it that way.)
+- **New tables need the same treatment.** Prisma does not manage RLS, so `prisma migrate` will
+  create future tables with RLS OFF. Every migration that adds a table must also add
+  `ALTER TABLE public."NewTable" ENABLE ROW LEVEL SECURITY;`, then re-run the Supabase advisors.
+
+### Expected advisor output
+
+`get_advisors({ type: "security" })` reports 15 × `rls_enabled_no_policy` at **INFO** level.
+That is the healthy steady state, not a regression. The thing to watch for is
+`rls_disabled_in_public` at **ERROR** level — that means a new table slipped through.
+
+### Still open
+
+`anon` / `authenticated` retain table-level GRANTs on all 15 tables (Supabase's default for
+`public`). RLS makes those grants useless for reading rows, so this is not a leak — but the
+Data API surface still exists. Restricting the exposed schemas / disabling the Data API is a
+pending decision for the owner; it would not affect Prisma, which never goes through PostgREST.
 
 ---
 
@@ -474,6 +564,13 @@ NEXTAUTH_URL=     # http://localhost:3000 dev, production URL on Vercel
 | 8  | Polish: mobile nav, states, a11y, PWA, final validation | ⬜ Todo |
 
 Update this table as phases complete. Change ⬜ to ✅.
+
+### Carried-forward notes
+
+- **Phase 8 (PWA):** the manifest `start_url` must be **`"/"`, not `"/dashboard"`** — the app is
+  served at the root and no `/dashboard` route exists. A wrong `start_url` sends every installed
+  home-screen launch to a 404, and it is easy to miss because it only breaks after install.
+  Set `scope: "/"` too. See the URL layout table under Folder Structure.
 
 ---
 
