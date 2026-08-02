@@ -24,7 +24,7 @@
  * rename. Fixing a typo in this file therefore will NOT propagate to a row that
  * already exists; edit it in the catalog UI instead.
  *
- * Not wrapped in a transaction: 76 sequential upserts would risk blowing the
+ * Not wrapped in a transaction: 75 sequential upserts would risk blowing the
  * 5s interactive-transaction timeout, and because the seed is idempotent and
  * additive, a partial run is safely fixed by simply running it again.
  *
