@@ -542,10 +542,55 @@ NEXTAUTH_URL=     # http://localhost:3000 dev, production URL on Vercel
 
 ---
 
-## Deployment & Ops Reality (tell the client upfront)
-- **Vercel Hobby (free) forbids commercial use.** A client business app must run on **Vercel Pro (~$20/mo)**. Budget for it.
-- **Supabase free tier pauses after 7 days of inactivity and keeps zero backups.** For real financial data, use **Supabase Pro (~$25/mo)** which removes the pause and adds daily backups, OR at minimum set up a scheduled keep-alive ping and a weekly DB export. Do not ship a business's money records on a zero-backup tier.
-- Prisma on Vercel: run `prisma generate` in the build step (`postinstall` or build command), use the pooled `DATABASE_URL` at runtime and `DIRECT_URL` only for migrations.
+## Deployment posture (DECIDED — do not re-litigate each session)
+
+**Vercel plan: stay on Hobby for the whole build phase. Deploy to it freely.**
+No client is using the app and there is no real business data, so Hobby is fine and no
+upgrade is pending work. Do not raise it as a blocker on every deploy.
+
+**Upgrade to Vercel Pro at CLIENT HANDOFF — event-triggered, not date-triggered.**
+The trigger is: *the client starts entering real records and relying on the app for daily
+use.* Upgrade **before** that moment, never after. Two independent reasons:
+1. **Terms** — Vercel Hobby forbids commercial use. Once it is a live business tool, Hobby
+   is a terms violation, and enforcement would hit the system the client runs their books on.
+2. **Headroom** — Pro raises function duration/size limits and concurrency. Hobby's limits
+   are fine for an idle build-phase app and not something to discover under live load.
+
+### Live project
+| | |
+|---|---|
+| Production URL | `https://muneeb-inventory-system.vercel.app` |
+| Vercel project | `muneeb-inventory-system` |
+| Scope | `saifurrehmanch104-5326s-projects` (personal, Hobby) |
+
+Production env vars: `DATABASE_URL`, `DIRECT_URL`, `NEXTAUTH_SECRET` (encrypted, Preview +
+Production) and `NEXTAUTH_URL` (Production). **`VERCEL_TOKEN` is CLI auth only — never add
+it as a project env var.**
+
+Note: a project's FIRST CLI deployment is assigned to production automatically, even without
+`--prod`. Only relevant once, but it surprises people.
+
+### Workflow rule: deploys are free, migrations are deliberate
+- **Deploys** to Hobby may be run without asking.
+- **Migrations are NEVER automatic.** Do not add `prisma migrate deploy` to the build script,
+  and do not run migrations without confirming first. `postinstall` and the build command run
+  `prisma generate` only.
+
+### PWA (Phase 8)
+Manifest `start_url` must be **`"/"`**, and `scope: "/"`. The app is served at the root;
+`(dashboard)` is a layout group that contributes nothing to the URL, and no `/dashboard`
+route exists. A wrong `start_url` 404s every installed home-screen launch, and only breaks
+after install — easy to miss.
+
+### Still true regardless of plan
+- **Supabase free tier pauses after 7 days of inactivity and keeps zero backups.** For real
+  financial data use **Supabase Pro (~$25/mo)** — removes the pause, adds daily backups — OR
+  at minimum a scheduled keep-alive ping plus a weekly DB export. Do not ship a business's
+  money records on a zero-backup tier. Same handoff trigger as the Vercel upgrade.
+- Prisma on Vercel: `prisma generate` runs in BOTH `postinstall` and the build command.
+  Vercel caches dependencies, which can skip `postinstall` and ship a stale client — the
+  build-command copy is the guard. Pooled `DATABASE_URL` at runtime, `DIRECT_URL` for
+  migrations only.
 
 ---
 
@@ -553,7 +598,7 @@ NEXTAUTH_URL=     # http://localhost:3000 dev, production URL on Vercel
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1  | Scaffold + Prisma schema + split-config auth + Vercel deploy | ⬜ Todo |
+| 1  | Scaffold + Prisma schema + split-config auth + Vercel deploy | ✅ Done |
 | 2  | Category & product manager (CRUD + inline price editor) + seed | ⬜ Todo |
 | 3  | Beverages module (multi-item sales, list, customer ledger) | ⬜ Todo |
 | 4  | Bakery module (mirrors beverages) | ⬜ Todo |
@@ -567,10 +612,12 @@ Update this table as phases complete. Change ⬜ to ✅.
 
 ### Carried-forward notes
 
-- **Phase 8 (PWA):** the manifest `start_url` must be **`"/"`, not `"/dashboard"`** — the app is
-  served at the root and no `/dashboard` route exists. A wrong `start_url` sends every installed
-  home-screen launch to a 404, and it is easy to miss because it only breaks after install.
-  Set `scope: "/"` too. See the URL layout table under Folder Structure.
+- **Phase 1 delivered:** Next.js 14 + Tailwind + shadcn scaffold, Prisma 6 schema (15 tables),
+  split-config NextAuth v5 with a live owner login, RLS on every table, the app shell
+  (sidebar + mobile bottom nav + shared components), and a deployed Vercel project.
+  Live: `https://muneeb-inventory-system.vercel.app`
+- **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
+  **Deployment posture** section above — single source of truth, don't duplicate it here.
 
 ---
 
