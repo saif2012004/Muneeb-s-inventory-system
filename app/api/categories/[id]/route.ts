@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
+import {
+  fail,
+  failBlocked,
+  firstIssue,
+  ok,
+  requireOwner,
+  serverError,
+} from "@/lib/api";
 import { buildDeleteRefusal, findProductsWithSaleHistory } from "@/lib/catalog-guards";
 import { prisma } from "@/lib/prisma";
 import { categoryUpdateSchema } from "@/lib/validations/catalog";
@@ -77,7 +84,8 @@ export async function DELETE(
 
     const blocking = await findProductsWithSaleHistory(productIds);
     if (blocking.length > 0) {
-      return fail(buildDeleteRefusal(category.name, blocking), 409);
+      // Prose for display, blockedBy for action. See failBlocked().
+      return failBlocked(buildDeleteRefusal(category.name, blocking), blocking);
     }
 
     // Children first — Product -> SubCategory is Restrict, so the order is

@@ -24,44 +24,60 @@
  */
 import { prisma } from "@/lib/prisma";
 
-/** A product that is referenced by at least one sale line. */
-export type BlockingProduct = { id: string; name: string };
+/**
+ * A product that is referenced by at least one sale line.
+ *
+ * `id` is what makes this actionable: the client can offer "deactivate these"
+ * and PATCH by id, instead of trying to parse names back out of the prose
+ * message. The message stays for display; this is for behaviour.
+ */
+export type BlockingProduct = { id: string; name: string; saleCount: number };
 
 /**
- * Which of these products appear on a beverage or bakery sale line.
- * Returns [] for an empty input without querying.
+ * Which of these products appear on a beverage or bakery sale line, and on how
+ * many. Returns [] for an empty input without querying.
  */
 export async function findProductsWithSaleHistory(
   productIds: string[]
 ): Promise<BlockingProduct[]> {
   if (productIds.length === 0) return [];
 
-  const [beverageItems, bakeryItems] = await Promise.all([
-    prisma.beverageSaleItem.findMany({
+  // groupBy rather than findMany+distinct: we need the per-product line count,
+  // not just which ids appear.
+  const [beverageGroups, bakeryGroups] = await Promise.all([
+    prisma.beverageSaleItem.groupBy({
+      by: ["productId"],
       where: { productId: { in: productIds } },
-      select: { productId: true },
-      distinct: ["productId"],
+      _count: { _all: true },
     }),
-    prisma.bakerySaleItem.findMany({
+    prisma.bakerySaleItem.groupBy({
+      by: ["productId"],
       where: { productId: { in: productIds } },
-      select: { productId: true },
-      distinct: ["productId"],
+      _count: { _all: true },
     }),
   ]);
 
-  const blockedIds = Array.from(
-    new Set([
-      ...beverageItems.map((item) => item.productId),
-      ...bakeryItems.map((item) => item.productId),
-    ])
-  );
-  if (blockedIds.length === 0) return [];
+  // A product can only belong to one module in practice, but summing both is
+  // correct regardless and costs nothing.
+  const countsById = new Map<string, number>();
+  for (const group of [...beverageGroups, ...bakeryGroups]) {
+    countsById.set(
+      group.productId,
+      (countsById.get(group.productId) ?? 0) + group._count._all
+    );
+  }
+  if (countsById.size === 0) return [];
 
-  return prisma.product.findMany({
-    where: { id: { in: blockedIds } },
+  const products = await prisma.product.findMany({
+    where: { id: { in: Array.from(countsById.keys()) } },
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
+
+  return products.map((product) => ({
+    ...product,
+    saleCount: countsById.get(product.id) ?? 0,
+  }));
 }
 
 /** True when this single product appears on any sale line. */

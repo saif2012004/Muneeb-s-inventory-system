@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
+import {
+  fail,
+  failBlocked,
+  firstIssue,
+  ok,
+  requireOwner,
+  serverError,
+} from "@/lib/api";
 import { buildDeleteRefusal, findProductsWithSaleHistory } from "@/lib/catalog-guards";
 import { prisma } from "@/lib/prisma";
 import { subCategoryUpdateSchema } from "@/lib/validations/catalog";
@@ -72,7 +79,8 @@ export async function DELETE(
 
     const blocking = await findProductsWithSaleHistory(productIds);
     if (blocking.length > 0) {
-      return fail(buildDeleteRefusal(subCategory.name, blocking), 409);
+      // Prose for display, blockedBy for action. See failBlocked().
+      return failBlocked(buildDeleteRefusal(subCategory.name, blocking), blocking);
     }
 
     await prisma.$transaction([

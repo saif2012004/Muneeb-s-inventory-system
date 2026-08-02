@@ -23,6 +23,21 @@ export function fail(error: string, status: number): NextResponse<ApiFailure> {
 }
 
 /**
+ * 409 for a delete the catalog guard refused, with the blocking rows attached.
+ *
+ * `error` stays the human-readable sentence (and remains the fallback for any
+ * client that ignores the extra field); `blockedBy` is the machine-readable
+ * form, so the UI can list the products and act on them BY ID rather than
+ * scraping names out of the prose.
+ */
+export function failBlocked(
+  error: string,
+  blockedBy: { id: string; name: string; saleCount: number }[]
+): NextResponse {
+  return NextResponse.json({ data: null, error, blockedBy }, { status: 409 });
+}
+
+/**
  * Logs the real error server-side and returns a generic message. Raw Prisma
  * errors carry column names and connection details — never send them out.
  */
