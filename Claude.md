@@ -94,6 +94,14 @@ bcryptjs and the Prisma client cannot run on Edge. Use the split-config pattern:
 - `trustHost: true` must stay set in auth.config. v5 ignores `NEXTAUTH_URL` for host trust;
   without the flag, production outside Vercel fails with `UntrustedHost` **inside middleware**,
   so every request silently reads as signed out. See the Authentication section.
+- **Signed-out requests under `/api/` return 401 JSON, NOT a redirect. This is intended —
+  do not "simplify" it back to a bare `return isLoggedIn`.** The `authorized` callback
+  returns `NextResponse.json({ data: null, error }, { status: 401 })` for `/api/` paths and
+  `false` (→ redirect to `/login`) for page requests. Returning `false` for an API route
+  sends a 307 to the HTML login page, and `fetch()` follows that redirect transparently —
+  the caller then receives HTML and dies inside `res.json()` with an opaque parse error
+  instead of surfacing "your session expired". Added in Phase 2.1; see the Authentication
+  section.
 - To verify the split actually holds, grep the built Edge bundle — it must contain none of
   `@prisma/client`, `PrismaClient`, `bcryptjs`, `.prisma`:
   `Select-String -Path .next/server/middleware.js -Pattern '@prisma/client|bcryptjs'`
@@ -444,6 +452,13 @@ outstanding      = totalBilled - totalPaid
   This is a single-owner app: the entire site is authenticated, and `/login` is the only
   public page. Do not narrow this to a path prefix — the app is served at the root
   (see URL layout above), so prefix-gating would leave the whole app open.
+- **Rejection shape differs by request type, deliberately.** A signed-out request to a
+  page redirects to `/login`; a signed-out request under `/api/` gets
+  `401 {"data": null, "error": "You must be signed in."}` — the same `{ data, error }`
+  envelope the route handlers use, so the UI can show a real message instead of choking
+  on an HTML login page inside `res.json()`. Both paths are exercised by the Phase 2.1
+  verification. Route handlers ALSO call `requireOwner()` for defence in depth: the
+  middleware is the gate, the route check is the backstop if the matcher ever changes.
 - **`trustHost: true` is set explicitly in `/lib/auth.config.ts` and is the source of
   truth for host trust.** Auth.js v5 does NOT read `NEXTAUTH_URL` for this; it only
   auto-trusts when `AUTH_URL` / `AUTH_TRUST_HOST` / `VERCEL` is set, or when

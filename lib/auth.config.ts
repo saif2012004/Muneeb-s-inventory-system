@@ -56,7 +56,22 @@ export default {
       }
 
       // Everything else the matcher lets through is owner-only.
-      return isLoggedIn;
+      if (isLoggedIn) return true;
+
+      // A signed-out API call must NOT be redirected. Returning false sends a
+      // 307 to the HTML login page, which a fetch() follows transparently —
+      // the caller then gets HTML and dies inside res.json() with an opaque
+      // parse error instead of "your session expired". Answer API requests in
+      // the same { data, error } shape the routes use, so the UI can show a
+      // real message. Page requests still redirect to /login as before.
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json(
+          { data: null, error: "You must be signed in." },
+          { status: 401 }
+        );
+      }
+
+      return false;
     },
 
     jwt({ token, user }) {
