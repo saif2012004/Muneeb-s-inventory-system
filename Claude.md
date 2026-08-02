@@ -105,6 +105,11 @@ bcryptjs and the Prisma client cannot run on Edge. Use the split-config pattern:
 - To verify the split actually holds, grep the built Edge bundle — it must contain none of
   `@prisma/client`, `PrismaClient`, `bcryptjs`, `.prisma`:
   `Select-String -Path .next/server/middleware.js -Pattern '@prisma/client|bcryptjs'`
+  **Run this against a PRODUCTION build only.** `next dev` leaves an unminified
+  `middleware.js` with comments intact, and the guardrail comments in `lib/auth.config.ts`
+  and `middleware.ts` literally contain the word "bcryptjs" — so the check reports 2 false
+  hits against a dev bundle. Confirm you have the production artifact (a few hundred KB, no
+  comments) before trusting either result. Verified clean on the Phase 2.1 build.
 
 ### 4. Dates must be handled in Asia/Karachi, not server UTC
 Vercel serverless functions run in UTC. The owner logs morning and evening deliveries in Pakistan time. A delivery logged near midnight PKT can land on the wrong calendar day if you use `new Date()` server-side.

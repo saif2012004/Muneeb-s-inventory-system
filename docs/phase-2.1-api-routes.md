@@ -147,6 +147,11 @@ area, so it needs an explicit keep/revert call.
 
 ### 5.2 `npm run build` is broken on this machine — pre-existing, not from these changes
 
+> **SUPERSEDED — see `docs/phase-2.1-deploy-verification.md` §3.** "Broken" was too strong.
+> The build OOMs only under memory pressure; with the dev server stopped it completes
+> locally and emits the same `ƒ Middleware 78.2 kB` as Vercel. The Edge-bundle check was
+> subsequently run against a real production bundle and came back **clean**.
+
 Confirmed by stashing all Phase 2 work and building clean `main`: it OOMs identically
 (`FATAL ERROR: Zone Allocation failed`, worker exit code 134). The machine has ~15 GB total with
 only ~2 GB free.
