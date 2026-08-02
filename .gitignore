@@ -26,8 +26,10 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
-.env
-.env*.local
+# Broad on purpose: .env, .env.local, .env.production, and the .env.local the
+# Vercel CLI writes (VERCEL_OIDC_TOKEN) are all secrets. The negation must stay
+# LAST in this block — a later .env* rule would silently re-ignore the example.
+.env*
 !.env.example
 
 # vercel
