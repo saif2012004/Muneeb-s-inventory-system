@@ -1,0 +1,426 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { CheckCircle2, Loader2, LogIn, Plus, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { useForm, useFieldArray, useWatch } from "react-hook-form";
+import { toast } from "sonner";
+
+import { CustomerCombobox } from "@/components/beverages/CustomerCombobox";
+import { LineItemRow } from "@/components/beverages/LineItemRow";
+import { SaleDatePicker } from "@/components/beverages/SaleDatePicker";
+import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
+import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ApiError, redirectToLogin } from "@/lib/api-client";
+import {
+  groupBeverageOptions,
+  indexBeverageOptions,
+} from "@/lib/beverage-catalog";
+import { karachiToday, toDateKey } from "@/lib/format";
+import { useCreateBeverageSale } from "@/lib/hooks/use-beverage-sales";
+import { useProducts } from "@/lib/hooks/use-catalog";
+import { useCustomers } from "@/lib/hooks/use-customers";
+import {
+  emptySaleLine,
+  newSaleFormSchema,
+  previewLineTotal,
+  type SaleFormOutput,
+  type SaleFormValues,
+} from "@/lib/validations/beverage-sale-form";
+
+/**
+ * The owner's most-used screen. Everything here is tuned for one-handed use on
+ * a cheap Android phone in daylight: 44px targets, numeric keypads, a total
+ * pinned where the thumb already is, and no state that looks frozen.
+ *
+ * The Beverages category id is resolved by the API, not hardcoded here — the
+ * product list is filtered with `?categoryId=` off the catalog tree, so a
+ * renamed category still works.
+ */
+export function NewSaleForm() {
+  const reduceMotion = useReducedMotion();
+  const [justSaved, setJustSaved] = useState<{ id: string; total: number } | null>(
+    null
+  );
+
+  const customersQuery = useCustomers();
+  // Active products only: the API refuses a deactivated product on a new sale,
+  // so offering one here would only produce an error the owner can't act on.
+  const productsQuery = useProducts(false);
+  const createSale = useCreateBeverageSale();
+
+  const form = useForm<SaleFormValues, unknown, SaleFormOutput>({
+    resolver: zodResolver(newSaleFormSchema),
+    defaultValues: {
+      customerId: "",
+      saleDate: karachiToday(),
+      notes: "",
+      items: [emptySaleLine()],
+    },
+    // Errors appear once a field has been touched and corrected live after —
+    // validating on every keystroke from the start would shout at a half-typed
+    // first line.
+    mode: "onTouched",
+  });
+
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: "items",
+  });
+
+  const beverageGroups = useMemo(() => {
+    const products = (productsQuery.data ?? []).filter(
+      (product) =>
+        product.subCategory.category.name.trim().toLowerCase() === "beverages"
+    );
+    return groupBeverageOptions(products);
+  }, [productsQuery.data]);
+
+  const optionsById = useMemo(
+    () => indexBeverageOptions(beverageGroups),
+    [beverageGroups]
+  );
+
+  // The live running total. Watched rather than derived from `fields`, because
+  // `fields` is a snapshot taken at render and would lag every keystroke.
+  const watchedItems = useWatch({ control: form.control, name: "items" });
+  const runningTotal = (watchedItems ?? []).reduce(
+    (total, item) =>
+      total + previewLineTotal(item?.quantity ?? "", item?.unitPrice ?? ""),
+    0
+  );
+
+  const customers = customersQuery.data ?? [];
+
+  // ------------------------------------------------------------------
+  // Session / error states
+  // ------------------------------------------------------------------
+
+  const sessionExpired =
+    (customersQuery.error instanceof ApiError &&
+      customersQuery.error.isSessionExpired) ||
+    (productsQuery.error instanceof ApiError &&
+      productsQuery.error.isSessionExpired);
+
+  if (sessionExpired) {
+    return (
+      <>
+        <PageHeader title="New sale" accent="blue" />
+        <EmptyState
+          icon={LogIn}
+          title="Your session expired"
+          description="Please sign in again to record a sale."
+          accent="blue"
+          action={
+            <Button
+              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              onClick={redirectToLogin}
+            >
+              Sign in
+            </Button>
+          }
+        />
+      </>
+    );
+  }
+
+  const loadError = customersQuery.error ?? productsQuery.error;
+  if (loadError) {
+    return (
+      <>
+        <PageHeader title="New sale" accent="blue" />
+        <EmptyState
+          icon={RefreshCw}
+          title="Couldn't load the form"
+          description={
+            loadError instanceof ApiError
+              ? loadError.message
+              : "Something went wrong."
+          }
+          accent="blue"
+          action={
+            <Button
+              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              onClick={() => {
+                customersQuery.refetch();
+                productsQuery.refetch();
+              }}
+            >
+              <RefreshCw className="mr-2 size-4" aria-hidden />
+              Try again
+            </Button>
+          }
+        />
+      </>
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Submit
+  // ------------------------------------------------------------------
+
+  const onSubmit = form.handleSubmit(
+    (values) => {
+      createSale.mutate(
+        {
+          customerId: values.customerId,
+          saleDate: toDateKey(values.saleDate),
+          notes: values.notes || undefined,
+          // unitPrice is ALWAYS sent: the owner may be pricing a 0-priced
+          // seeded product at the point of sale, and the server treats an
+          // explicit price as the snapshot (Gotcha 5).
+          items: values.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          })),
+        },
+        {
+          onSuccess: (sale) => {
+            toast.success(`Sale recorded for ${sale.customer.name}`);
+            setJustSaved({ id: sale.id, total: sale.totalAmount });
+          },
+          onError: (error) => {
+            if (error instanceof ApiError && error.isSessionExpired) {
+              toast.error(error.message);
+              redirectToLogin();
+              return;
+            }
+            // The API's messages are specific and actionable — "X is
+            // deactivated and can't be added to a new sale", "That customer no
+            // longer exists" — so they are shown verbatim.
+            toast.error(
+              error instanceof ApiError
+                ? error.message
+                : "Couldn't record the sale."
+            );
+          },
+        }
+      );
+    },
+    () => {
+      toast.error("Check the highlighted fields and try again.");
+    }
+  );
+
+  /** Keep customer + date, clear the lines. The common case is another sale to the same shop. */
+  function addAnother() {
+    form.setValue("items", [emptySaleLine()]);
+    form.setValue("notes", "");
+    form.clearErrors();
+    setJustSaved(null);
+  }
+
+  const isLoading = customersQuery.isPending || productsQuery.isPending;
+
+  // ------------------------------------------------------------------
+  // Saved confirmation
+  // ------------------------------------------------------------------
+
+  if (justSaved) {
+    return (
+      <>
+        <PageHeader title="Sale recorded" accent="blue" />
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 420, damping: 34 }}
+          className="rounded-xl border border-blue-100 bg-white p-6 text-center shadow-sm"
+        >
+          <span className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+            <CheckCircle2 className="size-6" aria-hidden />
+          </span>
+          <p className="text-[15px] font-medium text-zinc-900">Sale saved</p>
+          <p className="num mt-1 text-[28px] font-bold text-blue-600">
+            <AnimatedMoney value={justSaved.total} />
+          </p>
+
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <Button
+              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              onClick={addAnother}
+            >
+              <Plus className="mr-2 size-4" aria-hidden />
+              Add another
+            </Button>
+            <Button asChild variant="outline" className="h-11 rounded-lg">
+              <Link href="/beverages">View sales</Link>
+            </Button>
+          </div>
+        </motion.div>
+      </>
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // Form
+  // ------------------------------------------------------------------
+
+  return (
+    <>
+      <PageHeader
+        title="New sale"
+        description="Beverages. Prices default to the catalog and can be changed per sale."
+        accent="blue"
+      />
+
+      <form onSubmit={onSubmit} noValidate>
+        {/* pb clears the pinned total bar so the last field is never trapped
+            underneath it. */}
+        <div className="space-y-5 pb-32">
+          <section className="space-y-1.5">
+            <Label htmlFor="customer">Customer</Label>
+            <CustomerCombobox
+              customers={customers}
+              isLoading={isLoading}
+              value={form.watch("customerId")}
+              invalid={Boolean(form.formState.errors.customerId)}
+              onChange={(customerId) =>
+                form.setValue("customerId", customerId, { shouldValidate: true })
+              }
+            />
+            {form.formState.errors.customerId ? (
+              <p className="text-sm text-rose-600">
+                {form.formState.errors.customerId.message}
+              </p>
+            ) : null}
+          </section>
+
+          <section className="space-y-1.5">
+            <Label htmlFor="sale-date">Date</Label>
+            <SaleDatePicker
+              value={form.watch("saleDate")}
+              invalid={Boolean(form.formState.errors.saleDate)}
+              onChange={(date) =>
+                form.setValue("saleDate", date, { shouldValidate: true })
+              }
+            />
+            {form.formState.errors.saleDate ? (
+              <p className="text-sm text-rose-600">
+                {form.formState.errors.saleDate.message}
+              </p>
+            ) : null}
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[18px] font-semibold text-zinc-900">Items</h2>
+              <span className="num text-sm text-zinc-500">
+                {fields.length} {fields.length === 1 ? "line" : "lines"}
+              </span>
+            </div>
+
+            {isLoading ? (
+              <div className="space-y-3">
+                <Skeleton className="h-56 w-full rounded-xl" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <AnimatePresence initial={false}>
+                  {fields.map((field, index) => (
+                    <motion.div
+                      key={field.id}
+                      layout={reduceMotion ? false : "position"}
+                      initial={reduceMotion ? false : { opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={
+                        reduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, y: 8, scale: 0.98 }
+                      }
+                      transition={{ type: "spring", stiffness: 480, damping: 38 }}
+                    >
+                      <LineItemRow
+                        form={form}
+                        index={index}
+                        groups={beverageGroups}
+                        optionsById={optionsById}
+                        canRemove={fields.length > 1}
+                        onRemove={() => remove(index)}
+                      />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {form.formState.errors.items?.message ? (
+              <p className="text-sm text-rose-600">
+                {form.formState.errors.items.message}
+              </p>
+            ) : null}
+
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full rounded-lg border-dashed"
+              onClick={() => append(emptySaleLine())}
+            >
+              <Plus className="mr-2 size-4" aria-hidden />
+              Add item
+            </Button>
+          </section>
+
+          <section className="space-y-1.5">
+            <Label htmlFor="notes">Notes (optional)</Label>
+            <Input
+              id="notes"
+              placeholder="e.g. Morning drop"
+              className="h-11 rounded-lg"
+              autoComplete="off"
+              {...form.register("notes")}
+            />
+            {form.formState.errors.notes ? (
+              <p className="text-sm text-rose-600">
+                {form.formState.errors.notes.message}
+              </p>
+            ) : null}
+          </section>
+        </div>
+
+        {/* Pinned total + submit. Sits above the mobile bottom nav.
+            `left-0 md:left-60` constrains the BACKGROUND to the content column:
+            with `inset-x-0` the bar spanned the full viewport and its white
+            background covered the sidebar's Log out button, since `md:pl-60`
+            only pads the inner content, not the panel itself. */}
+        <div className="fixed bottom-[68px] left-0 right-0 z-30 border-t border-zinc-200 bg-white/95 backdrop-blur md:bottom-0 md:left-60">
+          <div className="mx-auto flex w-full max-w-[640px] items-center gap-3 px-4 py-3 md:px-8 lg:max-w-[1100px]">
+            {/* Inner column keeps the same max-width as <main>, so the total
+                still lines up with the form above it. */}
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">
+                Total
+              </p>
+              <AnimatedMoney
+                value={runningTotal}
+                className="block text-[28px] font-bold leading-tight text-blue-600"
+              />
+            </div>
+
+            <Button
+              type="submit"
+              disabled={createSale.isPending}
+              className="h-12 shrink-0 rounded-lg bg-blue-600 px-6 hover:bg-blue-700"
+            >
+              {createSale.isPending ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+                  Saving…
+                </>
+              ) : (
+                "Save sale"
+              )}
+            </Button>
+          </div>
+        </div>
+      </form>
+    </>
+  );
+}

@@ -46,15 +46,33 @@ type ApiEnvelope<T> =
   | { data: T; error: null }
   | { data: null; error: string; blockedBy?: BlockingProduct[] };
 
+/**
+ * How long to wait before giving up on a request.
+ *
+ * A dropped connection rejects `fetch` immediately, but a STALLED one — the
+ * normal failure mode on patchy mobile data, which is what the owner is on —
+ * never settles at all. Without a deadline the promise hangs forever, and every
+ * caller that disables a button while pending stays disabled forever with it:
+ * "Saving…" that never resolves and cannot be retried.
+ *
+ * 15s is comfortably above a slow-but-working request to a cold serverless
+ * function, and well below the point where someone assumes the app is broken.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {
       ...init,
       headers: { "Content-Type": "application/json", ...init?.headers },
+      // A timeout fires as an AbortError, which lands in the catch below and
+      // becomes the same friendly "can't reach the server" ApiError as a hard
+      // network failure — from the owner's side the two are the same problem.
+      signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
-    // Network-level failure: offline, DNS, connection reset.
+    // Network-level failure: offline, DNS, connection reset, or our own timeout.
     throw new ApiError(0, "Can't reach the server. Check your connection.");
   }
 

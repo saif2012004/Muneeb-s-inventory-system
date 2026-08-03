@@ -13,6 +13,7 @@ import {
   addMonths,
   endOfMonth,
   endOfWeek,
+  format,
   startOfDay,
   startOfMonth,
   startOfWeek,
@@ -116,6 +117,41 @@ export function todayInKarachi(): Date {
 /** Today's Karachi calendar date as `"yyyy-MM-dd"`. */
 export function todayKeyInKarachi(): string {
   return karachiDayKey(new Date());
+}
+
+// ---------------------------------------------------------------------------
+// Calendar-day pickers
+//
+// A date PICKER deals in calendar days, not instants. shadcn's Calendar hands
+// back a Date at LOCAL midnight for the day the owner clicked, and that day —
+// not the underlying instant — is what they meant.
+//
+// So these two deliberately use local formatting rather than
+// formatInTimeZone(..., KARACHI_TZ): converting a local-midnight Date into
+// Karachi would shift the day for anyone not sitting in Karachi, and show them
+// a different date from the one they just tapped. The Karachi part is handled
+// where it belongs — `karachiToday()` seeds the picker with the right day, and
+// the server turns the `yyyy-MM-dd` key back into a Karachi midnight instant.
+// ---------------------------------------------------------------------------
+
+/**
+ * Today's Karachi calendar day, as a local Date suitable for `<Calendar>`.
+ * Use this to seed a picker, never `new Date()` — near midnight PKT those are
+ * different days.
+ */
+export function karachiToday(): Date {
+  const [year, month, day] = todayKeyInKarachi().split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+/** A picked Date -> the `"yyyy-MM-dd"` key the API expects. */
+export function toDateKey(date: Date): string {
+  return format(date, "yyyy-MM-dd");
+}
+
+/** A picked Date -> `"03/08/2026"` for display next to the picker. */
+export function formatPickedDate(date: Date): string {
+  return format(date, "dd/MM/yyyy");
 }
 
 export type KarachiPeriod =
