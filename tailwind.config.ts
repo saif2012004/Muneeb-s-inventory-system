@@ -7,6 +7,12 @@ const config = {
     "./components/**/*.{ts,tsx}",
     "./app/**/*.{ts,tsx}",
     "./src/**/*.{ts,tsx}",
+    // REQUIRED: lib/nav.ts holds the ACCENTS map — every module accent class
+    // (text-blue-600, bg-amber-50, …) is a literal string there and nowhere
+    // else. Tailwind scans source TEXT, so omitting this directory silently
+    // drops those classes from the build: the className lands on the element
+    // but no rule exists, and the colour falls back to default foreground.
+    "./lib/**/*.{ts,tsx}",
   ],
   prefix: "",
   theme: {
