@@ -560,6 +560,24 @@ pending decision for the owner; it would not affect Prisma, which never goes thr
 - Every route checks the session with `auth()` first; reject unauthenticated with 401.
 - `export const runtime = "nodejs"` on routes using Prisma/bcrypt.
 
+### Client data fetching (GLOBAL — applies to every module, not just beverages)
+
+**TanStack Query uses `networkMode: "always"` (set on both queries and mutations in
+`components/providers/query-provider.tsx`) plus a 15s `AbortSignal.timeout` in
+`lib/api-client.ts`, so requests fail fast and recover instead of pausing or hanging when
+offline. Do NOT revert to the default `networkMode`.**
+
+Both halves are load-bearing and cover different failures:
+
+| Failure | Without the setting | With it |
+|---|---|---|
+| No connection (`navigator.onLine` false) | Query's default `"online"` mode **pauses** the mutation — `mutationFn` is never called, so there is no request, no error and no toast, and a submit button disabled while pending stays disabled **forever** | Request runs, fails immediately, button re-enables with "Can't reach the server." |
+| Connected but stalled | `fetch` never settles, so the catch in `api-client` never runs — same permanent "Saving…" | Aborts at 15s into the existing catch |
+
+Found the hard way in Phase 3.2: the new-sale Save button hung indefinitely offline with no
+feedback. Verified fixed in-browser — recovery in ~305ms. See
+`docs/phase-3.2-fixes-verified.md` §4.
+
 ---
 
 ## Environment Variables
@@ -640,7 +658,7 @@ after install — easy to miss.
 |---|---|---|
 | 1  | Scaffold + Prisma schema + split-config auth + Vercel deploy | ✅ Done |
 | 2  | Category & product manager (CRUD + inline price editor) + seed | ✅ Done |
-| 3  | Beverages module (multi-item sales, list, customer ledger) | ⬜ Todo |
+| 3  | Beverages module (multi-item sales, list, customer ledger) | ✅ Done |
 | 4  | Bakery module (mirrors beverages) | ⬜ Todo |
 | 4b | Customers hub + receivables (payments, outstanding balances) | ⬜ Todo |
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ⬜ Todo |
@@ -672,6 +690,22 @@ Update this table as phases complete. Change ⬜ to ✅.
     `lib/nav.ts` is the only place module accent classes appear as literals; dropping `./lib`
     silently strips them from the CSS and colours fall back to default foreground. This bit
     us once already — see `docs/phase-2.3-seed-run.md` §6.
+- **Phase 3 delivered:** the beverages sale API (3.1) and UI (3.2) — `/beverages` and
+  `/beverages/new-sale`. Reports: `docs/phase-3.1-beverages-api.md`,
+  `docs/phase-3.1-review-signoff.md`, `docs/phase-3.2-beverages-ui.md`,
+  `docs/phase-3.2-browser-verification.md`, `docs/phase-3.2-fixes-verified.md`.
+  Four things Phase 4 (Bakery) inherits:
+  - **`reconcileSaleLines()` in `lib/sales.ts` is THE price-snapshot implementation.** Reuse
+    it; do not re-derive the predicate. Same for `SALE_DETAIL_SELECT` and `loadSaleProducts`,
+    which are written generically because BakerySale has the same relation names.
+  - **The global TanStack Query settings above are not optional.** See the client
+    data-fetching note in API Route Conventions.
+  - **The delete-guard 409 / soft-delete re-test is still outstanding.** Real sale history now
+    exists in the code paths but the test DB was reset, so it needs sales re-created first.
+    Procedure: `docs/phase-3.1-beverages-api.md` §6.
+  - **Verify UI in a real browser, not on a build.** Phase 3.2 type-checked, linted and built
+    green while still carrying three real bugs — one of which trapped the owner with no way to
+    recover. The build proves it compiles, nothing more.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 
