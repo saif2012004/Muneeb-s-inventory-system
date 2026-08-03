@@ -619,7 +619,7 @@ after install — easy to miss.
 | Phase | Scope | Status |
 |---|---|---|
 | 1  | Scaffold + Prisma schema + split-config auth + Vercel deploy | ✅ Done |
-| 2  | Category & product manager (CRUD + inline price editor) + seed | ⬜ Todo |
+| 2  | Category & product manager (CRUD + inline price editor) + seed | ✅ Done |
 | 3  | Beverages module (multi-item sales, list, customer ledger) | ⬜ Todo |
 | 4  | Bakery module (mirrors beverages) | ⬜ Todo |
 | 4b | Customers hub + receivables (payments, outstanding balances) | ⬜ Todo |
@@ -636,6 +636,22 @@ Update this table as phases complete. Change ⬜ to ✅.
   split-config NextAuth v5 with a live owner login, RLS on every table, the app shell
   (sidebar + mobile bottom nav + shared components), and a deployed Vercel project.
   Live: `https://muneeb-inventory-system.vercel.app`
+- **Phase 2 delivered:** catalog API with guarded deletes, the catalog UI at `/catalog`, and
+  the seed. Reports: `docs/phase-2.1-api-routes.md`, `docs/phase-2.1-deploy-verification.md`,
+  `docs/phase-2.2-catalog-ui.md`, `docs/phase-2.3-seed-run.md`. Three things Phase 3 inherits:
+  - **The catalog is seeded.** 2 categories, 11 sub-categories, 62 products, all at `price 0`
+    and `isActive true`. The seed is additive (`upsert` with `update: {}` on deterministic
+    ids), so re-running never duplicates or resets an owner-set price — but it WILL recreate
+    a seeded product the owner deleted.
+  - **A refused delete returns `{ error, blockedBy: [{ id, name, saleCount }] }`.** Consume
+    the structured field; never parse the prose. Sale modules must keep this working — the
+    guard in `lib/catalog-guards.ts` is the single implementation for all three levels.
+    **The 409 path has never fired outside a test fixture** (it needs real sale history), so
+    re-test it for real once beverage/bakery sales exist.
+  - **`tailwind.config.ts` content globs must include `./lib`.** The `ACCENTS` map in
+    `lib/nav.ts` is the only place module accent classes appear as literals; dropping `./lib`
+    silently strips them from the CSS and colours fall back to default foreground. This bit
+    us once already — see `docs/phase-2.3-seed-run.md` §6.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 
