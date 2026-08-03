@@ -436,7 +436,27 @@ outstanding      = totalBilled - totalPaid
 ### Price snapshot
 - On sale creation, copy current `product.price` into line-item `unitPrice`.
 - Historical records always read `unitPrice`, never re-join to product.
-- Editing a sale is allowed, but on edit re-snapshot the current price for any changed/added line and recompute totals inside a transaction. Do not silently rewrite unchanged historical lines.
+- Editing a sale is allowed. Totals are always recomputed inside a transaction.
+
+**Exactly when a line re-snapshots the current price (decided Phase 3.1 — do not loosen):**
+
+| Edit to a line | Price behaviour |
+|---|---|
+| New line added | **Re-snapshot** — copy current `product.price` |
+| Line's `productId` changed | **Re-snapshot** — it is a different item, the old price is meaningless for it |
+| Line's `quantity` changed, same product | **KEEP the stored `unitPrice`** |
+| Line untouched | **KEEP the stored `unitPrice`** |
+| Explicit `unitPrice` sent for the line | That value wins over every row above |
+
+**Quantity is NOT a re-price trigger, deliberately.** Correcting "12 crates" to "15" on a
+months-old sale is a typo fix, not a re-sale; re-pricing it at today's catalog price would
+silently move a historical total the owner never asked to change. An earlier draft of this
+rule said "any changed line re-snapshots" — that was rejected on review. Do not restore it.
+
+The decision is implemented ONCE, in `reconcileSaleLines()` in `lib/sales.ts`, as a pure
+function so it can be tested without HTTP. Beverages uses it; Bakery (Phase 4) must reuse it
+rather than re-implement the predicate. Sale PATCH responses return `repricedItemIds` so the
+UI can show which lines genuinely took a new price.
 
 ### Discounts, russ, eggs
 - Discount variants (20/30/60%) are separate Product records with the discounted price stored directly. No runtime discount math.
