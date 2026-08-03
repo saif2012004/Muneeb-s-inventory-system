@@ -38,3 +38,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# scratch
+# The working file phase prompts get pasted into. It is an INPUT, not a
+# deliverable — the phase reports in docs/ and the run-by-run record in
+# docs/responses/ are what belong in the repo.
+docs/prompt.txt
