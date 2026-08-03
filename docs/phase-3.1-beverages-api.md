@@ -418,7 +418,7 @@ test fixture** because it needs real sale history. Creating a sale here produces
 | Supabase column check, read-only | matches `schema.prisma` |
 | Prisma version | `@prisma/client` 6.19.3 — v6 conventions only |
 | Migration run? | **No.** Tables already existed; no schema change was needed. |
-| Production build | **not run locally** — this machine OOMs. Type-check is a type-check, not a build; confirm via a Vercel preview deploy. |
+| Production build | **PASSED** on Vercel preview — see §7.2 |
 
 ### 7.1 Price-snapshot checks, executed
 
@@ -439,6 +439,46 @@ Big Apple to **999**:
 
 **8/8 passed.** The headline: a quantity-only edit no longer re-prices at today's catalog
 price, while a product swap and a new line still do.
+
+### 7.2 Vercel preview deploy — real build signal
+
+Commit `3cf2fc6`. Deployed with `vercel deploy` (**no `--prod`**; `target: null` confirms
+preview, production is untouched).
+
+| | |
+|---|---|
+| Result | **READY** — build completed in 42s |
+| Preview URL | `https://muneeb-inventory-system-9x36tkriz.vercel.app` |
+| Deployment | `dpl_GdiawGKS2LaWXMucRvwTQ2iE7d6C` |
+| Prisma client | generated **v6.19.3** in both `postinstall` and the build command, as designed |
+| New routes registered | `ƒ /api/beverages/sales`, `ƒ /api/beverages/sales/[id]`, `ƒ /api/customers` — all dynamic, 0 B client JS |
+
+**Edge bundle is clean.** `ƒ Middleware 78.2 kB` — unchanged in order of magnitude from
+Phase 2.1 and far too small to contain the Prisma client (~1 MB+) or bcryptjs. The split
+config (Gotcha 3) still holds. Confirmed behaviourally against the live preview rather than
+by grepping a local artifact, since this machine OOMs on a production build:
+
+| Request (signed out) | Result |
+|---|---|
+| `GET /api/beverages/sales` | **401** `{"data":null,"error":"You must be signed in."}`, `Content-Type: application/json` |
+| `GET /api/customers` | **401**, same JSON envelope |
+| `GET /` (page) | **307** → `/login?callbackUrl=…` |
+| `GET /login` | **200** HTML — the only public page |
+
+That exercises both arms of the `authorized` callback in production: JSON for `/api/`,
+redirect for pages. Middleware executing correctly on Edge is itself proof the bundle
+carries no Node-only dependency.
+
+> Note: preview deployments sit behind Vercel's SSO Deployment Protection, so a plain
+> `curl` gets a 302 to `vercel.com/sso-api` before ever reaching the app. Use
+> `vercel curl <url>` to authenticate through it — a plain curl's 302 is the protection
+> layer, not the app's middleware.
+
+**One build warning, deliberately not acted on:** Prisma warns that
+`package.json#prisma` is deprecated and *"will be removed in Prisma 7"*, suggesting a
+migration to `prisma.config.ts`. **Ignore it.** This project is pinned to v6 on purpose and
+`prisma.config.ts` is an explicitly forbidden v7 pattern (see the Prisma guardrail in
+`CLAUDE.md`). The warning is correct about v7 and irrelevant to us.
 
 ---
 
