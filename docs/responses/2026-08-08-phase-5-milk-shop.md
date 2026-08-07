@@ -277,7 +277,33 @@ cleanup script was deleted after running; `git status` shows only Phase 5 additi
 
 ---
 
-## 7. Suggested next step
+## 7. Commit + preview deploy
+
+Committed to `main` (where every prior phase was committed in this repo) as
+`5e5f727`, pushed to `origin/main`.
+
+Before committing: `.env`, `.env.local` and `.vercel` all confirmed ignored
+(`.gitignore:32 .env*`, `:36 .vercel`); the only env file tracked is
+`.env.example` (placeholders). Nothing secret staged.
+
+**Vercel preview deploy — the real production-build signal this phase needed**, since local
+production builds OOM on this machine and Phase 5 added 9 routes and an interactive
+transaction:
+
+| | |
+|---|---|
+| Preview URL | `https://muneeb-inventory-system-mcbx3zx8j.vercel.app` |
+| Deployment | `dpl_B4zSmAUra6g2RNh4ZuTWd1Gnrx2p` |
+| `readyState` | **READY** |
+| `target` | `null` — a **preview**, not production (no `--prod`) |
+| Build | Completed in 42s |
+
+Production build passes. Note the preview sits behind Vercel Deployment Protection, so an
+unauthenticated `curl` returns a 302 to `vercel.com/sso-api` — that is the protection layer,
+not the app, and it means the 307→`/login` and 401-JSON behaviours cannot be smoke-tested
+through the preview URL. Both were verified locally instead (checks 1 and 18).
+
+## 8. Suggested next step
 
 Phase 6 (farmer net-balance ledger + all-farmers balance sheet) is now mostly assembled:
 `getFarmerBalances()` already returns every farmer's balance in a fixed two queries and
