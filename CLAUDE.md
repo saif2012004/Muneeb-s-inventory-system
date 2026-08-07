@@ -773,7 +773,7 @@ defect — an operational trap that cost real time in Phase 5.
 | 4  | Bakery module (mirrors beverages) | ✅ Done |
 | 4b | Customers hub + receivables (payments, outstanding balances) | ✅ Done |
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ✅ Done |
-| 6  | Farmer net-balance ledger + all-farmers balance sheet | ⬜ Todo |
+| 6  | Farmer net-balance ledger + all-farmers balance sheet | ✅ Done |
 | 7  | Reports dashboard + charts + CSV export | ⬜ Todo |
 | 8  | Polish: mobile nav, states, a11y, PWA, **login POST-only security fix**, final validation | ⬜ Todo |
 
@@ -800,8 +800,12 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
   - **A refused delete returns `{ error, blockedBy: [{ id, name, saleCount }] }`.** Consume
     the structured field; never parse the prose. Sale modules must keep this working — the
     guard in `lib/catalog-guards.ts` is the single implementation for all three levels.
-    **The 409 path has never fired outside a test fixture** (it needs real sale history), so
-    re-test it for real once beverage/bakery sales exist.
+    **✅ CLOSED — re-tested against real sale history on 4 Aug 2026 and passed at all three
+    levels** (category 409, sub-category 409, product 200 + soft delete). The `blockedBy`
+    field was proven to be consumed structurally rather than parsed from the prose: the UI
+    renders a per-product sale count that appears nowhere in the sentence. Evidence:
+    `docs/responses/2026-08-04-delete-guard-retest.md`. Keep it working; it no longer needs
+    re-testing.
   - **`tailwind.config.ts` content globs must include `./lib`.** The `ACCENTS` map in
     `lib/nav.ts` is the only place module accent classes appear as literals; dropping `./lib`
     silently strips them from the CSS and colours fall back to default foreground. This bit
@@ -816,9 +820,9 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
     which are written generically because BakerySale has the same relation names.
   - **The global TanStack Query settings above are not optional.** See the client
     data-fetching note in API Route Conventions.
-  - **The delete-guard 409 / soft-delete re-test is still outstanding.** Real sale history now
-    exists in the code paths but the test DB was reset, so it needs sales re-created first.
-    Procedure: `docs/phase-3.1-beverages-api.md` §6.
+  - **The delete-guard 409 / soft-delete re-test is DONE** — run 4 Aug 2026, all three levels
+    passed, DB restored to baseline. See the Phase 2 note above and
+    `docs/responses/2026-08-04-delete-guard-retest.md`. No longer an open item.
   - **Verify UI in a real browser, not on a build.** Phase 3.2 type-checked, linted and built
     green while still carrying three real bugs — one of which trapped the owner with no way to
     recover. The build proves it compiles, nothing more.
@@ -878,6 +882,26 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
     warns; deletion stays an explicit action with a confirm dialog.
   - **`components/shared/ConfirmDialog.tsx`** is the new generic destructive-action confirm.
     `DeleteSaleDialog` was deliberately left alone — it is shipped and verified.
+- **Phase 6 delivered:** the all-farmers balance sheet at `/milk/balances`, plus the hub link.
+  Report: `docs/responses/2026-08-08-phase-6-balance-sheet.md`. **No new API route, no new
+  query, no new arithmetic** — it consumes the existing `/api/milk/farmers` response, which
+  already carried both the per-farmer balances and the summary. What carries forward:
+  - **The fixed-query claim is now MEASURED, not just asserted.** `getFarmerBalances()` issues
+    **exactly 2 SQL statements for 2 farmers and for 7** — two `SUM … GROUP BY` aggregates.
+    Proven by instrumenting the real singleton (`lib/prisma.ts` caches it on `globalThis`
+    outside production, so pre-seeding it with an event-logging client measures the real code
+    path). Re-run that if you ever suspect an N+1 has crept in.
+  - **The per-farmer ledger already existed** — the farmer profile's Ledger tab renders
+    `buildFarmerLedger` with a running balance. Phase 6 confirmed it and did NOT rebuild it.
+  - **No date-range filter on the ledger, deliberately.** A running balance filtered to a date
+    window is wrong unless it carries an opening balance forward; the first row would start
+    from zero and every figure below it would be understated. If a date filter is ever wanted,
+    it has to compute an opening balance too — it is not a cosmetic addition.
+  - **The balance sheet includes RETIRED farmers who still have a balance** (`includeInactive`),
+    because retiring someone does not settle what they are owed. Retired *and* settled are
+    hidden. **The milk hub's "You owe farmers" tile does NOT do this** — it lists active
+    farmers only, so it can understate the true total when a retired farmer is still owed.
+    The balance sheet is the authoritative figure. Worth reconciling in Phase 8.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 - **Phase 8 (touch targets) — QUEUED, found in 4b:** several controls sit under the Design

@@ -8,6 +8,7 @@ import {
   Milk,
   Plus,
   RefreshCw,
+  Scale,
   Search,
   Users,
   X,
@@ -223,27 +224,51 @@ export function MilkHub() {
         </div>
       </motion.div>
 
-      {/* Milk sales are the OTHER direction — money in, not out. Kept on its
-          own screen so the buying and selling sides never blur together. */}
-      <Link
-        href="/milk/sales"
-        className="mb-4 flex min-h-[56px] items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-zinc-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-      >
-        <span className="flex items-center gap-3">
-          <span className="flex size-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
-            <Milk className="size-4" aria-hidden />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-[15px] font-medium text-zinc-900">
-              Milk sales
+      {/* Two destinations off the hub. The balance sheet is the money-OUT
+          totals across every farmer; milk sales are the other direction
+          entirely — money IN — and are kept on their own screen so the buying
+          and selling sides never blur together. */}
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <Link
+          href="/milk/balances"
+          className="flex min-h-[56px] items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-zinc-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+        >
+          <span className="flex items-center gap-3">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+              <Scale className="size-4" aria-hidden />
             </span>
-            <span className="block text-sm text-zinc-500">
-              Milk you sold to hotels and shops
+            <span className="min-w-0">
+              <span className="block text-[15px] font-medium text-zinc-900">
+                Balance sheet
+              </span>
+              <span className="block text-sm text-zinc-500">
+                What you owe every farmer
+              </span>
             </span>
           </span>
-        </span>
-        <ArrowRight className="size-4 shrink-0 text-zinc-400" aria-hidden />
-      </Link>
+          <ArrowRight className="size-4 shrink-0 text-zinc-400" aria-hidden />
+        </Link>
+
+        <Link
+          href="/milk/sales"
+          className="flex min-h-[56px] items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-zinc-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+        >
+          <span className="flex items-center gap-3">
+            <span className="flex size-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+              <Milk className="size-4" aria-hidden />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[15px] font-medium text-zinc-900">
+                Milk sales
+              </span>
+              <span className="block text-sm text-zinc-500">
+                Milk you sold to hotels and shops
+              </span>
+            </span>
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-zinc-400" aria-hidden />
+        </Link>
+      </div>
 
       {/* Farmers list ------------------------------------------------- */}
       <div className="mb-3 flex items-center justify-between gap-3">
