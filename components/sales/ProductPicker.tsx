@@ -17,27 +17,42 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { BeverageBrandGroup, BeverageOption } from "@/lib/beverage-catalog";
+import type { SaleBrandGroup, SaleProductOption } from "@/lib/sale-catalog";
 import { cn } from "@/lib/utils";
 
 /**
- * Grouped product picker: Brand → Size → discount tier.
+ * Grouped product picker, shared by every sale module.
  *
- * Grouped rather than three chained selects because the owner already knows the
- * whole thing as one name — "Pepsi 1.5 the thirty" — and typing "1.5" or "30"
- * should reach it in one gesture. cmdk searches the composed label, so any
- * fragment of brand, size or tier narrows the list.
+ * Rows are grouped by brand (the SubCategory) and labelled with whatever
+ * attributes the product actually carries. cmdk searches the composed label, so
+ * any fragment reaches the row: "1.5", "30", "premium", "circle".
+ *
+ * ---------------------------------------------------------------------------
+ * DEGRADING FOR PRODUCTS WITH NO ATTRIBUTES
+ * ---------------------------------------------------------------------------
+ * Beverages always have a size, so a row could safely show `detail` alone
+ * ("1.5L › 30% off") under the group heading. Bakery cannot: Buns and Eggs have
+ * no size, no tier and no shape, so their detail is EMPTY.
+ *
+ * A row is therefore rendered as:
+ *   detail present -> the detail        ("Large › Circle", "1.5L › 30% off")
+ *   detail empty   -> the brand itself  ("Buns", "Eggs")
+ *
+ * so a brand whose product carries no attributes reads as a single named choice
+ * rather than a heading above a blank row.
  */
 export function ProductPicker({
   groups,
   selected,
   onSelect,
   invalid,
+  searchPlaceholder = "Search products…",
 }: {
-  groups: BeverageBrandGroup[];
-  selected: BeverageOption | undefined;
-  onSelect: (option: BeverageOption) => void;
+  groups: SaleBrandGroup[];
+  selected: SaleProductOption | undefined;
+  onSelect: (option: SaleProductOption) => void;
   invalid?: boolean;
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -74,7 +89,7 @@ export function ProductPicker({
 
       <PopoverContent className="w-[min(360px,90vw)] p-0" align="start">
         <Command>
-          <CommandInput placeholder="Brand, size or discount…" className="h-11" />
+          <CommandInput placeholder={searchPlaceholder} className="h-11" />
           <CommandList>
             <CommandEmpty>
               <span className="text-sm text-zinc-500">No product found.</span>
@@ -101,12 +116,14 @@ export function ProductPicker({
                       )}
                       aria-hidden
                     />
+                    {/* Falls back to the brand so an attribute-less product
+                        (Buns, Eggs) still names itself instead of rendering an
+                        empty row under its own heading. */}
                     <span className="flex-1 truncate">
                       {option.detail || option.brand}
                     </span>
-                    {/* Seeded products all sit at 0 until the owner prices
-                        them. Flagging it here, before selection, saves a
-                        surprise in the price field. */}
+                    {/* Seeded products all sit at 0 until priced. Flagging it
+                        before selection saves a surprise in the price field. */}
                     {option.needsPrice ? (
                       <span className="ml-2 shrink-0 text-xs text-amber-600">
                         set price

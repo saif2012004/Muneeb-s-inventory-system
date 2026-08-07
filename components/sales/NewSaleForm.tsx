@@ -8,9 +8,9 @@ import Link from "next/link";
 import { useForm, useFieldArray, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
-import { CustomerCombobox } from "@/components/beverages/CustomerCombobox";
-import { LineItemRow } from "@/components/beverages/LineItemRow";
-import { SaleDatePicker } from "@/components/beverages/SaleDatePicker";
+import { CustomerCombobox } from "@/components/sales/CustomerCombobox";
+import { LineItemRow } from "@/components/sales/LineItemRow";
+import { SaleDatePicker } from "@/components/sales/SaleDatePicker";
 import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -19,42 +19,50 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
-import {
-  groupBeverageOptions,
-  indexBeverageOptions,
-} from "@/lib/beverage-catalog";
 import { karachiToday, toDateKey } from "@/lib/format";
-import { useCreateBeverageSale } from "@/lib/hooks/use-beverage-sales";
 import { useProducts } from "@/lib/hooks/use-catalog";
 import { useCustomers } from "@/lib/hooks/use-customers";
+import { useCreateSale } from "@/lib/hooks/use-sales";
+import { ACCENTS } from "@/lib/nav";
+import { groupSaleProducts, indexSaleProducts } from "@/lib/sale-catalog";
+import {
+  MODULE_BUTTON_CLASS,
+  type SaleModule,
+} from "@/lib/sale-modules";
+import { cn } from "@/lib/utils";
 import {
   emptySaleLine,
   newSaleFormSchema,
   previewLineTotal,
   type SaleFormOutput,
   type SaleFormValues,
-} from "@/lib/validations/beverage-sale-form";
+} from "@/lib/validations/sale-form";
 
 /**
- * The owner's most-used screen. Everything here is tuned for one-handed use on
- * a cheap Android phone in daylight: 44px targets, numeric keypads, a total
- * pinned where the thumb already is, and no state that looks frozen.
+ * The owner's most-used screen, shared by every sale module.
  *
- * The Beverages category id is resolved by the API, not hardcoded here — the
- * product list is filtered with `?categoryId=` off the catalog tree, so a
- * renamed category still works.
+ * Tuned for one-handed use on a cheap Android phone in daylight: 44px targets,
+ * numeric keypads, a total pinned where the thumb already is, and no state that
+ * looks frozen.
+ *
+ * The module supplies the endpoint, the catalog category, the accent and the
+ * wording. Everything else — the price-snapshot behaviour, the running total,
+ * the validation — is identical by design, because the rules are identical.
  */
-export function NewSaleForm() {
+export function NewSaleForm({ module }: { module: SaleModule }) {
   const reduceMotion = useReducedMotion();
   const [justSaved, setJustSaved] = useState<{ id: string; total: number } | null>(
     null
   );
 
+  const accent = ACCENTS[module.accent];
+  const primaryButton = MODULE_BUTTON_CLASS[module.accent];
+
   const customersQuery = useCustomers();
   // Active products only: the API refuses a deactivated product on a new sale,
-  // so offering one here would only produce an error the owner can't act on.
+  // so offering one would only produce an error the owner can't act on.
   const productsQuery = useProducts(false);
-  const createSale = useCreateBeverageSale();
+  const createSale = useCreateSale(module);
 
   const form = useForm<SaleFormValues, unknown, SaleFormOutput>({
     resolver: zodResolver(newSaleFormSchema),
@@ -64,9 +72,8 @@ export function NewSaleForm() {
       notes: "",
       items: [emptySaleLine()],
     },
-    // Errors appear once a field has been touched and corrected live after —
-    // validating on every keystroke from the start would shout at a half-typed
-    // first line.
+    // Errors appear once a field has been touched and correct live after —
+    // validating from the first keystroke would shout at a half-typed line.
     mode: "onTouched",
   });
 
@@ -75,18 +82,19 @@ export function NewSaleForm() {
     name: "items",
   });
 
-  const beverageGroups = useMemo(() => {
+  // Matched on the category NAME rather than a hardcoded id, so a renamed or
+  // owner-recreated category still resolves. The server does the authoritative
+  // check; this only decides what the picker offers.
+  const saleGroups = useMemo(() => {
     const products = (productsQuery.data ?? []).filter(
       (product) =>
-        product.subCategory.category.name.trim().toLowerCase() === "beverages"
+        product.subCategory.category.name.trim().toLowerCase() ===
+        module.label.toLowerCase()
     );
-    return groupBeverageOptions(products);
-  }, [productsQuery.data]);
+    return groupSaleProducts(products);
+  }, [productsQuery.data, module.label]);
 
-  const optionsById = useMemo(
-    () => indexBeverageOptions(beverageGroups),
-    [beverageGroups]
-  );
+  const optionsById = useMemo(() => indexSaleProducts(saleGroups), [saleGroups]);
 
   // The live running total. Watched rather than derived from `fields`, because
   // `fields` is a snapshot taken at render and would lag every keystroke.
@@ -112,15 +120,15 @@ export function NewSaleForm() {
   if (sessionExpired) {
     return (
       <>
-        <PageHeader title="New sale" accent="blue" />
+        <PageHeader title="New sale" accent={module.accent} />
         <EmptyState
           icon={LogIn}
           title="Your session expired"
           description="Please sign in again to record a sale."
-          accent="blue"
+          accent={module.accent}
           action={
             <Button
-              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              className={cn("h-11 rounded-lg", primaryButton)}
               onClick={redirectToLogin}
             >
               Sign in
@@ -135,7 +143,7 @@ export function NewSaleForm() {
   if (loadError) {
     return (
       <>
-        <PageHeader title="New sale" accent="blue" />
+        <PageHeader title="New sale" accent={module.accent} />
         <EmptyState
           icon={RefreshCw}
           title="Couldn't load the form"
@@ -144,10 +152,10 @@ export function NewSaleForm() {
               ? loadError.message
               : "Something went wrong."
           }
-          accent="blue"
+          accent={module.accent}
           action={
             <Button
-              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              className={cn("h-11 rounded-lg", primaryButton)}
               onClick={() => {
                 customersQuery.refetch();
                 productsQuery.refetch();
@@ -195,7 +203,7 @@ export function NewSaleForm() {
             }
             // The API's messages are specific and actionable — "X is
             // deactivated and can't be added to a new sale", "That customer no
-            // longer exists" — so they are shown verbatim.
+            // longer exists" — so they're shown verbatim.
             toast.error(
               error instanceof ApiError
                 ? error.message
@@ -210,7 +218,7 @@ export function NewSaleForm() {
     }
   );
 
-  /** Keep customer + date, clear the lines. The common case is another sale to the same shop. */
+  /** Keep customer + date, clear the lines — the common case is another sale to the same shop. */
   function addAnother() {
     form.setValue("items", [emptySaleLine()]);
     form.setValue("notes", "");
@@ -227,31 +235,36 @@ export function NewSaleForm() {
   if (justSaved) {
     return (
       <>
-        <PageHeader title="Sale recorded" accent="blue" />
+        <PageHeader title="Sale recorded" accent={module.accent} />
         <motion.div
           initial={reduceMotion ? false : { opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ type: "spring", stiffness: 420, damping: 34 }}
-          className="rounded-xl border border-blue-100 bg-white p-6 text-center shadow-sm"
+          className="rounded-xl border border-zinc-200 bg-white p-6 text-center shadow-sm"
         >
-          <span className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+          <span
+            className={cn(
+              "mx-auto mb-4 flex size-12 items-center justify-center rounded-xl",
+              accent.icon
+            )}
+          >
             <CheckCircle2 className="size-6" aria-hidden />
           </span>
           <p className="text-[15px] font-medium text-zinc-900">Sale saved</p>
-          <p className="num mt-1 text-[28px] font-bold text-blue-600">
+          <p className={cn("num mt-1 text-[28px] font-bold", accent.text)}>
             <AnimatedMoney value={justSaved.total} />
           </p>
 
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <Button
-              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              className={cn("h-11 rounded-lg", primaryButton)}
               onClick={addAnother}
             >
               <Plus className="mr-2 size-4" aria-hidden />
               Add another
             </Button>
             <Button asChild variant="outline" className="h-11 rounded-lg">
-              <Link href="/beverages">View sales</Link>
+              <Link href={module.listRoute}>View sales</Link>
             </Button>
           </div>
         </motion.div>
@@ -267,8 +280,8 @@ export function NewSaleForm() {
     <>
       <PageHeader
         title="New sale"
-        description="Beverages. Prices default to the catalog and can be changed per sale."
-        accent="blue"
+        description={module.formDescription}
+        accent={module.accent}
       />
 
       <form onSubmit={onSubmit} noValidate>
@@ -282,6 +295,7 @@ export function NewSaleForm() {
               isLoading={isLoading}
               value={form.watch("customerId")}
               invalid={Boolean(form.formState.errors.customerId)}
+              accent={module.accent}
               onChange={(customerId) =>
                 form.setValue("customerId", customerId, { shouldValidate: true })
               }
@@ -340,10 +354,15 @@ export function NewSaleForm() {
                       <LineItemRow
                         form={form}
                         index={index}
-                        groups={beverageGroups}
+                        groups={saleGroups}
                         optionsById={optionsById}
                         canRemove={fields.length > 1}
                         onRemove={() => remove(index)}
+                        searchPlaceholder={
+                          module.key === "beverages"
+                            ? "Brand, size or discount…"
+                            : "Product, tier or shape…"
+                        }
                       />
                     </motion.div>
                   ))}
@@ -392,22 +411,23 @@ export function NewSaleForm() {
             only pads the inner content, not the panel itself. */}
         <div className="fixed bottom-[68px] left-0 right-0 z-30 border-t border-zinc-200 bg-white/95 backdrop-blur md:bottom-0 md:left-60">
           <div className="mx-auto flex w-full max-w-[640px] items-center gap-3 px-4 py-3 md:px-8 lg:max-w-[1100px]">
-            {/* Inner column keeps the same max-width as <main>, so the total
-                still lines up with the form above it. */}
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">
                 Total
               </p>
               <AnimatedMoney
                 value={runningTotal}
-                className="block text-[28px] font-bold leading-tight text-blue-600"
+                className={cn(
+                  "block text-[28px] font-bold leading-tight",
+                  accent.text
+                )}
               />
             </div>
 
             <Button
               type="submit"
               disabled={createSale.isPending}
-              className="h-12 shrink-0 rounded-lg bg-blue-600 px-6 hover:bg-blue-700"
+              className={cn("h-12 shrink-0 rounded-lg px-6", primaryButton)}
             >
               {createSale.isPending ? (
                 <>

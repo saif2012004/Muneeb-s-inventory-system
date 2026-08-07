@@ -29,19 +29,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/beverages/sales
+ * Bakery sales. Deliberately the SAME logic as the beverages routes — the two
+ * modules share tables that are column-for-column identical, and every rule
+ * that could drift (the price snapshot, product validation, the date window,
+ * the money maths) lives in lib/sales.ts and is imported by both. What differs
+ * here is only the Prisma model and the catalog category.
+ */
+
+/**
+ * GET /api/bakery/sales
  *
- * Query params (all optional):
- *   customerId   restrict to one customer's sales
- *   dateFrom     inclusive, a Karachi calendar day ("2026-08-03")
- *   dateTo       inclusive, a Karachi calendar day
- *   page         1-based, default 1
- *   limit        default 10, max 100
- *
- * DATE FILTERING IS KARACHI-BASED (Gotcha 4). `dateTo` is turned into the UTC
- * instant of the START of the FOLLOWING Karachi day and compared with `lt`, so
- * the named day is fully included without `lte` double-counting a sale landing
- * exactly on midnight.
+ * Query params (all optional): customerId, dateFrom, dateTo (Karachi calendar
+ * days), page (1), limit (10, max 100).
  */
 export async function GET(request: Request): Promise<NextResponse> {
   const denied = await requireOwner();
@@ -63,7 +62,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const window = buildSaleDateWindow(dateFrom, dateTo);
     if (isSaleProblem(window)) return fail(window.message, window.status);
 
-    const where: Prisma.BeverageSaleWhereInput = {
+    const where: Prisma.BakerySaleWhereInput = {
       ...(customerId ? { customerId } : {}),
       ...(window ? { saleDate: window } : {}),
     };
@@ -72,14 +71,14 @@ export async function GET(request: Request): Promise<NextResponse> {
     // rows exist — otherwise a sale created between the two queries makes the
     // pager show a page that isn't there.
     const [sales, total] = await prisma.$transaction([
-      prisma.beverageSale.findMany({
+      prisma.bakerySale.findMany({
         where,
         select: SALE_LIST_SELECT,
         orderBy: [...SALE_LIST_ORDER],
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.beverageSale.count({ where }),
+      prisma.bakerySale.count({ where }),
     ]);
 
     return ok({
@@ -93,20 +92,17 @@ export async function GET(request: Request): Promise<NextResponse> {
       },
     });
   } catch (error) {
-    return serverError("beverages.sales.GET", error);
+    return serverError("bakery.sales.GET", error);
   }
 }
 
 /**
- * POST /api/beverages/sales
- *
- * Body: { customerId, saleDate, notes?, items: [{ productId, quantity, unitPrice? }] }
+ * POST /api/bakery/sales
  *
  * PRICE SNAPSHOT (Gotcha 5): each line copies the CURRENT `Product.price` into
- * its own `unitPrice`, unless the body passes an explicit `unitPrice` override
- * — which it will often need to, because the seed ships all 62 products at 0.
- * `lineTotal` and `totalAmount` are computed here from Decimals and are never
- * accepted from the client.
+ * its own `unitPrice`, unless the body passes an explicit override — which it
+ * usually will, because every seeded bakery product ships at 0. `lineTotal` and
+ * `totalAmount` are computed here from Decimals, never accepted from the client.
  */
 export async function POST(request: Request): Promise<NextResponse> {
   const denied = await requireOwner();
@@ -118,10 +114,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     const { customerId, saleDate, notes, items } = parsed.data;
 
-    const categoryId = await resolveModuleCategoryId("beverages");
+    const categoryId = await resolveModuleCategoryId("bakery");
     if (!categoryId) {
       return fail(
-        "There's no Beverages category in the catalog yet. Add one before recording beverage sales.",
+        "There's no Bakery category in the catalog yet. Add one before recording bakery sales.",
         409
       );
     }
@@ -134,11 +130,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     });
     if (!customer) return fail("That customer no longer exists.", 404);
 
+    // Module ownership: a Beverages product on a bakery sale is a friendly 400,
+    // not an FK error. Same guard as beverages, mirrored.
     const products = await loadSaleProducts(
       items.map((item) => item.productId),
       {
         categoryId,
-        moduleLabel: "Beverages",
+        moduleLabel: "Bakery",
         findMany: (ids) =>
           prisma.product.findMany({
             where: { id: { in: ids } },
@@ -167,7 +165,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     // A nested `create` IS a single transaction — Prisma wraps the parent row
     // and its children in one, so the sale and its lines commit or fail
     // together. No sale can ever exist without its items.
-    const sale = await prisma.beverageSale.create({
+    const sale = await prisma.bakerySale.create({
       data: {
         customerId,
         saleDate,
@@ -180,6 +178,6 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     return ok(serialize(sale), 201);
   } catch (error) {
-    return serverError("beverages.sales.POST", error);
+    return serverError("bakery.sales.POST", error);
   }
 }

@@ -659,7 +659,7 @@ after install — easy to miss.
 | 1  | Scaffold + Prisma schema + split-config auth + Vercel deploy | ✅ Done |
 | 2  | Category & product manager (CRUD + inline price editor) + seed | ✅ Done |
 | 3  | Beverages module (multi-item sales, list, customer ledger) | ✅ Done |
-| 4  | Bakery module (mirrors beverages) | ⬜ Todo |
+| 4  | Bakery module (mirrors beverages) | ✅ Done |
 | 4b | Customers hub + receivables (payments, outstanding balances) | ⬜ Todo |
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ⬜ Todo |
 | 6  | Farmer net-balance ledger + all-farmers balance sheet | ⬜ Todo |
@@ -706,6 +706,23 @@ Update this table as phases complete. Change ⬜ to ✅.
   - **Verify UI in a real browser, not on a build.** Phase 3.2 type-checked, linted and built
     green while still carrying three real bugs — one of which trapped the owner with no way to
     recover. The build proves it compiles, nothing more.
+- **Phase 4 delivered:** the bakery module — `/bakery`, `/bakery/new-sale`, and
+  `/api/bakery/sales`. Reports: `docs/phase-4-bakery-module.md`,
+  `docs/responses/2026-08-07-phase-4-browser-verification.md`. What later modules inherit:
+  - **The sale components are SHARED, in `/components/sales/`**, parameterised by a
+    `SaleModule` from `lib/sale-modules.ts` (endpoint, catalog category, accent, copy).
+    Milk sales should add a config row, NOT a third copy of the form. If you find yourself
+    forking one of these components, that is the signal to parameterise instead.
+  - **Query keys are module-scoped** — `["sales", module.key, …]` in `lib/hooks/use-sales.ts`.
+    Without the module segment, opening one module's list shows the other's rows from cache.
+    Verified behaviourally: 12 samples across rapid switches, no leak.
+  - **A unit suffix is shown only when the unit ADDS information.** `SELF_EVIDENT_UNITS` in
+    `lib/sale-catalog.ts` suppresses "bottle"/"piece"; eggs keep "Quantity (cottons)" because
+    a bare "3" is genuinely ambiguous. It is a property of the unit, not the module — do not
+    add per-module branching.
+  - **Picker labels use every attribute a product carries** (size, qualityTier, shape,
+    discount) and fall back to the brand when it carries none. Composing from size+discount
+    alone made `Biscuits Premium`/`Simple` and all four Russ variants indistinguishable.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 

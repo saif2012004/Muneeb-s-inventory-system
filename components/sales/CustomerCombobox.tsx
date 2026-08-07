@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCreateCustomer, type Customer } from "@/lib/hooks/use-customers";
+import type { AccentKey } from "@/lib/nav";
+import { MODULE_BUTTON_CLASS, MODULE_RING_CLASS } from "@/lib/sale-modules";
 import { cn } from "@/lib/utils";
 import {
   CUSTOMER_TYPES,
@@ -51,12 +53,15 @@ export function CustomerCombobox({
   value,
   onChange,
   invalid,
+  accent = "zinc",
 }: {
   customers: Customer[];
   isLoading: boolean;
   value: string;
   onChange: (customerId: string) => void;
   invalid?: boolean;
+  /** Module accent, so the picker matches the screen it sits on. */
+  accent?: AccentKey;
 }) {
   const [open, setOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -82,7 +87,10 @@ export function CustomerCombobox({
             type="button"
             // 44px touch target, per the Design System — the visual chip is
             // shorter than the hit area on purpose.
-            className="-mr-1 flex size-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+            className={cn(
+              "-mr-1 flex size-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2",
+              MODULE_RING_CLASS[accent]
+            )}
             onClick={() => onChange("")}
           >
             <X className="size-4" aria-hidden />
@@ -155,6 +163,7 @@ export function CustomerCombobox({
       <AddCustomerPopover
         open={addOpen}
         onOpenChange={setAddOpen}
+        accent={accent}
         onCreated={(customer) => {
           onChange(customer.id);
           setAddOpen(false);
@@ -172,10 +181,12 @@ function AddCustomerPopover({
   open,
   onOpenChange,
   onCreated,
+  accent,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (customer: Customer) => void;
+  accent: AccentKey;
 }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -270,7 +281,7 @@ function AddCustomerPopover({
 
         <Button
           type="button"
-          className="h-11 w-full rounded-lg bg-blue-600 hover:bg-blue-700"
+          className={cn("h-11 w-full rounded-lg", MODULE_BUTTON_CLASS[accent])}
           disabled={trimmedName.length === 0 || createCustomer.isPending}
           onClick={submit}
         >

@@ -1,11 +1,15 @@
 "use client";
 
 /**
- * TanStack Query bindings for the Phase 3.1 beverage sale routes.
+ * TanStack Query bindings for the sale routes of ANY module.
  *
- * Every money field arriving here is ALREADY A NUMBER — the routes serialize
- * the Prisma Decimals at the boundary (Gotcha 2). Nothing in the UI recomputes
- * a stored total; it renders what the server sent.
+ * Generalised from the beverages-only hooks in Phase 3. Both modules' endpoints
+ * return the same shapes, so one set of hooks serves both — parameterised by
+ * the SaleModule, which supplies the base path and scopes the query keys.
+ *
+ * Every money field arriving here is ALREADY A NUMBER — the routes serialize the
+ * Prisma Decimals at the boundary (Gotcha 2). Nothing here recomputes a stored
+ * total; it renders what the server sent.
  */
 import {
   useMutation,
@@ -15,10 +19,11 @@ import {
 } from "@tanstack/react-query";
 
 import { api } from "@/lib/api-client";
+import type { SaleModule } from "@/lib/sale-modules";
 import type { CustomerType } from "@/lib/validations/customers";
 
 // ---------------------------------------------------------------------------
-// Response shapes (mirror the `select` blocks in the 3.1 routes)
+// Response shapes (mirror the `select` blocks in the route handlers)
 // ---------------------------------------------------------------------------
 
 export type SaleCustomer = {
@@ -30,7 +35,7 @@ export type SaleCustomer = {
 
 export type SaleListRow = {
   id: string;
-  /** ISO-8601 UTC. Bucket/display it in Karachi, never with the raw UTC day. */
+  /** ISO-8601 UTC. Bucket/display in Karachi, never by the raw UTC day. */
   saleDate: string;
   totalAmount: number;
   notes: string | null;
@@ -55,7 +60,12 @@ export type SaleItem = {
     id: string;
     name: string;
     size: string | null;
+    /** Bakery: "premium" | "simple". Null on beverages. */
+    qualityTier: string | null;
+    /** Russ: "circle" | "rectangular_round". Null elsewhere. */
+    shape: string | null;
     discountPercent: number | null;
+    /** "cotton" for eggs, "piece", "bottle". Drives the quantity wording. */
     unit: string | null;
     isActive: boolean;
   };
@@ -88,18 +98,21 @@ export type SaleListFilters = {
 };
 
 // ---------------------------------------------------------------------------
-// Query keys
+// Query keys — scoped by module so beverages and bakery never share a cache
+// entry. Without the module segment, opening one list would show the other's
+// rows from cache until the refetch landed.
 // ---------------------------------------------------------------------------
 
-export const beverageSaleKeys = {
-  all: ["beverage-sales"] as const,
-  list: (filters: SaleListFilters) =>
-    [...beverageSaleKeys.all, "list", filters] as const,
-  detail: (id: string) => [...beverageSaleKeys.all, "detail", id] as const,
+export const saleKeys = {
+  module: (module: SaleModule) => ["sales", module.key] as const,
+  list: (module: SaleModule, filters: SaleListFilters) =>
+    [...saleKeys.module(module), "list", filters] as const,
+  detail: (module: SaleModule, id: string) =>
+    [...saleKeys.module(module), "detail", id] as const,
 };
 
-function invalidateSales(queryClient: QueryClient) {
-  return queryClient.invalidateQueries({ queryKey: beverageSaleKeys.all });
+function invalidateModule(queryClient: QueryClient, module: SaleModule) {
+  return queryClient.invalidateQueries({ queryKey: saleKeys.module(module) });
 }
 
 function buildQuery(filters: SaleListFilters): string {
@@ -116,16 +129,17 @@ function buildQuery(filters: SaleListFilters): string {
 // Queries
 // ---------------------------------------------------------------------------
 
-export function useBeverageSales(
+export function useSales(
+  module: SaleModule,
   filters: SaleListFilters,
   options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: beverageSaleKeys.list(filters),
+    queryKey: saleKeys.list(module, filters),
     queryFn: () =>
-      api.get<SaleListResponse>(`/api/beverages/sales?${buildQuery(filters)}`),
-    // Keeps the current page on screen while the next one loads, instead of
-    // flashing back to skeletons every time a filter or page changes.
+      api.get<SaleListResponse>(`${module.apiBase}?${buildQuery(filters)}`),
+    // Keeps the current page on screen while the next loads, instead of
+    // flashing back to skeletons on every filter or page change.
     placeholderData: (previous) => previous,
     // The caller can suppress a request it already knows is invalid — e.g. a
     // date range whose start is after its end.
@@ -137,10 +151,10 @@ export function useBeverageSales(
  * One sale with its line items. Only fetched when a row is expanded — the list
  * response carries a count, not the lines, so the table stays light.
  */
-export function useBeverageSale(id: string | null) {
+export function useSale(module: SaleModule, id: string | null) {
   return useQuery({
-    queryKey: beverageSaleKeys.detail(id ?? ""),
-    queryFn: () => api.get<SaleDetail>(`/api/beverages/sales/${id}`),
+    queryKey: saleKeys.detail(module, id ?? ""),
+    queryFn: () => api.get<SaleDetail>(`${module.apiBase}/${id}`),
     enabled: id !== null,
   });
 }
@@ -149,22 +163,22 @@ export function useBeverageSale(id: string | null) {
 // Mutations
 // ---------------------------------------------------------------------------
 
-export function useCreateBeverageSale() {
+export function useCreateSale(module: SaleModule) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: SaleCreateInput) =>
-      api.post<SaleDetail>("/api/beverages/sales", input),
-    onSuccess: () => invalidateSales(queryClient),
+      api.post<SaleDetail>(module.apiBase, input),
+    onSuccess: () => invalidateModule(queryClient, module),
   });
 }
 
-export function useDeleteBeverageSale() {
+export function useDeleteSale(module: SaleModule) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
       api.delete<{ deleted: "hard"; id: string; itemCount: number }>(
-        `/api/beverages/sales/${id}`
+        `${module.apiBase}/${id}`
       ),
-    onSuccess: () => invalidateSales(queryClient),
+    onSuccess: () => invalidateModule(queryClient, module),
   });
 }

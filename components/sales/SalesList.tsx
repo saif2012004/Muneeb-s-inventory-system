@@ -10,14 +10,16 @@ import {
   LogIn,
   Plus,
   RefreshCw,
+  ShoppingBag,
   Trash2,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
-import { DeleteSaleDialog } from "@/components/beverages/DeleteSaleDialog";
-import { SaleLineItems } from "@/components/beverages/SaleLineItems";
+import { DeleteSaleDialog } from "@/components/sales/DeleteSaleDialog";
+import { SaleLineItems } from "@/components/sales/SaleLineItems";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -27,15 +29,26 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatPKR } from "@/lib/format";
 import {
-  useBeverageSales,
-  useDeleteBeverageSale,
+  useSales,
+  useDeleteSale,
   type SaleListRow,
-} from "@/lib/hooks/use-beverage-sales";
+} from "@/lib/hooks/use-sales";
 import { useCustomers } from "@/lib/hooks/use-customers";
+import { MODULE_BUTTON_CLASS, MODULE_RING_CLASS, type SaleModule } from "@/lib/sale-modules";
 import { cn } from "@/lib/utils";
 import { CUSTOMER_TYPE_LABELS } from "@/lib/validations/customers";
 
 const PAGE_SIZE = 10;
+
+/**
+ * Empty-state icon per module, mirroring the sidebar icons in lib/nav.ts.
+ * Kept here rather than on SaleModule so that config stays icon-free and can be
+ * imported by route handlers without dragging lucide into a server bundle.
+ */
+const MODULE_ICON: Record<string, LucideIcon> = {
+  beverages: GlassWater,
+  bakery: ShoppingBag,
+};
 
 /**
  * Beverage sales list.
@@ -45,8 +58,9 @@ const PAGE_SIZE = 10;
  * which is the thing the brief rules out — and money that scrolls out of view
  * is money the owner cannot check.
  */
-export function SalesList() {
+export function SalesList({ module }: { module: SaleModule }) {
   const reduceMotion = useReducedMotion();
+  const primaryButton = MODULE_BUTTON_CLASS[module.accent];
 
   const [page, setPage] = useState(1);
   const [dateFrom, setDateFrom] = useState("");
@@ -66,7 +80,8 @@ export function SalesList() {
   const invalidRange = Boolean(dateFrom && dateTo && dateFrom > dateTo);
 
   const customersQuery = useCustomers();
-  const salesQuery = useBeverageSales(
+  const salesQuery = useSales(
+    module,
     {
       page,
       limit: PAGE_SIZE,
@@ -78,7 +93,7 @@ export function SalesList() {
     // the feedback, and the previous results stay on screen meanwhile.
     { enabled: !invalidRange }
   );
-  const deleteSale = useDeleteBeverageSale();
+  const deleteSale = useDeleteSale(module);
 
   const hasFilters = Boolean(dateFrom || dateTo || customerId);
 
@@ -99,12 +114,12 @@ export function SalesList() {
 
   const header = (
     <PageHeader
-      title="Beverages"
-      description="Sales recorded for the Pepsi agency."
-      accent="blue"
+      title={module.label}
+      description={module.listDescription}
+      accent={module.accent}
       action={
-        <Button asChild className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700">
-          <Link href="/beverages/new-sale">
+        <Button asChild className={cn("h-11 rounded-lg", primaryButton)}>
+          <Link href={module.newSaleRoute}>
             <Plus className="mr-2 size-4" aria-hidden />
             New sale
           </Link>
@@ -128,10 +143,10 @@ export function SalesList() {
           icon={LogIn}
           title="Your session expired"
           description="Please sign in again to see your sales."
-          accent="blue"
+          accent={module.accent}
           action={
             <Button
-              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              className={cn("h-11 rounded-lg", primaryButton)}
               onClick={redirectToLogin}
             >
               Sign in
@@ -199,7 +214,10 @@ export function SalesList() {
               onChange={(event) =>
                 updateFilter(() => setCustomerId(event.target.value))
               }
-              className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              className={cn(
+                "h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2",
+                MODULE_RING_CLASS[module.accent]
+              )}
             >
               <option value="">All customers</option>
               {(customersQuery.data ?? []).map((customer) => (
@@ -270,10 +288,10 @@ export function SalesList() {
               ? salesQuery.error.message
               : "Something went wrong."
           }
-          accent="blue"
+          accent={module.accent}
           action={
             <Button
-              className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+              className={cn("h-11 rounded-lg", primaryButton)}
               onClick={() => salesQuery.refetch()}
             >
               <RefreshCw className="mr-2 size-4" aria-hidden />
@@ -289,14 +307,16 @@ export function SalesList() {
         </div>
       ) : sales.length === 0 ? (
         <EmptyState
-          icon={GlassWater}
-          title={hasFilters ? "No sales match those filters" : "No sales yet"}
+          icon={MODULE_ICON[module.key] ?? ShoppingBag}
+          title={
+            hasFilters ? "No sales match those filters" : module.emptyTitle
+          }
           description={
             hasFilters
               ? "Try widening the date range or clearing the customer filter."
               : "Record your first sale."
           }
-          accent="blue"
+          accent={module.accent}
           action={
             hasFilters ? (
               <Button
@@ -309,9 +329,9 @@ export function SalesList() {
             ) : (
               <Button
                 asChild
-                className="h-11 rounded-lg bg-blue-600 hover:bg-blue-700"
+                className={cn("h-11 rounded-lg", primaryButton)}
               >
-                <Link href="/beverages/new-sale">
+                <Link href={module.newSaleRoute}>
                   <Plus className="mr-2 size-4" aria-hidden />
                   New sale
                 </Link>
@@ -344,7 +364,10 @@ export function SalesList() {
                     aria-expanded={isExpanded}
                     aria-controls={`sale-items-${sale.id}`}
                     onClick={() => setExpandedId(isExpanded ? null : sale.id)}
-                    className="min-w-0 flex-1 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                    className={cn(
+                      "min-w-0 flex-1 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2",
+                      MODULE_RING_CLASS[module.accent]
+                    )}
                   >
                     <div className="flex items-center gap-2">
                       <ChevronDown
@@ -396,7 +419,7 @@ export function SalesList() {
                       transition={{ type: "spring", stiffness: 400, damping: 40 }}
                       className="overflow-hidden"
                     >
-                      <SaleLineItems saleId={sale.id} />
+                      <SaleLineItems module={module} saleId={sale.id} />
                     </motion.div>
                   ) : null}
                 </AnimatePresence>

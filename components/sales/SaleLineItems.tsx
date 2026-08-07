@@ -4,9 +4,11 @@ import { RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatSize } from "@/lib/catalog-display";
+import { formatSize, titleCase } from "@/lib/catalog-display";
 import { formatPKR } from "@/lib/format";
-import { useBeverageSale } from "@/lib/hooks/use-beverage-sales";
+import { useSale } from "@/lib/hooks/use-sales";
+import { formatQuantityWithUnit } from "@/lib/sale-catalog";
+import type { SaleModule } from "@/lib/sale-modules";
 
 /**
  * The line items shown inside an expanded sale row, fetched on demand.
@@ -16,8 +18,14 @@ import { useBeverageSale } from "@/lib/hooks/use-beverage-sales";
  * its name only; today's catalog price is never shown against a past sale
  * (Gotcha 5).
  */
-export function SaleLineItems({ saleId }: { saleId: string }) {
-  const saleQuery = useBeverageSale(saleId);
+export function SaleLineItems({
+  module,
+  saleId,
+}: {
+  module: SaleModule;
+  saleId: string;
+}) {
+  const saleQuery = useSale(module, saleId);
 
   if (saleQuery.isPending) {
     return (
@@ -52,8 +60,12 @@ export function SaleLineItems({ saleId }: { saleId: string }) {
   return (
     <div className="space-y-2 border-t border-zinc-100 bg-zinc-50/60 p-4">
       {sale.items.map((item) => {
+        // Same attributes the picker shows, so a line reads the way it was
+        // chosen — without these, all four Russ variants look identical here.
         const detail = [
           formatSize(item.product.size) !== "—" ? formatSize(item.product.size) : null,
+          item.product.qualityTier ? titleCase(item.product.qualityTier) : null,
+          item.product.shape ? titleCase(item.product.shape) : null,
           item.product.discountPercent ? `${item.product.discountPercent}% off` : null,
         ]
           .filter(Boolean)
@@ -75,7 +87,8 @@ export function SaleLineItems({ saleId }: { saleId: string }) {
               </p>
               <p className="num mt-0.5 text-xs text-zinc-500">
                 {detail ? `${detail} · ` : ""}
-                {item.quantity} × {formatPKR(item.unitPrice)}
+                {formatQuantityWithUnit(item.quantity, item.product.unit)} ×{" "}
+                {formatPKR(item.unitPrice)}
               </p>
             </div>
             <span className="num shrink-0 text-sm font-semibold text-zinc-900">

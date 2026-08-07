@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
-import { NewSaleForm } from "@/components/beverages/NewSaleForm";
+import { NewSaleForm } from "@/components/sales/NewSaleForm";
+import { BEVERAGES_MODULE } from "@/lib/sale-modules";
 
 /**
  * URL: /beverages/new-sale
@@ -14,5 +15,5 @@ export const metadata: Metadata = {
 };
 
 export default function NewBeverageSalePage() {
-  return <NewSaleForm />;
+  return <NewSaleForm module={BEVERAGES_MODULE} />;
 }

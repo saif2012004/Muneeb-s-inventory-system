@@ -22,6 +22,8 @@
  */
 import { Prisma } from "@prisma/client";
 
+import { endOfKarachiDay, startOfKarachiDay } from "@/lib/format";
+
 /** Decimal(10, 2) tops out here. A total above it would throw inside Prisma. */
 export const MAX_MONEY = new Prisma.Decimal("99999999.99");
 
@@ -72,7 +74,13 @@ export const SALE_DETAIL_SELECT = {
           id: true,
           name: true,
           size: true,
+          // qualityTier and shape are what separate Biscuits Premium from
+          // Simple, and all four Russ variants from each other. Without them an
+          // expanded bakery line can't say which product it actually was.
+          qualityTier: true,
+          shape: true,
           discountPercent: true,
+          // Eggs sell by the cotton; the unit is what makes "3" mean something.
           unit: true,
           isActive: true,
         },
@@ -208,6 +216,63 @@ export function checkTotalFits(total: Prisma.Decimal): SaleProblem | null {
     };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Listing
+// ---------------------------------------------------------------------------
+
+/** The list `select`, shared by every module. No line items — just the count. */
+export const SALE_LIST_SELECT = {
+  id: true,
+  saleDate: true,
+  totalAmount: true,
+  notes: true,
+  createdAt: true,
+  customer: { select: { id: true, name: true, type: true } },
+  _count: { select: { items: true } },
+} as const;
+
+/** Newest first, with a stable tiebreak so paging can't repeat or skip a row. */
+export const SALE_LIST_ORDER = [
+  { saleDate: "desc" },
+  { createdAt: "desc" },
+] as const;
+
+/**
+ * Turn validated list filters into the `saleDate` window, in Asia/Karachi.
+ *
+ * `dateTo` becomes the UTC instant of the START of the FOLLOWING Karachi day and
+ * is compared with `lt`, so the named day is fully included without `lte`
+ * double-counting a sale landing exactly on midnight (Gotcha 4).
+ *
+ * Returns a SaleProblem for a backwards range rather than throwing, so the
+ * caller answers with a sentence instead of a 500.
+ */
+export function buildSaleDateWindow(
+  dateFrom: string | undefined,
+  dateTo: string | undefined
+): { gte?: Date; lt?: Date } | SaleProblem | null {
+  const start = dateFrom ? startOfKarachiDay(dateFrom) : undefined;
+  const end = dateTo ? endOfKarachiDay(dateTo) : undefined;
+
+  if (start && end && start >= end) {
+    return {
+      message: "The start date must be on or before the end date.",
+      status: 400,
+    };
+  }
+  if (!start && !end) return null;
+
+  return { ...(start ? { gte: start } : {}), ...(end ? { lt: end } : {}) };
+}
+
+/** Shape a list row for the client: Decimals serialized, count flattened. */
+export function toSaleListRow<
+  T extends { _count: { items: number } },
+>(row: T): Omit<T, "_count"> & { itemCount: number } {
+  const { _count, ...rest } = row;
+  return { ...rest, itemCount: _count.items };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
-import { SalesList } from "@/components/beverages/SalesList";
+import { SalesList } from "@/components/sales/SalesList";
+import { BEVERAGES_MODULE } from "@/lib/sale-modules";
 
 /**
  * URL: /beverages
@@ -8,13 +9,14 @@ import { SalesList } from "@/components/beverages/SalesList";
  * `(dashboard)` is a parenthesised route group — it contributes the shared nav
  * shell and NOTHING to the URL (see the URL layout note in CLAUDE.md).
  *
- * A thin server shell. The list is fetched client-side through TanStack Query
- * so filters, pagination and delete can revalidate without a navigation.
+ * A thin server shell over the shared sales list. Everything module-specific —
+ * endpoint, accent, copy — comes from BEVERAGES_MODULE, so beverages and bakery
+ * render the same component rather than two copies that can drift.
  */
 export const metadata: Metadata = {
   title: "Beverages",
 };
 
 export default function BeveragesPage() {
-  return <SalesList />;
+  return <SalesList module={BEVERAGES_MODULE} />;
 }

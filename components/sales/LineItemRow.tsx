@@ -3,27 +3,42 @@
 import { Trash2 } from "lucide-react";
 import { useWatch, type UseFormReturn } from "react-hook-form";
 
+import { ProductPicker } from "@/components/sales/ProductPicker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ProductPicker } from "@/components/beverages/ProductPicker";
-import type { BeverageBrandGroup, BeverageOption } from "@/lib/beverage-catalog";
 import { formatPKR } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import {
-  previewLineTotal,
-  type SaleFormValues,
-} from "@/lib/validations/beverage-sale-form";
+  formatQuantityWithUnit,
+  quantityFieldLabel,
+  unitIsInformative,
+  unitPriceFieldLabel,
+  type SaleBrandGroup,
+  type SaleProductOption,
+} from "@/lib/sale-catalog";
+import { cn } from "@/lib/utils";
+import { previewLineTotal, type SaleFormValues } from "@/lib/validations/sale-form";
 
 type SaleForm = UseFormReturn<SaleFormValues, unknown, unknown>;
 
 /**
- * One line of the sale: product, quantity, unit price, live total.
+ * One line of a sale: product, quantity, unit price, live total. Shared by
+ * every sale module.
  *
  * The unit price is PRE-FILLED from the catalog but stays EDITABLE. That is not
- * a convenience — every seeded product ships at price 0, so without an editable
- * price the owner could not record a single real sale until they had gone
- * through the whole catalog. What they type here is sent as an explicit
- * `unitPrice` and the server snapshots that value verbatim (Gotcha 5).
+ * a convenience — every seeded product ships at price 0, in bakery exactly as in
+ * beverages, so without an editable price the owner could not record a single
+ * real sale until the whole catalog had been priced. What they type is sent as
+ * an explicit `unitPrice` and the server snapshots that value verbatim
+ * (Gotcha 5).
+ *
+ * ---------------------------------------------------------------------------
+ * THE QUANTITY UNIT
+ * ---------------------------------------------------------------------------
+ * Quantity means different things per product. Eggs are sold BY THE COTTON, so
+ * "3" is three cottons, not three eggs. The unit lives on the product, so the
+ * field labels itself once a product is chosen — "Quantity (cottons)" — and the
+ * line total row spells the quantity out, "3 cottons". A number with no named
+ * unit is a number the owner has to remember the convention for.
  */
 export function LineItemRow({
   form,
@@ -32,15 +47,17 @@ export function LineItemRow({
   optionsById,
   onRemove,
   canRemove,
+  searchPlaceholder,
 }: {
   form: SaleForm;
   index: number;
-  groups: BeverageBrandGroup[];
-  optionsById: Map<string, BeverageOption>;
+  groups: SaleBrandGroup[];
+  optionsById: Map<string, SaleProductOption>;
   onRemove: () => void;
   canRemove: boolean;
+  searchPlaceholder?: string;
 }) {
-  // Subscribes this row only — typing in one line does not re-render the others.
+  // Subscribes this row only — typing in one line doesn't re-render the others.
   const row = useWatch({ control: form.control, name: `items.${index}` });
 
   const productId = row?.productId ?? "";
@@ -48,10 +65,22 @@ export function LineItemRow({
   const unitPrice = row?.unitPrice ?? "";
 
   const selected = productId ? optionsById.get(productId) : undefined;
+  const unit = selected?.product.unit ?? null;
   const lineTotal = previewLineTotal(quantity, unitPrice);
 
   const errors = form.formState.errors.items?.[index];
   const priceIsZero = unitPrice.trim() === "0";
+
+  // Only worth spelling out when the unit adds information — "3 cottons" earns
+  // its place, "12 pieces" just repeats what the product already said.
+  const parsedQuantity = Number(quantity);
+  const quantitySummary =
+    selected &&
+    unitIsInformative(unit) &&
+    Number.isFinite(parsedQuantity) &&
+    parsedQuantity > 0
+      ? formatQuantityWithUnit(parsedQuantity, unit)
+      : null;
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -79,13 +108,14 @@ export function LineItemRow({
               groups={groups}
               selected={selected}
               invalid={Boolean(errors?.productId)}
+              searchPlaceholder={searchPlaceholder}
               onSelect={(option) => {
                 form.setValue(`items.${index}.productId`, option.product.id, {
                   shouldValidate: true,
                 });
-                // Pre-fill the catalog price, but only when the owner has not
-                // already typed one — re-picking a product must never silently
-                // discard a price they entered by hand.
+                // Pre-fill the catalog price, but only when the owner hasn't
+                // already typed one — re-picking must never silently discard a
+                // price they entered by hand.
                 const current = form.getValues(`items.${index}.unitPrice`);
                 if (current.trim() === "") {
                   form.setValue(
@@ -104,7 +134,10 @@ export function LineItemRow({
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label htmlFor={`item-${index}-quantity`}>Quantity</Label>
+            {/* Names the unit as soon as one is known: "Quantity (cottons)". */}
+            <Label htmlFor={`item-${index}-quantity`}>
+              {quantityFieldLabel(unit)}
+            </Label>
             <Input
               id={`item-${index}-quantity`}
               // Design System: numeric inputs use inputMode="decimal" so the
@@ -123,7 +156,9 @@ export function LineItemRow({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor={`item-${index}-price`}>Unit price</Label>
+            <Label htmlFor={`item-${index}-price`}>
+              {unitPriceFieldLabel(unit)}
+            </Label>
             <Input
               id={`item-${index}-price`}
               inputMode="decimal"
@@ -138,7 +173,7 @@ export function LineItemRow({
               <p className="text-sm text-rose-600">{errors.unitPrice.message}</p>
             ) : priceIsZero ? (
               // Not an error — selling at 0 is legal, just almost always a
-              // catalog price the owner has not set yet.
+              // catalog price the owner hasn't set yet.
               <p className="text-sm text-amber-600">
                 This product has no price set yet.
               </p>
@@ -147,7 +182,10 @@ export function LineItemRow({
         </div>
 
         <div className="flex items-baseline justify-between border-t border-zinc-100 pt-3">
-          <span className="text-sm text-zinc-500">Line total</span>
+          <span className="num text-sm text-zinc-500">
+            {/* Spells the unit out: "3 cottons", "12 pieces". */}
+            {quantitySummary ? `${quantitySummary} · Line total` : "Line total"}
+          </span>
           <span className="num text-[15px] font-semibold text-zinc-900">
             {formatPKR(lineTotal)}
           </span>
