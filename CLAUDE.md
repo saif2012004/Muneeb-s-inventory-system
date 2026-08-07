@@ -498,6 +498,44 @@ UI can show which lines genuinely took a new price.
 - No database adapter. Credentials + JWT sessions don't use one, and the Credentials
   provider is incompatible with DB sessions. `@auth/prisma-adapter` is NOT a dependency.
 
+### 🔴 OPEN SECURITY ITEM — login form falls back to a GET with credentials in the URL
+
+**MUST FIX before client handoff. Do not close Phase 8 with this outstanding.**
+
+**Symptom.** When the client JS bundle is absent or has not hydrated, the login form submits
+NATIVELY. There is no `method` on the `<form>`, so the browser defaults to **GET**, and the
+email and password land in the query string:
+
+```
+/login?email=owner%40example.com&password=<the actual password>
+```
+
+**Why it matters.** A password in a URL is not a cosmetic problem — it is written to browser
+history, server and proxy access logs, and any `Referer` header sent onward. Those are places
+credentials are never rotated out of, and the owner reuses passwords like everyone else.
+
+**Status.** Found during Phase 5 mobile verification (2026-08-08) and **reproduced**: the URL
+above is what the address bar actually showed. It only appeared while every client chunk was
+404ing from a corrupted `.next` (see the dev-server note below), and it did NOT recur once
+the chunks served 200 — so in normal operation the React `onSubmit` handler intercepts and
+this path is not taken. It is a **degraded-state** exposure, not an everyday one.
+
+That is a reason to schedule it, not to dismiss it: "only when JS fails" still includes a
+failed deploy, a CDN hiccup, an ad-blocker or a locked-down corporate browser — exactly the
+moments a user retypes their password.
+
+**The fix (not applied yet — deliberately deferred, Phase 1 code, out of Phase 5 scope):**
+the login form must never be capable of sending credentials via GET.
+- Put `method="post"` on the `<form>` so the no-JS fallback can never serialise fields into
+  the URL, and
+- ensure the no-JS path cannot post credentials anywhere that isn't a real handler — prefer
+  a server action / route that accepts POST only, and reject non-POST outright.
+- Re-test with JavaScript disabled in the browser, not just with JS working. The bug is
+  invisible in the working case.
+
+Owner: whoever picks up Phase 8, or a standalone task before handoff. **Do not let this get
+lost in the a11y sweep.**
+
 ---
 
 ## Database security (READ BEFORE TOUCHING RLS)
@@ -695,6 +733,36 @@ after install — easy to miss.
 
 ---
 
+## Local development notes
+
+**Two dev servers running at once will corrupt `.next` and 404 every client chunk.**
+
+*Symptom:* the page renders (server HTML is fine) but nothing is interactive — no hydration,
+buttons do nothing, forms fall back to native submits. The console shows repeated
+`Failed to load resource: 404`, and the network panel shows `main-app.js`,
+`app-pages-internals.js` and every `app/**/page.js` returning **404** while `webpack.js`
+returns 200. It looks like an application bug and is not one.
+
+*Cause:* a hard-killed `next dev` can leave port 3000 held, so the next `npm run dev` starts
+on **3001** and writes to the same `.next`. Two servers, one build directory. Whichever one
+you have open in the browser is now serving chunks the other overwrote.
+
+*Fix:* kill everything listening on 3000/3001, delete `.next`, start exactly ONE server.
+
+```powershell
+Get-NetTCPConnection -LocalPort 3000,3001 -State Listen -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty OwningProcess -Unique |
+  ForEach-Object { Stop-Process -Id $_ -Force }
+```
+```bash
+rm -rf .next && npm run dev   # confirm it says "Local: http://localhost:3000", not 3001
+```
+
+Always check the port the server actually bound to before blaming the app. Not a code
+defect — an operational trap that cost real time in Phase 5.
+
+---
+
 ## Development Phases
 
 | Phase | Scope | Status |
@@ -707,9 +775,14 @@ after install — easy to miss.
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ✅ Done |
 | 6  | Farmer net-balance ledger + all-farmers balance sheet | ⬜ Todo |
 | 7  | Reports dashboard + charts + CSV export | ⬜ Todo |
-| 8  | Polish: mobile nav, states, a11y, PWA, final validation | ⬜ Todo |
+| 8  | Polish: mobile nav, states, a11y, PWA, **login POST-only security fix**, final validation | ⬜ Todo |
 
 Update this table as phases complete. Change ⬜ to ✅.
+
+**Phase 8 cannot be marked ✅ while the login GET-fallback is unfixed.** It is a real
+credential-exposure path (email + password in the URL when JS is absent) and is written up in
+full in the Authentication section above. Fix it as its own task before handoff, or inside
+Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
 
 ### Carried-forward notes
 
