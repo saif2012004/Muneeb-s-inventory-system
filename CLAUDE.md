@@ -759,6 +759,14 @@ Update this table as phases complete. Change ⬜ to ✅.
   - **A customer is never hard-deleted** — soft only, like a Product with sale history.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
+- **Phase 8 (touch targets) — QUEUED, found in 4b:** several controls sit under the Design
+  System's 44px minimum. Measured on the customer profile at 360px: **shadcn `TabsTrigger` is
+  28px** and the **"All customers" back link is 20px**. These are framework/text defaults rather
+  than one-off mistakes, so the same undersized tabs and inline links will exist wherever they
+  are used — Phase 5's milk tabs will inherit it too. **Do NOT patch these piecemeal as they
+  turn up.** Raise them app-wide in the a11y/mobile sweep, ideally by overriding the `TabsTrigger`
+  default once in `components/ui/tabs.tsx` rather than per usage. Everything else measured
+  clean: inputs, buttons and cards are all ≥44px.
 
 ---
 

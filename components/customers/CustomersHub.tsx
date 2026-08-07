@@ -179,6 +179,9 @@ export function CustomersHub() {
           ) : (
             <AnimatedMoney
               value={totals.owed}
+              // A summary tile, fetched once — so it counts up from 0 rather
+              // than appearing at its final value.
+              countUpOnMount
               className="mt-2 block text-[28px] font-bold leading-tight text-rose-600"
             />
           )}
