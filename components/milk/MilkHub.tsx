@@ -57,7 +57,24 @@ export function MilkHub() {
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
-  const farmersQuery = useFarmers({ withBalances: true });
+  /**
+   * `includeInactive` — the SAME basis the balance sheet uses, deliberately.
+   *
+   * Retiring a farmer stops new milk; it does not erase a debt. Fetching only
+   * active farmers made the "You owe farmers" tile silently exclude anyone
+   * retired while still owed, so the landing screen understated a real payable
+   * — 17,000 against the balance sheet's 21,000 on the Phase 6 fixture. A total
+   * that is wrong in the direction of "you owe less than you do" is exactly the
+   * error the owner cannot catch by eye.
+   *
+   * Passing the same options as the balance sheet also means both screens share
+   * ONE TanStack cache entry, so they cannot drift apart later: they are not
+   * two agreeing calculations, they are the same response rendered twice.
+   */
+  const farmersQuery = useFarmers({
+    withBalances: true,
+    includeInactive: true,
+  });
   const createFarmer = useCreateFarmer();
 
   const farmers = useMemo(
@@ -66,15 +83,33 @@ export function MilkHub() {
   );
   const summary = farmersQuery.data?.summary ?? null;
 
+  /**
+   * The hub's LIST stays active-only — this is the working list of people who
+   * deliver, and a retired farmer does not belong in it. Their money still
+   * counts (the tile above is computed server-side over everyone) and they
+   * remain reachable from the balance sheet, which is the screen for exactly
+   * that question.
+   */
+  const activeFarmers = useMemo(
+    () => farmers.filter((farmer) => farmer.isActive),
+    [farmers]
+  );
+
+  /** Retired farmers who are still owed something — the tile says so out loud. */
+  const retiredWithBalance = useMemo(
+    () => farmers.filter((farmer) => !farmer.isActive && farmer.netBalanceOwed !== 0),
+    [farmers]
+  );
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     const filtered = term
-      ? farmers.filter(
+      ? activeFarmers.filter(
           (farmer) =>
             farmer.name.toLowerCase().includes(term) ||
             (farmer.phone ?? "").toLowerCase().includes(term)
         )
-      : farmers;
+      : activeFarmers;
 
     // Biggest debt first; ties broken by name so the order is stable.
     return [...filtered].sort((a, b) => {
@@ -83,7 +118,7 @@ export function MilkHub() {
       }
       return a.name.localeCompare(b.name);
     });
-  }, [farmers, search]);
+  }, [activeFarmers, search]);
 
   const header = (
     <PageHeader
@@ -190,8 +225,20 @@ export function MilkHub() {
               summariseFarmerBalances. Two farmers, one owed 5,000 and one 5,000
               ahead, would net to "nothing to pay" while the first still has to
               be paid 5,000 in cash.
+
+              "All farmers" now genuinely means all — retired included. Said out
+              loud when a retired farmer is carrying a balance, so the tile and
+              the shorter list below it don't look like they disagree.
             */}
             across all farmers
+            {retiredWithBalance.length > 0 ? (
+              <>
+                <span className="mx-1.5 text-zinc-300">·</span>
+                <span className="num">
+                  includes {retiredWithBalance.length} retired
+                </span>
+              </>
+            ) : null}
           </p>
         </div>
 
@@ -217,7 +264,10 @@ export function MilkHub() {
             <Skeleton className="mt-3 h-9 w-16 rounded-lg" />
           ) : (
             <p className="num mt-2 text-[28px] font-bold leading-tight text-zinc-900">
-              {farmers.length}
+              {/* ACTIVE farmers, not everyone returned — the query now also
+                  fetches retired ones for the money tile above, and this tile
+                  is explicitly labelled "active". */}
+              {activeFarmers.length}
             </p>
           )}
           <p className="mt-1 text-sm text-zinc-500">active</p>

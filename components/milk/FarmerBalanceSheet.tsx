@@ -77,10 +77,47 @@ export function FarmerBalanceSheet() {
   );
   const summary = farmersQuery.data?.summary ?? null;
 
+  /**
+   * The farmers this sheet is ABOUT, before the settled filter is applied.
+   *
+   * A retired farmer with nothing outstanding is finished business and is
+   * excluded entirely. Everyone else — active, or retired but still carrying a
+   * balance — belongs on the sheet.
+   */
+  const included = useMemo(
+    () =>
+      farmers.filter(
+        (farmer) => farmer.isActive || farmer.netBalanceOwed !== 0
+      ),
+    [farmers]
+  );
+
+  /**
+   * The context line describes exactly {@link included}, so its count can never
+   * disagree with the number of rows underneath it. Previously it used the
+   * server's `farmerCount`, which counts every farmer fetched — so the sheet
+   * read "7 farmers" above 6 rows.
+   *
+   * Summing already-serialized numbers held in memory for a display line is the
+   * same latitude the customers hub takes; the AUTHORITATIVE money answer (owed
+   * vs advanced) still comes from the server and is untouched by this. It has to
+   * be: every farmer excluded here is net-zero by definition, so they contribute
+   * nothing to either the owed or the advanced bucket.
+   */
+  const context = useMemo(() => {
+    let liters = 0;
+    let milk = 0;
+    let purchases = 0;
+    for (const farmer of included) {
+      liters += farmer.totalLiters;
+      milk += farmer.totalMilkValue;
+      purchases += farmer.totalPurchases;
+    }
+    return { count: included.length, liters, milk, purchases };
+  }, [included]);
+
   const rows = useMemo(() => {
-    const visible = farmers.filter((farmer) => {
-      // A retired farmer with nothing outstanding is finished business.
-      if (!farmer.isActive && farmer.netBalanceOwed === 0) return false;
+    const visible = included.filter((farmer) => {
       if (outstandingOnly && farmer.netBalanceOwed === 0) return false;
       return true;
     });
@@ -94,10 +131,10 @@ export function FarmerBalanceSheet() {
       }
       return a.name.localeCompare(b.name);
     });
-  }, [farmers, outstandingOnly]);
+  }, [included, outstandingOnly]);
 
-  const settledCount = farmers.filter(
-    (farmer) => farmer.netBalanceOwed === 0 && farmer.isActive
+  const settledCount = included.filter(
+    (farmer) => farmer.netBalanceOwed === 0
   ).length;
 
   const header = (
@@ -221,16 +258,17 @@ export function FarmerBalanceSheet() {
         </div>
       </motion.div>
 
-      {/* Milk bought, for context on the numbers above. */}
+      {/* Context for the numbers above. Describes exactly the farmers on this
+          sheet, so the count always matches the rows below it. */}
       {!farmersQuery.isPending && summary ? (
         <p className="num mb-4 text-sm text-zinc-500">
-          {summary.farmerCount} {summary.farmerCount === 1 ? "farmer" : "farmers"}
+          {context.count} {context.count === 1 ? "farmer" : "farmers"}
           <span className="mx-1.5 text-zinc-300">·</span>
-          {formatLiters(summary.totalLiters)} bought
+          {formatLiters(context.liters)} bought
           <span className="mx-1.5 text-zinc-300">·</span>
-          {formatPKR(summary.totalMilkValue)} milk
+          {formatPKR(context.milk)} milk
           <span className="mx-1.5 text-zinc-300">·</span>
-          {formatPKR(summary.totalPurchases)} purchases
+          {formatPKR(context.purchases)} purchases
         </p>
       ) : null}
 

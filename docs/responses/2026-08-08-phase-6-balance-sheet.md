@@ -246,21 +246,52 @@ show. That belongs with Phase 7's reports, against real history.
 
 ---
 
-## 8. Known gap this phase surfaced
+## 8. The hub-tile understatement — FOUND, then FIXED (not deferred)
 
-**The milk hub's "You owe farmers" tile can understate the total.** It lists active farmers
-only, so a retired-but-unpaid farmer is excluded from its summary — the balance sheet includes
-them (`includeInactive`) and would show a larger, correct figure.
+Originally reported here as a gap to reconcile in Phase 8. On your instruction it was fixed
+immediately, as a deliberate change to the Phase 5 hub, and re-verified in the browser.
 
-In the fixture the hub would have read **17,000** against the balance sheet's **21,000**.
+**The bug.** The milk hub's "You owe farmers" tile fetched active farmers only, so a
+retired-but-unpaid farmer was silently excluded from the landing screen's headline payable.
+Retiring a farmer stops new milk; it does not erase a debt. On the fixture the hub read
+**Rs. 17,000** against the balance sheet's **Rs. 21,000** — wrong in the direction of "you owe
+less than you do", which is the direction the owner cannot catch by eye.
 
-I did **not** silently change Phase 5's verified hub to fix this. It is recorded in CLAUDE.md
-as something to reconcile in Phase 8, since it is a behaviour change to a shipped screen and
-your call which number that tile should show. The balance sheet is the authoritative one.
+**The fix.** The hub now passes the **same** options to `useFarmers` as the balance sheet
+(`withBalances: true, includeInactive: true`). That does more than make the numbers agree
+today — both screens now resolve to **one TanStack cache entry**, so they are not two agreeing
+calculations that could drift apart later, they are the same response rendered twice.
 
-Minor, related: the context line reads "7 farmers" while 6 rows display, because the summary
-covers the whole book including the hidden retired-and-settled farmer. Accurate for the
-totals it sits under, but worth knowing.
+Three display consequences, all deliberate:
+
+- The hub's farmer **list** stays active-only. It is the working list of people who deliver;
+  a retired farmer does not belong in it, and remains reachable from the balance sheet.
+- Because the tile can now exceed the visible list, it says so: **"across all farmers ·
+  includes 1 retired"**, shown only when a retired farmer actually carries a balance.
+- The **Farmers** count tile now counts `activeFarmers`, not everything fetched — it is
+  labelled "active" and must stay true to that.
+
+**Also fixed: the "7 farmers / 6 rows" context line.** It used the server's `farmerCount`,
+which counts every farmer fetched, while the sheet hides retired-and-settled ones. It now
+describes exactly the farmers on the sheet. The authoritative owed/advanced tiles are
+untouched and still server-derived — they have to be unaffected by this, because every farmer
+excluded is net-zero by definition and so contributes nothing to either bucket.
+
+### Verified in the browser (fixture rebuilt, then removed)
+
+| Check | Before | After |
+|---|---|---|
+| Hub "You owe farmers" | Rs. 17,000 | **Rs. 21,000** |
+| Balance sheet total | Rs. 21,000 | Rs. 21,000 |
+| The two agree | **No** | **Yes** |
+| Hub subtext | "across all farmers" | "across all farmers · includes 1 retired" |
+| Hub "Farmers" tile | 7 (would have counted retired) | **5 active** |
+| Balance sheet context line | 7 farmers / 6 rows | **6 farmers / 6 rows** |
+| Litres / milk / purchases | 145 L / 29,000 / 11,000 | unchanged — the excluded farmer had zero activity |
+
+**No hub regressions:** search still filters (typing "Ahead" → 1 result, clearing → 5), the
+retired farmer stays out of the list, Quick entry / Balance sheet / Milk sales links all
+present, Add farmer intact, no horizontal scroll.
 
 ---
 

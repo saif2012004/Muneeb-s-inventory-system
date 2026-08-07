@@ -897,11 +897,19 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
     window is wrong unless it carries an opening balance forward; the first row would start
     from zero and every figure below it would be understated. If a date filter is ever wanted,
     it has to compute an opening balance too — it is not a cosmetic addition.
-  - **The balance sheet includes RETIRED farmers who still have a balance** (`includeInactive`),
-    because retiring someone does not settle what they are owed. Retired *and* settled are
-    hidden. **The milk hub's "You owe farmers" tile does NOT do this** — it lists active
-    farmers only, so it can understate the true total when a retired farmer is still owed.
-    The balance sheet is the authoritative figure. Worth reconciling in Phase 8.
+  - **Retired farmers who still have a balance are INCLUDED everywhere money is totalled**
+    (`includeInactive: true`), because retiring someone does not settle what they are owed.
+    Retired *and* settled are hidden — finished business.
+    **The milk hub and the balance sheet pass the SAME options to `useFarmers`, on purpose.**
+    They therefore share one TanStack cache entry: they are not two agreeing calculations,
+    they are the same response rendered twice, and cannot drift. ✅ The hub tile previously
+    fetched active-only and understated the payable (17,000 vs 21,000 on the Phase 6 fixture);
+    fixed and browser-verified — both now read 21,000.
+    Two display rules follow from that shared query, and should be kept:
+    the hub's farmer LIST stays active-only (it is the working list of people who deliver,
+    and the tile says "includes N retired" when relevant), and any per-screen count must be
+    derived from the set that screen actually shows — the balance sheet's context line counts
+    the farmers ON the sheet, not every farmer fetched, or it reads "7 farmers" above 6 rows.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 - **Phase 8 (touch targets) — QUEUED, found in 4b:** several controls sit under the Design
