@@ -560,6 +560,30 @@ pending decision for the owner; it would not affect Prisma, which never goes thr
 - Every route checks the session with `auth()` first; reject unauthenticated with 401.
 - `export const runtime = "nodejs"` on routes using Prisma/bcrypt.
 
+### Never fan out Prisma queries with Promise.all (pooled connection = 1)
+
+**`DATABASE_URL` carries `connection_limit=1`, so a `Promise.all` of Prisma queries does NOT
+run in parallel — the first executes and the rest QUEUE for the single connection. Await
+multiple queries in SERIES.**
+
+Past ~8 concurrent queries the ones at the back exceed the 10s pool timeout and the request
+fails outright:
+
+```
+Timed out fetching a new connection from the connection pool.
+(Current connection pool timeout: 10, connection limit: 1)
+```
+
+Found in Phase 4b: the customer profile fanned out 12 concurrent queries and 500'd in the
+browser while `tsc` and `next lint` were both clean. Sequential costs nothing real — with one
+connection there was never any parallelism to lose — and it cannot time out waiting for
+itself. The same limit applies on Vercel, so this is not a dev-only concern.
+
+Two or three concurrent queries are fine in practice; the rule is to prefer series and never
+nest a `Promise.all` inside another. Where a route needs many rows, fetch them ONCE and derive
+everything from that set — the profile route was also fetching every sale twice, once for the
+ledger and once for the purchases list. See `getCustomerActivity()` in `lib/receivables.ts`.
+
 ### Client data fetching (GLOBAL — applies to every module, not just beverages)
 
 **TanStack Query uses `networkMode: "always"` (set on both queries and mutations in
@@ -660,7 +684,7 @@ after install — easy to miss.
 | 2  | Category & product manager (CRUD + inline price editor) + seed | ✅ Done |
 | 3  | Beverages module (multi-item sales, list, customer ledger) | ✅ Done |
 | 4  | Bakery module (mirrors beverages) | ✅ Done |
-| 4b | Customers hub + receivables (payments, outstanding balances) | ⬜ Todo |
+| 4b | Customers hub + receivables (payments, outstanding balances) | ✅ Done |
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ⬜ Todo |
 | 6  | Farmer net-balance ledger + all-farmers balance sheet | ⬜ Todo |
 | 7  | Reports dashboard + charts + CSV export | ⬜ Todo |
@@ -723,6 +747,16 @@ Update this table as phases complete. Change ⬜ to ✅.
   - **Picker labels use every attribute a product carries** (size, qualityTier, shape,
     discount) and fall back to the brand when it carries none. Composing from size+discount
     alone made `Biscuits Premium`/`Simple` and all four Russ variants indistinguishable.
+- **Phase 4b delivered:** the customers hub + receivables — `/customers`, `/customers/[id]`,
+  and the `/api/customers/*` tree. Report:
+  `docs/responses/2026-08-07-phase-4b-customers-receivables.md`. Three things that carry
+  forward:
+  - **`lib/receivables.ts` is THE receivables calculation**, the way `reconcileSaleLines` is
+    THE price snapshot. `outstanding = billed − paid`, billed spans beverages + bakery +
+    **milk**. Reports and dashboards must call it, not re-derive it.
+  - **MilkSale is already counted**, ahead of its Phase 5 UI. Empty table contributes 0, so
+    when milk sales start being recorded the balances are correct with no change here.
+  - **A customer is never hard-deleted** — soft only, like a Product with sale history.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 

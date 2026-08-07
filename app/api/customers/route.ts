@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { getCustomerBalances } from "@/lib/receivables";
+import { serialize } from "@/lib/serialize";
 import { customerCreateSchema } from "@/lib/validations/customers";
 
 // Prisma cannot run on Edge (Gotcha 3).
@@ -9,11 +11,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Minimal customer endpoints — just enough for the sale form to pick or add a
- * customer. The full customers hub (payments, outstanding balances, the
- * receivables view) is Phase 4b; deliberately nothing about money here.
+ * Customers, shared across beverages, bakery and milk.
  *
- * No Decimal fields are returned, so no serializer is needed.
+ * Phase 3 shipped this as a bare picker feed. Phase 4b adds the receivables:
+ * every row now carries its outstanding balance, because "who owes me money"
+ * is the question the hub exists to answer.
  */
 
 const CUSTOMER_SELECT = {
@@ -22,6 +24,7 @@ const CUSTOMER_SELECT = {
   phone: true,
   type: true,
   isActive: true,
+  createdAt: true,
 } as const;
 
 /**
@@ -30,9 +33,14 @@ const CUSTOMER_SELECT = {
  * Query params (all optional):
  *   search           case-insensitive name match
  *   includeInactive  "true" to include deactivated customers
+ *   withBalances     "false" to skip the receivables aggregation
  *
- * Inactive customers are hidden by default so the sale form's picker only
- * offers people the owner still trades with.
+ * Balances are ON by default so the hub gets them in one round trip. The sale
+ * form's picker passes `withBalances=false` — it only needs names, and four
+ * aggregate queries to render a dropdown is waste.
+ *
+ * Cost is a FIXED four aggregate queries for the whole list, not one per
+ * customer — see lib/receivables.ts.
  */
 export async function GET(request: Request): Promise<NextResponse> {
   const denied = await requireOwner();
@@ -42,6 +50,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search")?.trim();
     const includeInactive = searchParams.get("includeInactive") === "true";
+    const withBalances = searchParams.get("withBalances") !== "false";
 
     const customers = await prisma.customer.findMany({
       where: {
@@ -54,13 +63,32 @@ export async function GET(request: Request): Promise<NextResponse> {
       orderBy: { name: "asc" },
     });
 
-    return ok(customers);
+    if (!withBalances) return ok(serialize(customers));
+
+    const balances = await getCustomerBalances(customers.map((c) => c.id));
+
+    // Decimals -> numbers at the boundary (Gotcha 2). Every id is present in
+    // the map by construction, so the fallback below is belt-and-braces rather
+    // than an expected path.
+    return ok(
+      customers.map((customer) => {
+        const balance = balances.get(customer.id);
+        return {
+          ...serialize(customer),
+          totalBilled: serialize(balance?.totalBilled ?? 0),
+          totalPaid: serialize(balance?.totalPaid ?? 0),
+          outstanding: serialize(balance?.outstanding ?? 0),
+          lastSaleDate: balance?.lastSaleDate ?? null,
+          lastPaymentDate: balance?.lastPaymentDate ?? null,
+        };
+      })
+    );
   } catch (error) {
     return serverError("customers.GET", error);
   }
 }
 
-/** POST /api/customers — add a customer from the sale form. */
+/** POST /api/customers — add a customer. */
 export async function POST(request: Request): Promise<NextResponse> {
   const denied = await requireOwner();
   if (denied) return denied;
@@ -85,7 +113,19 @@ export async function POST(request: Request): Promise<NextResponse> {
       select: CUSTOMER_SELECT,
     });
 
-    return ok(customer, 201);
+    // A new customer has no history, so their balance is a known zero — no
+    // point aggregating for it.
+    return ok(
+      {
+        ...serialize(customer),
+        totalBilled: 0,
+        totalPaid: 0,
+        outstanding: 0,
+        lastSaleDate: null,
+        lastPaymentDate: null,
+      },
+      201
+    );
   } catch (error) {
     return serverError("customers.POST", error);
   }

@@ -1,14 +1,23 @@
 "use client";
 
 /**
- * TanStack Query bindings for the minimal customer routes added in 3.1.
- * Customers are shared across beverages, bakery and milk, so this is not
- * namespaced under a module. The full customers hub is Phase 4b.
+ * TanStack Query bindings for the customers hub and the receivables ledger.
+ *
+ * Every money field arriving here is ALREADY A NUMBER — the routes serialize
+ * the Decimals at the boundary (Gotcha 2). Nothing in the UI recomputes a
+ * balance; it renders what the server calculated in lib/receivables.ts.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api-client";
-import type { CustomerType } from "@/lib/validations/customers";
+import type {
+  CustomerType,
+  PaymentMethod,
+} from "@/lib/validations/customers";
+
+// ---------------------------------------------------------------------------
+// Shapes
+// ---------------------------------------------------------------------------
 
 export type Customer = {
   id: string;
@@ -16,38 +25,222 @@ export type Customer = {
   phone: string | null;
   type: CustomerType;
   isActive: boolean;
+  createdAt: string;
 };
+
+/** A customer row on the hub, carrying its computed balance. */
+export type CustomerWithBalance = Customer & {
+  totalBilled: number;
+  totalPaid: number;
+  /** billed − paid. Positive = they owe the owner. */
+  outstanding: number;
+  lastSaleDate: string | null;
+  lastPaymentDate: string | null;
+};
+
+export type CustomerBalance = {
+  totalBilled: number;
+  totalPaid: number;
+  outstanding: number;
+  lastSaleDate: string | null;
+  lastPaymentDate: string | null;
+};
+
+export type Payment = {
+  id: string;
+  customerId: string;
+  paymentDate: string;
+  amount: number;
+  method: PaymentMethod | null;
+  notes: string | null;
+  createdAt: string;
+};
+
+export type Purchase = {
+  id: string;
+  module: "beverages" | "bakery" | "milk";
+  saleDate: string;
+  totalAmount: number;
+  notes: string | null;
+  itemCount: number | null;
+  detail: string | null;
+};
+
+export type LedgerEntry = {
+  id: string;
+  kind: "sale" | "payment";
+  module: "beverages" | "bakery" | "milk" | null;
+  date: string;
+  /** Signed: positive for a sale, negative for a payment. */
+  amount: number;
+  /** Outstanding AFTER this entry. */
+  runningBalance: number;
+  label: string;
+  itemCount: number | null;
+};
+
+export type CustomerProfile = {
+  customer: Customer;
+  balance: CustomerBalance;
+  purchases: Purchase[];
+  payments: Payment[];
+  ledger: LedgerEntry[];
+};
+
+// ---------------------------------------------------------------------------
+// Query keys
+// ---------------------------------------------------------------------------
 
 export const customerKeys = {
   all: ["customers"] as const,
-  list: () => [...customerKeys.all, "list"] as const,
+  list: (withBalances: boolean) =>
+    [...customerKeys.all, "list", withBalances] as const,
+  profile: (id: string) => [...customerKeys.all, "profile", id] as const,
 };
 
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
+
 /**
- * Every active customer, fetched once and searched client-side by the combobox.
- * A shop has tens of customers, not thousands — filtering in the browser keeps
- * the picker instant with no keystroke round-trips.
+ * Every active customer.
+ *
+ * `withBalances` is false for the sale-form picker, which only needs names —
+ * four aggregate queries to render a dropdown would be waste. The hub passes
+ * true. The flag is part of the query key so the two never share a cache entry
+ * and the picker can't accidentally read a balance-less list as complete.
  */
-export function useCustomers() {
+export function useCustomers(options?: { withBalances?: boolean }) {
+  const withBalances = options?.withBalances ?? false;
   return useQuery({
-    queryKey: customerKeys.list(),
-    queryFn: () => api.get<Customer[]>("/api/customers"),
+    queryKey: customerKeys.list(withBalances),
+    queryFn: () =>
+      api.get<CustomerWithBalance[]>(
+        `/api/customers${withBalances ? "" : "?withBalances=false"}`
+      ),
   });
 }
+
+/** The profile: customer, balance, purchases, payments and the ledger. */
+export function useCustomerProfile(id: string) {
+  return useQuery({
+    queryKey: customerKeys.profile(id),
+    queryFn: () => api.get<CustomerProfile>(`/api/customers/${id}`),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Mutations
+//
+// Every write invalidates the WHOLE customers tree, not just the row it
+// touched: a payment changes that customer's profile AND their outstanding on
+// the hub AND the total across all customers. Invalidating narrowly is how the
+// summary bar ends up disagreeing with the list below it.
+// ---------------------------------------------------------------------------
 
 export function useCreateCustomer() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { name: string; phone?: string | null; type: CustomerType }) =>
-      api.post<Customer>("/api/customers", input),
+    mutationFn: (input: {
+      name: string;
+      phone?: string | null;
+      type: CustomerType;
+    }) => api.post<CustomerWithBalance>("/api/customers", input),
     onSuccess: (created) => {
-      // Seed the new row straight into the cache so the combobox can select it
-      // immediately, then revalidate. Without this the owner adds a customer
-      // and watches an empty picker until the refetch lands.
-      queryClient.setQueryData<Customer[]>(customerKeys.list(), (current) =>
-        current ? [...current, created] : [created]
-      );
+      // Seed both list variants so a picker opened straight after adding can
+      // select the new customer without waiting for the refetch.
+      for (const withBalances of [true, false]) {
+        queryClient.setQueryData<CustomerWithBalance[]>(
+          customerKeys.list(withBalances),
+          (current) => (current ? [...current, created] : [created])
+        );
+      }
       return queryClient.invalidateQueries({ queryKey: customerKeys.all });
     },
+  });
+}
+
+export function useUpdateCustomer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...patch
+    }: {
+      id: string;
+      name?: string;
+      phone?: string | null;
+      type?: CustomerType;
+      isActive?: boolean;
+    }) => api.patch<Customer>(`/api/customers/${id}`, patch),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: customerKeys.all }),
+  });
+}
+
+export function useDeactivateCustomer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete<{
+        deleted: "soft";
+        customer: Customer;
+        outstanding: number;
+        message: string;
+      }>(`/api/customers/${id}`),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: customerKeys.all }),
+  });
+}
+
+export function useCreatePayment(customerId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      paymentDate: string;
+      amount: number;
+      method?: PaymentMethod | null;
+      notes?: string | null;
+    }) =>
+      api.post<{ payment: Payment; balance: CustomerBalance }>(
+        `/api/customers/${customerId}/payments`,
+        input
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: customerKeys.all }),
+  });
+}
+
+export function useUpdatePayment(customerId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      paymentId,
+      ...patch
+    }: {
+      paymentId: string;
+      paymentDate?: string;
+      amount?: number;
+      method?: PaymentMethod | null;
+      notes?: string | null;
+    }) =>
+      api.patch<{ payment: Payment; balance: CustomerBalance }>(
+        `/api/customers/${customerId}/payments/${paymentId}`,
+        patch
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: customerKeys.all }),
+  });
+}
+
+export function useDeletePayment(customerId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (paymentId: string) =>
+      api.delete<{ deleted: "hard"; id: string; balance: CustomerBalance }>(
+        `/api/customers/${customerId}/payments/${paymentId}`
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: customerKeys.all }),
   });
 }
