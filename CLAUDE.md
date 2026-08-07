@@ -602,6 +602,25 @@ Found the hard way in Phase 3.2: the new-sale Save button hung indefinitely offl
 feedback. Verified fixed in-browser — recovery in ~305ms. See
 `docs/phase-3.2-fixes-verified.md` §4.
 
+### Structural sharing: a refetch that changes nothing keeps the SAME object reference
+
+**Any screen that seeds local form state from server data with
+`useEffect(..., [query.data])` can silently display a value that is not what is stored.**
+
+TanStack Query uses structural sharing: when a refetch returns data deeply equal to what it
+already held, it keeps the **existing reference**. The effect's dependency never changes, so
+the reseed does not run and whatever the user typed stays on screen as if it had been saved.
+
+Found in Phase 5 browser testing. Quick entry never deletes, so blanking a farmer's litres
+and saving leaves the stored delivery untouched — the refetch returned identical data, the
+box stayed empty, and the grid showed "no delivery" next to a delivery that still existed.
+It type-checked and linted clean; only the browser showed it.
+
+Fix used in `components/milk/QuickEntryGrid.tsx`: a `seedVersion` counter bumped in the
+mutation's `onSuccess` and included in the effect deps, forcing a reseed from the server
+after every save. **Do not key such an effect on `dataUpdatedAt`** — that also fires on
+background/window-focus refetches and would wipe half-typed input mid-entry.
+
 ---
 
 ## Environment Variables
@@ -685,7 +704,7 @@ after install — easy to miss.
 | 3  | Beverages module (multi-item sales, list, customer ledger) | ✅ Done |
 | 4  | Bakery module (mirrors beverages) | ✅ Done |
 | 4b | Customers hub + receivables (payments, outstanding balances) | ✅ Done |
-| 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ⬜ Todo |
+| 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ✅ Done |
 | 6  | Farmer net-balance ledger + all-farmers balance sheet | ⬜ Todo |
 | 7  | Reports dashboard + charts + CSV export | ⬜ Todo |
 | 8  | Polish: mobile nav, states, a11y, PWA, final validation | ⬜ Todo |
@@ -757,6 +776,35 @@ Update this table as phases complete. Change ⬜ to ✅.
   - **MilkSale is already counted**, ahead of its Phase 5 UI. Empty table contributes 0, so
     when milk sales start being recorded the balances are correct with no change here.
   - **A customer is never hard-deleted** — soft only, like a Product with sale history.
+- **Phase 5 delivered:** the milk shop — `/milk`, `/milk/quick-entry`, `/milk/farmers/[id]`,
+  `/milk/sales`, and the `/api/milk/*` tree. Report:
+  `docs/responses/2026-08-08-phase-5-milk-shop.md`. **No migration was needed** — all four
+  milk tables already existed. Zero existing files were modified. What Phase 6 inherits:
+  - **`lib/milk.ts` is THE farmer net-balance calculation**, the way `lib/receivables.ts` is
+    THE customer balance. `netBalanceOwed = milkValue − purchases`. Phase 6's balance sheet
+    must call `getFarmerBalances()` (a FIXED two queries for all farmers) and
+    `summariseFarmerBalances()`, not re-derive either — and never one query per farmer.
+  - **THE SIGN IS INVERTED versus customers, and this is the module's sharpest trap.**
+    Customer: positive `outstanding` = they owe the owner → **rose**. Farmer: positive
+    `netBalanceOwed` = the OWNER owes the farmer → **emerald**. Both positive, opposite
+    directions. Only `lib/milk-display.ts` decides colour/wording; never test the sign at a
+    call site, and never reuse the customer helpers on a farmer.
+  - **Debts and advances are never netted.** `summariseFarmerBalances` reports
+    `totalOwedToFarmers` and `totalAdvanced` separately: one farmer owed 5,000 and another
+    5,000 ahead would net to "nothing to pay" while the first still needs paying in cash.
+  - **`lib/milk.ts` imports Prisma, so it is SERVER-ONLY.** Client components use
+    `lib/milk-display.ts` (dependency-free). Same split as receivables/receivables-display.
+  - **null litres ≠ 0 litres.** `morningLiters`/`eveningLiters` are null when that session
+    did not happen. `serializeLiters()` preserves it and `formatSessionLiters()` renders "—".
+    Never coerce to 0 — a skipped morning would read as a farmer who came empty-handed.
+  - **One delivery per farmer per Karachi DAY, enforced in the route, not the DB.** There is
+    no unique constraint (that would need a migration). The POST returns 409 with
+    `existingDeliveryId`; quick entry finds the day's row and UPDATES it, which is how the
+    evening pass lands on the same row as the morning.
+  - **Quick entry never deletes.** A blanked row comes back in `clearedButKept` and the UI
+    warns; deletion stays an explicit action with a confirm dialog.
+  - **`components/shared/ConfirmDialog.tsx`** is the new generic destructive-action confirm.
+    `DeleteSaleDialog` was deliberately left alone — it is shipped and verified.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 - **Phase 8 (touch targets) — QUEUED, found in 4b:** several controls sit under the Design

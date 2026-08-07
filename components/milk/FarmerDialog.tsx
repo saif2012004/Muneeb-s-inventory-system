@@ -1,0 +1,160 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { MODULE_BUTTON_CLASS } from "@/lib/sale-modules";
+import { cn } from "@/lib/utils";
+
+/**
+ * Add or edit a farmer. One dialog for both, because the fields are identical
+ * and two would drift — the same call the customers hub made.
+ *
+ * A farmer has no "type" (customers do): every farmer is the same kind of
+ * relationship, milk in and money out. It has an address instead, because the
+ * owner sometimes has to go and find them.
+ */
+export function FarmerDialog({
+  open,
+  onOpenChange,
+  mode,
+  initial,
+  isPending,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  mode: "create" | "edit";
+  initial?: { name: string; phone: string | null; address: string | null };
+  isPending: boolean;
+  onSubmit: (values: {
+    name: string;
+    phone: string | null;
+    address: string | null;
+  }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+
+  // Reseed whenever the dialog opens, so editing farmer B never shows farmer
+  // A's details left over from the last time it was used.
+  useEffect(() => {
+    if (!open) return;
+    setName(initial?.name ?? "");
+    setPhone(initial?.phone ?? "");
+    setAddress(initial?.address ?? "");
+  }, [open, initial]);
+
+  const trimmed = name.trim();
+  const canSubmit = trimmed.length > 0 && !isPending;
+
+  function submit() {
+    if (!canSubmit) return;
+    onSubmit({
+      name: trimmed,
+      phone: phone.trim() || null,
+      address: address.trim() || null,
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !isPending && onOpenChange(next)}>
+      <DialogContent className="rounded-xl sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {mode === "create" ? "Add farmer" : "Edit farmer"}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === "create"
+              ? "The people who deliver milk to you."
+              : "Changing these details doesn't affect past deliveries or the balance."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="farmer-name">Name</Label>
+            <Input
+              id="farmer-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. Ali Muhammad"
+              className="h-11 rounded-lg"
+              autoComplete="off"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="farmer-phone">Phone (optional)</Label>
+            <Input
+              id="farmer-phone"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="0300-1234567"
+              inputMode="tel"
+              className="h-11 rounded-lg"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="farmer-address">Address (optional)</Label>
+            <Input
+              id="farmer-address"
+              value={address}
+              onChange={(event) => setAddress(event.target.value)}
+              placeholder="Village or area"
+              className="h-11 rounded-lg"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            variant="outline"
+            className="h-11 rounded-lg"
+            disabled={isPending}
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            className={cn("h-11 rounded-lg", MODULE_BUTTON_CLASS.emerald)}
+            disabled={!canSubmit}
+            onClick={submit}
+          >
+            {isPending ? (
+              <>
+                <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+                Saving…
+              </>
+            ) : mode === "create" ? (
+              "Add farmer"
+            ) : (
+              "Save changes"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
