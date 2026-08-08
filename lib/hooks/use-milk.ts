@@ -12,10 +12,16 @@
  * They are set once in components/providers/query-provider.tsx — see the client
  * data-fetching note in CLAUDE.md.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 
 import { api } from "@/lib/api-client";
 import { customerKeys } from "@/lib/hooks/use-customers";
+import { invalidateReports } from "@/lib/hooks/use-reports";
 
 // ---------------------------------------------------------------------------
 // Shapes
@@ -184,6 +190,26 @@ export const milkKeys = {
     [...milkKeys.all, "sales", filters] as const,
 };
 
+/**
+ * Everything a milk write changes.
+ *
+ * Deliveries and farmer purchases move the REPORTS milk block (litres received,
+ * milk value, purchases deducted, net cost), and milk sales move revenue too —
+ * so a milk write that only invalidated `milkKeys` left the dashboard stale in
+ * exactly the same way sales did.
+ *
+ * Applied to every milk mutation rather than only the money-moving ones: an
+ * invalidation on a farmer rename is harmless (unmounted queries are merely
+ * MARKED stale, never refetched), and one rule is easier to keep correct than a
+ * per-mutation judgement about whether a figure moved.
+ */
+function invalidateMilk(queryClient: QueryClient) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    invalidateReports(queryClient),
+  ]);
+}
+
 function buildQuery(params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   for (const key of Object.keys(params)) {
@@ -273,7 +299,7 @@ export function useCreateFarmer() {
       phone?: string | null;
       address?: string | null;
     }) => api.post<FarmerWithBalance>("/api/milk/farmers", input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -290,7 +316,7 @@ export function useUpdateFarmer() {
       address?: string | null;
       isActive?: boolean;
     }) => api.patch<Farmer>(`/api/milk/farmers/${id}`, patch),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -304,7 +330,7 @@ export function useRetireFarmer() {
         netBalanceOwed: number;
         message: string;
       }>(`/api/milk/farmers/${id}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -322,7 +348,7 @@ export function useCreateDelivery(farmerId: string) {
         `/api/milk/farmers/${farmerId}/deliveries`,
         input
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -344,7 +370,7 @@ export function useUpdateDelivery(farmerId: string) {
         `/api/milk/farmers/${farmerId}/deliveries/${deliveryId}`,
         patch
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -355,7 +381,7 @@ export function useDeleteDelivery(farmerId: string) {
       api.delete<{ deleted: "hard"; id: string; balance: FarmerBalance }>(
         `/api/milk/farmers/${farmerId}/deliveries/${deliveryId}`
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -372,7 +398,7 @@ export function useCreatePurchase(farmerId: string) {
         `/api/milk/farmers/${farmerId}/purchases`,
         input
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -393,7 +419,7 @@ export function useUpdatePurchase(farmerId: string) {
         `/api/milk/farmers/${farmerId}/purchases/${purchaseId}`,
         patch
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -404,7 +430,7 @@ export function useDeletePurchase(farmerId: string) {
       api.delete<{ deleted: "hard"; id: string; balance: FarmerBalance }>(
         `/api/milk/farmers/${farmerId}/purchases/${purchaseId}`
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -421,7 +447,7 @@ export function useSaveQuickEntry() {
       }[];
     }) =>
       api.post<QuickEntryResult>("/api/milk/deliveries/quick-entry", input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: milkKeys.all }),
+    onSuccess: () => invalidateMilk(queryClient),
   });
 }
 
@@ -437,7 +463,7 @@ export function useCreateMilkSale() {
     }) =>
       api.post<{ sale: MilkSale; balance: unknown }>("/api/milk/sales", input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: milkKeys.all });
+      await invalidateMilk(queryClient);
       // A milk sale is a receivable too — see the note above.
       await queryClient.invalidateQueries({ queryKey: customerKeys.all });
     },
@@ -462,7 +488,7 @@ export function useUpdateMilkSale() {
         patch
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: milkKeys.all });
+      await invalidateMilk(queryClient);
       await queryClient.invalidateQueries({ queryKey: customerKeys.all });
     },
   });
@@ -474,7 +500,7 @@ export function useDeleteMilkSale() {
     mutationFn: (id: string) =>
       api.delete<{ deleted: "hard"; id: string }>(`/api/milk/sales/${id}`),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: milkKeys.all });
+      await invalidateMilk(queryClient);
       await queryClient.invalidateQueries({ queryKey: customerKeys.all });
     },
   });

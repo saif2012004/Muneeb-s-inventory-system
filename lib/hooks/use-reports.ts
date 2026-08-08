@@ -8,7 +8,7 @@
  * recomputes a total; it renders what lib/reports.ts calculated, which in turn
  * calls the receivables and milk helpers rather than re-deriving them.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api-client";
 import type {
@@ -68,6 +68,30 @@ export const reportKeys = {
   topProducts: (module: ProductModule, period: ReportPeriod, limit: number) =>
     [...reportKeys.all, "top-products", module, period, limit] as const,
 };
+
+/**
+ * Mark every reports query stale after something changed the underlying money.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS
+ * ---------------------------------------------------------------------------
+ * The dashboard was not updating after a sale. The sale mutations invalidated
+ * only their own module's list, so `/reports` kept serving whatever TanStack
+ * Query had cached — the owner recorded a sale, opened Reports, and saw the old
+ * totals until they hard-reloaded.
+ *
+ * Invalidating the ROOT key (`["reports"]`) covers summary, trend, top-products
+ * and balances in one call, and keeps working when a new reports query is added
+ * later. Every mutation that moves a figure the dashboard shows must call this.
+ *
+ * Invalidation is cheap when the user is elsewhere: queries that are not
+ * currently mounted are only MARKED stale, not refetched, so recording a sale
+ * does not fire six balance queries in the background — they run when the
+ * dashboard is next opened.
+ */
+export function invalidateReports(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: reportKeys.all });
+}
 
 export function useReportSummary(period: ReportPeriod) {
   return useQuery({

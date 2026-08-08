@@ -234,9 +234,16 @@ export function ReportsDashboard() {
         {/* These two wait on `balancesQuery`, not on the page. Their own
             skeletons mean the rest of the dashboard is usable while the six
             balance queries are still running. */}
+        {/* `failed` is passed separately from `loading` on purpose. These are
+            money tiles: if the request fails, `data` is undefined and a naive
+            `?? 0` renders a confident "Rs. 0" — telling the owner nothing is
+            owed when the truth is simply unknown. A dash and a retry is honest;
+            a fabricated zero is not. */}
         <StatCard
           label="Outstanding receivables"
           loading={balancesQuery.isPending}
+          failed={balancesQuery.isError}
+          onRetry={() => balancesQuery.refetch()}
           value={balancesQuery.data?.receivables.totalOutstanding ?? 0}
           tone="text-rose-600"
           border="border-rose-100"
@@ -248,6 +255,8 @@ export function ReportsDashboard() {
         <StatCard
           label="Owed to farmers"
           loading={balancesQuery.isPending}
+          failed={balancesQuery.isError}
+          onRetry={() => balancesQuery.refetch()}
           value={balancesQuery.data?.farmers.totalOwed ?? 0}
           tone="text-emerald-600"
           border="border-emerald-100"
@@ -275,6 +284,27 @@ export function ReportsDashboard() {
             bakeryTrend.isPending ||
             milkTrend.isPending ? (
             <Skeleton className="h-[280px] w-full rounded-lg" />
+          ) : beveragesTrend.isError ||
+            bakeryTrend.isError ||
+            milkTrend.isError ? (
+            /* An errored trend query would otherwise fall through to the
+               chart's empty state and read as "no sales in this period" —
+               claiming the business sold nothing when the request simply
+               failed. */
+            <div className="flex h-[140px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-200 px-4 text-center text-sm text-zinc-500">
+              <span>Couldn&apos;t load the trend.</span>
+              <button
+                type="button"
+                onClick={() => {
+                  beveragesTrend.refetch();
+                  bakeryTrend.refetch();
+                  milkTrend.refetch();
+                }}
+                className="min-h-[44px] font-medium text-zinc-700 underline underline-offset-2 hover:text-zinc-900"
+              >
+                Try again
+              </button>
+            </div>
           ) : (
             <RevenueTrendChart
               beverages={beveragesTrend.data ?? []}
@@ -297,6 +327,8 @@ export function ReportsDashboard() {
             products={topBeverages.data ?? []}
             colour="#2563eb"
             isLoading={topBeverages.isPending}
+            isError={topBeverages.isError}
+            onRetry={() => topBeverages.refetch()}
             emptyMessage="No beverage sales in this period."
           />
         </section>
@@ -308,6 +340,8 @@ export function ReportsDashboard() {
             products={topBakery.data ?? []}
             colour="#d97706"
             isLoading={topBakery.isPending}
+            isError={topBakery.isError}
+            onRetry={() => topBakery.refetch()}
             emptyMessage="No bakery sales in this period."
           />
         </section>
@@ -418,6 +452,8 @@ function StatCard({
   border,
   hint,
   loading,
+  failed,
+  onRetry,
   countUp,
 }: {
   label: string;
@@ -426,6 +462,9 @@ function StatCard({
   border: string;
   hint?: string;
   loading: boolean;
+  /** The query errored — show that, never a stand-in zero. */
+  failed?: boolean;
+  onRetry?: () => void;
   countUp?: boolean;
 }) {
   return (
@@ -435,6 +474,19 @@ function StatCard({
       </p>
       {loading ? (
         <Skeleton className="mt-3 h-9 w-32 rounded-lg" />
+      ) : failed ? (
+        <>
+          <p className="mt-2 text-[28px] font-bold leading-tight text-zinc-300">
+            —
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-1 inline-flex min-h-[44px] items-center text-sm font-medium text-zinc-600 underline underline-offset-2 hover:text-zinc-900"
+          >
+            Couldn&apos;t load — retry
+          </button>
+        </>
       ) : countUp ? (
         <AnimatedMoney
           value={value}
@@ -446,7 +498,7 @@ function StatCard({
           {formatPKR(value)}
         </p>
       )}
-      {hint ? (
+      {hint && !failed ? (
         <p className="mt-1 line-clamp-2 text-sm text-zinc-500">{hint}</p>
       ) : null}
     </div>

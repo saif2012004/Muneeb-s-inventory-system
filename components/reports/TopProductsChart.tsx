@@ -31,15 +31,35 @@ export function TopProductsChart({
   products,
   colour,
   isLoading,
+  isError,
+  onRetry,
   emptyMessage,
 }: {
   products: TopProduct[];
   colour: string;
   isLoading: boolean;
+  /** Distinguished from "empty" — a failed request is not "nothing sold". */
+  isError?: boolean;
+  onRetry?: () => void;
   emptyMessage: string;
 }) {
   if (isLoading) {
     return <Skeleton className="h-[200px] w-full rounded-lg" />;
+  }
+
+  if (isError) {
+    return (
+      <div className="flex h-[200px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-200 px-4 text-center text-sm text-zinc-500">
+        <span>Couldn&apos;t load this list.</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="min-h-[44px] font-medium text-zinc-700 underline underline-offset-2 hover:text-zinc-900"
+        >
+          Try again
+        </button>
+      </div>
+    );
   }
 
   if (products.length === 0) {

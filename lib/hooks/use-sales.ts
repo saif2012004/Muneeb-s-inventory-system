@@ -19,6 +19,8 @@ import {
 } from "@tanstack/react-query";
 
 import { api } from "@/lib/api-client";
+import { customerKeys } from "@/lib/hooks/use-customers";
+import { invalidateReports } from "@/lib/hooks/use-reports";
 import type { SaleModule } from "@/lib/sale-modules";
 import type { CustomerType } from "@/lib/validations/customers";
 
@@ -111,8 +113,25 @@ export const saleKeys = {
     [...saleKeys.module(module), "detail", id] as const,
 };
 
-function invalidateModule(queryClient: QueryClient, module: SaleModule) {
-  return queryClient.invalidateQueries({ queryKey: saleKeys.module(module) });
+/**
+ * Everything a sale changes.
+ *
+ * A sale is not just a row in one list. It also moves:
+ *   - the REPORTS dashboard (revenue, counts, trend, top products), and
+ *   - that CUSTOMER's outstanding balance, since billing is derived from sales.
+ *
+ * Invalidating only this module's list is what made the dashboard show stale
+ * totals after recording a sale — the owner had to hard-reload to see their own
+ * money. Queries that aren't currently mounted are merely MARKED stale rather
+ * than refetched, so this costs nothing while the owner is still on the sale
+ * screen; the work happens when they next open the affected screen.
+ */
+function invalidateAfterSale(queryClient: QueryClient, module: SaleModule) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: saleKeys.module(module) }),
+    invalidateReports(queryClient),
+    queryClient.invalidateQueries({ queryKey: customerKeys.all }),
+  ]);
 }
 
 function buildQuery(filters: SaleListFilters): string {
@@ -168,7 +187,7 @@ export function useCreateSale(module: SaleModule) {
   return useMutation({
     mutationFn: (input: SaleCreateInput) =>
       api.post<SaleDetail>(module.apiBase, input),
-    onSuccess: () => invalidateModule(queryClient, module),
+    onSuccess: () => invalidateAfterSale(queryClient, module),
   });
 }
 
@@ -179,6 +198,6 @@ export function useDeleteSale(module: SaleModule) {
       api.delete<{ deleted: "hard"; id: string; itemCount: number }>(
         `${module.apiBase}/${id}`
       ),
-    onSuccess: () => invalidateModule(queryClient, module),
+    onSuccess: () => invalidateAfterSale(queryClient, module),
   });
 }

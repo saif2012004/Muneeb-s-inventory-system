@@ -28,9 +28,41 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // Avoid refetching immediately on the client after SSR.
-            staleTime: 30 * 1000,
+            /**
+             * CACHING IS WORTH MORE HERE THAN IN A NORMAL APP.
+             *
+             * A single database round trip from the deployed function to
+             * Supabase costs about **1.07 seconds** — the function runs in
+             * `iad1` (Washington) and the database is in `ap-northeast-2`
+             * (Seoul). Measured, not estimated. So every avoided refetch is
+             * roughly a second the owner does not wait, and a screen that
+             * refetches on every visit feels broken on a phone.
+             *
+             * 5 minutes: navigating away and back — the single most common
+             * thing the owner does — serves instantly from cache with no
+             * request at all. This is safe because **every mutation
+             * invalidates explicitly**, so a write is always reflected
+             * immediately; `staleTime` only governs background refreshing of
+             * data nobody changed.
+             */
+            staleTime: 5 * 60 * 1000,
+            /**
+             * Keep it in memory well past `staleTime`, so returning to a screen
+             * shows the previous numbers instantly and refreshes behind them,
+             * rather than dropping to skeletons for a second per query.
+             */
+            gcTime: 30 * 60 * 1000,
+            // Single owner, usually one device: a background refetch every time
+            // they switch apps costs seconds and buys nothing.
             refetchOnWindowFocus: false,
+            /**
+             * `refetchOnMount` is deliberately LEFT AT ITS DEFAULT ("refetch if
+             * stale"). Setting it to false was tempting — it would skip even
+             * more requests — but it would also mean genuinely stale data never
+             * refreshes on its own, which is how this app got a dashboard that
+             * would not update in the first place. `staleTime` above already
+             * gives the fast path; this keeps the correct one.
+             */
             retry: 1,
             networkMode: "always",
           },
