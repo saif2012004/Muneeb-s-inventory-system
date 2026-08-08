@@ -58,6 +58,10 @@ export const SALE_PRODUCT_SELECT = {
 export const SALE_DETAIL_SELECT = {
   id: true,
   saleDate: true,
+  // The whole-bill discount ACTUALLY APPLIED, read from the sale, never
+  // recomputed. An old bill must show what was charged even after the catalog
+  // price and the owner's usual discount have both moved on.
+  discountPercent: true,
   totalAmount: true,
   notes: true,
   createdAt: true,
@@ -68,6 +72,8 @@ export const SALE_DETAIL_SELECT = {
       productId: true,
       quantity: true,
       unitPrice: true,
+      // Same for the line: the snapshot, not today's value.
+      discountPercent: true,
       lineTotal: true,
       product: {
         select: {
@@ -97,6 +103,8 @@ export type SaleLine = {
   productId: string;
   quantity: number;
   unitPrice: Prisma.Decimal;
+  /** The discount actually applied to this line, snapshotted with the price. */
+  discountPercent: Prisma.Decimal;
   lineTotal: Prisma.Decimal;
 };
 
@@ -187,12 +195,74 @@ export function snapshotUnitPrice(
   return override === undefined ? product.price : new Prisma.Decimal(override);
 }
 
-/** `quantity x unitPrice`, at Decimal precision. */
+// ---------------------------------------------------------------------------
+// Discount
+// ---------------------------------------------------------------------------
+
+/**
+ * THE STACKING ORDER. One place, so the two modules and the UI preview cannot
+ * disagree about what a bill comes to.
+ *
+ *   lineTotal = round(qty x unitPrice x (1 - lineDiscount/100), 2)
+ *   subtotal  = SUM(lineTotal)
+ *   total     = round(subtotal x (1 - saleDiscount/100), 2)
+ *
+ * Rounded to 2dp at BOTH points — after each line, and again after the bill
+ * discount — never by letting a full-precision value drift to the end. Each
+ * lineTotal is a rupee figure the owner can see on the bill, so it has to be a
+ * real 2dp number, and the subtotal must be the sum of the numbers shown rather
+ * than a more precise quantity that happens to print the same.
+ *
+ * Order matters and is NOT commutative once rounding is involved: line-then-bill
+ * and bill-then-line can differ by a paisa. Line first, always.
+ */
+
+/** Money is 2dp. Prisma.Decimal rounds ROUND_HALF_UP by default — verified. */
+export const MONEY_DP = 2;
+
+export function roundMoney(value: Prisma.Decimal): Prisma.Decimal {
+  return value.toDecimalPlaces(MONEY_DP);
+}
+
+/**
+ * `1 - percent/100` as an exact Decimal.
+ *
+ * Kept as a multiplier rather than "compute the discount then subtract it"
+ * because the subtract form drifts: `333 * 0.07` is `23.310000000000002` in
+ * IEEE floats. On Decimal both forms are exact, but the multiplier form is one
+ * operation and one rounding point instead of two.
+ */
+function discountMultiplier(discountPercent: Prisma.Decimal): Prisma.Decimal {
+  return new Prisma.Decimal(1).minus(discountPercent.div(100));
+}
+
+/**
+ * `round(quantity x unitPrice x (1 - discount/100), 2)`.
+ *
+ * Why Decimal and not floats, concretely: 3 x Rs. 12.50 at 33% off is exactly
+ * 25.125, which rounds HALF-UP to **25.13**. In floats the same expression is
+ * 25.124999999999996, which rounds to **25.12** — the owner is short a paisa and
+ * the bill does not foot. That case is in the browser verification.
+ */
 export function computeLineTotal(
   unitPrice: Prisma.Decimal,
-  quantity: number
+  quantity: number,
+  discountPercent: Prisma.Decimal = new Prisma.Decimal(0)
 ): Prisma.Decimal {
-  return unitPrice.mul(quantity);
+  return roundMoney(
+    unitPrice.mul(quantity).mul(discountMultiplier(discountPercent))
+  );
+}
+
+/**
+ * The whole-bill discount, applied to the subtotal of already-discounted lines.
+ * Second and last rounding point.
+ */
+export function applySaleDiscount(
+  subtotal: Prisma.Decimal,
+  discountPercent: Prisma.Decimal
+): Prisma.Decimal {
+  return roundMoney(subtotal.mul(discountMultiplier(discountPercent)));
 }
 
 /** Sum of every line total. The sale's `totalAmount` is never client-supplied. */
@@ -201,6 +271,18 @@ export function sumLineTotals(lines: { lineTotal: Prisma.Decimal }[]): Prisma.De
     (total, line) => total.add(line.lineTotal),
     new Prisma.Decimal(0)
   );
+}
+
+/**
+ * Subtotal -> total in one call, so no route re-derives the second half of the
+ * stacking order by hand.
+ */
+export function computeSaleTotal(
+  lines: { lineTotal: Prisma.Decimal }[],
+  saleDiscountPercent: Prisma.Decimal
+): { subtotal: Prisma.Decimal; total: Prisma.Decimal } {
+  const subtotal = sumLineTotals(lines);
+  return { subtotal, total: applySaleDiscount(subtotal, saleDiscountPercent) };
 }
 
 /**
@@ -285,6 +367,7 @@ export type ExistingSaleLine = {
   productId: string;
   quantity: number;
   unitPrice: Prisma.Decimal;
+  discountPercent: Prisma.Decimal;
 };
 
 /** A line as the client submitted it. `id` absent = a new line. */
@@ -293,6 +376,7 @@ export type SubmittedSaleLine = {
   productId: string;
   quantity: number;
   unitPrice?: number;
+  discountPercent?: number;
 };
 
 export type LineReconciliation = {
@@ -361,11 +445,13 @@ export function reconcileSaleLines(
 
     if (!prior) {
       const unitPrice = snapshotUnitPrice(product, line.unitPrice);
+      const discountPercent = new Prisma.Decimal(line.discountPercent ?? 0);
       creates.push({
         productId: line.productId,
         quantity: line.quantity,
         unitPrice,
-        lineTotal: computeLineTotal(unitPrice, line.quantity),
+        discountPercent,
+        lineTotal: computeLineTotal(unitPrice, line.quantity, discountPercent),
       });
       continue;
     }
@@ -389,12 +475,24 @@ export function reconcileSaleLines(
       repricedItemIds.push(prior.id);
     }
 
+    /**
+     * The discount is a SALE-TIME decision, not a property of the product, so
+     * unlike the price it never re-snapshots on its own: swapping the product on
+     * a line does not change the deal the owner struck. Send a value to change
+     * it, omit it to keep what was stored.
+     */
+    const discountPercent =
+      line.discountPercent !== undefined
+        ? new Prisma.Decimal(line.discountPercent)
+        : prior.discountPercent;
+
     updates.push({
       id: prior.id,
       productId: line.productId,
       quantity: line.quantity,
       unitPrice,
-      lineTotal: computeLineTotal(unitPrice, line.quantity),
+      discountPercent,
+      lineTotal: computeLineTotal(unitPrice, line.quantity, discountPercent),
     });
   }
 

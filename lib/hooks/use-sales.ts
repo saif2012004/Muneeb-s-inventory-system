@@ -57,6 +57,8 @@ export type SaleItem = {
   quantity: number;
   /** The SNAPSHOT taken when the line was written — not today's catalog price. */
   unitPrice: number;
+  /** The discount % ACTUALLY APPLIED to this line, snapshotted with the price. */
+  discountPercent: number;
   lineTotal: number;
   product: {
     id: string;
@@ -76,6 +78,8 @@ export type SaleItem = {
 export type SaleDetail = {
   id: string;
   saleDate: string;
+  /** The whole-bill discount % ACTUALLY APPLIED. Never recomputed. */
+  discountPercent: number;
   totalAmount: number;
   notes: string | null;
   createdAt: string;
@@ -88,7 +92,15 @@ export type SaleCreateInput = {
   /** `yyyy-MM-dd`, read as a Karachi calendar day by the server. */
   saleDate: string;
   notes?: string;
-  items: { productId: string; quantity: number; unitPrice?: number }[];
+  /** Whole-bill discount %, applied to the subtotal of discounted lines. */
+  discountPercent?: number;
+  items: {
+    productId: string;
+    quantity: number;
+    unitPrice?: number;
+    /** Per-line discount %, applied before the whole-bill one. */
+    discountPercent?: number;
+  }[];
 };
 
 export type SaleListFilters = {

@@ -42,6 +42,30 @@ const notes = z
   .nullable()
   .optional();
 
+/**
+ * A discount PERCENTAGE — the owner types `5` and means 5%.
+ *
+ * Clamped 0–100 at the edge, deliberately, rather than trusted and clamped in
+ * the maths. Above 100 would make a line total NEGATIVE, which the Decimal(10,2)
+ * column would happily store and every "revenue" figure in reports would then
+ * silently subtract. Below 0 would be a mark-up wearing a discount's name.
+ *
+ * Not an integer: 7.5% is a real thing a shop gives. Two decimal places matches
+ * the DECIMAL(5,2) column, so a value that validates always survives the round
+ * trip unchanged.
+ *
+ * Defaults to 0 rather than being nullable — null and 0% mean the same thing,
+ * and this project has already lost time to exactly that ambiguity (a bakery
+ * product storing `discountPercent = 0` instead of null broke a falsy check and
+ * printed "0% off" on every row; see docs/phase-4-bakery-module.md).
+ */
+const discountPercent = z
+  .number({ message: "Discount must be a number" })
+  .min(0, { message: "Discount cannot be negative" })
+  .max(100, { message: "Discount cannot be more than 100%" })
+  .multipleOf(0.01, { message: "Discount can have at most 2 decimal places" })
+  .default(0);
+
 function isRealDate(value: string): boolean {
   return !Number.isNaN(new Date(value).getTime());
 }
@@ -80,6 +104,8 @@ export const saleItemCreateSchema = z.object({
   productId: id,
   quantity,
   unitPrice: money.optional(),
+  /** Per-LINE discount. Applied before the whole-bill discount. */
+  discountPercent,
 });
 
 /**
@@ -99,6 +125,8 @@ export const saleCreateSchema = z.object({
   customerId: id,
   saleDate,
   notes,
+  /** Whole-bill discount, applied to the subtotal of already-discounted lines. */
+  discountPercent,
   items: z
     .array(saleItemCreateSchema)
     .min(1, { message: "Add at least one item to the sale." })
@@ -113,6 +141,9 @@ export const saleUpdateSchema = z
   .object({
     saleDate: saleDate.optional(),
     notes,
+    // Optional here (unlike create): omitting it leaves the stored bill
+    // discount alone, so a header-only edit cannot silently reprice the sale.
+    discountPercent: discountPercent.optional(),
     items: z
       .array(saleItemUpdateSchema)
       .min(1, { message: "A sale must keep at least one item." })

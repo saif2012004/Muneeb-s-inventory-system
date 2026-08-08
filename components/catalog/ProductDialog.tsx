@@ -34,7 +34,6 @@ import {
 import { formatSize, titleCase } from "@/lib/catalog-display";
 import type { Product, ProductWriteInput } from "@/lib/hooks/use-catalog";
 import {
-  DISCOUNT_PERCENTS,
   PRODUCT_SHAPES,
   PRODUCT_SIZES,
   PRODUCT_UNITS,
@@ -212,15 +211,14 @@ export function ProductDialog({
                   label: formatSize(value),
                 }))}
               />
-              <SelectField
-                form={form}
-                name="discountPercent"
-                label="Discount"
-                options={DISCOUNT_PERCENTS.map((value) => ({
-                  value: String(value),
-                  label: value === 0 ? "Full price" : `${value}% off`,
-                }))}
-              />
+              {/* NO DISCOUNT FIELD. Removed deliberately when discount became a
+                  sale-time percentage: leaving it here would let the owner
+                  recreate the "Pepsi 1.5L (30% off)" variant rows that were
+                  just deleted, and the same bottle would once again be two
+                  products. A discount now belongs to a bill, not to the
+                  catalog. The Product.discountPercent COLUMN still exists and
+                  is dropped in a later migration — see the discount-rework
+                  response in docs/responses/. */}
               <SelectField
                 form={form}
                 name="qualityTier"

@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
-import { karachiToday, toDateKey } from "@/lib/format";
+import { formatPKR, karachiToday, toDateKey } from "@/lib/format";
 import { useProducts } from "@/lib/hooks/use-catalog";
 import { useCustomers } from "@/lib/hooks/use-customers";
 import { useCreateSale } from "@/lib/hooks/use-sales";
@@ -34,6 +34,7 @@ import {
   emptySaleLine,
   newSaleFormSchema,
   previewLineTotal,
+  previewSaleTotal,
   type SaleFormOutput,
   type SaleFormValues,
 } from "@/lib/validations/sale-form";
@@ -70,6 +71,7 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
       customerId: "",
       saleDate: karachiToday(),
       notes: "",
+      discountPercent: "",
       items: [emptySaleLine()],
     },
     // Errors appear once a field has been touched and correct live after —
@@ -99,11 +101,25 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
   // The live running total. Watched rather than derived from `fields`, because
   // `fields` is a snapshot taken at render and would lag every keystroke.
   const watchedItems = useWatch({ control: form.control, name: "items" });
-  const runningTotal = (watchedItems ?? []).reduce(
+  const billDiscount = useWatch({ control: form.control, name: "discountPercent" }) ?? "";
+
+  /**
+   * The bill, in the order the server computes it (lib/sales.ts):
+   * line discounts are already inside each line total, those sum to a subtotal,
+   * and the whole-bill discount applies to that subtotal — never the reverse.
+   */
+  const subtotal = (watchedItems ?? []).reduce(
     (total, item) =>
-      total + previewLineTotal(item?.quantity ?? "", item?.unitPrice ?? ""),
+      total +
+      previewLineTotal(
+        item?.quantity ?? "",
+        item?.unitPrice ?? "",
+        item?.discountPercent ?? ""
+      ),
     0
   );
+  const runningTotal = previewSaleTotal(subtotal, billDiscount);
+  const billSaving = subtotal - runningTotal;
 
   const customers = customersQuery.data ?? [];
 
@@ -181,6 +197,7 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
           customerId: values.customerId,
           saleDate: toDateKey(values.saleDate),
           notes: values.notes || undefined,
+          discountPercent: values.discountPercent,
           // unitPrice is ALWAYS sent: the owner may be pricing a 0-priced
           // seeded product at the point of sale, and the server treats an
           // explicit price as the snapshot (Gotcha 5).
@@ -188,6 +205,7 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
             productId: item.productId,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            discountPercent: item.discountPercent,
           })),
         },
         {
@@ -222,6 +240,16 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
   function addAnother() {
     form.setValue("items", [emptySaleLine()]);
     form.setValue("notes", "");
+    /**
+     * The whole-bill discount is CLEARED, like the notes and unlike the customer.
+     *
+     * Found in browser testing: it used to persist, so recording a 5%-off bill
+     * and tapping "Add another" silently applied 5% to the next sale too. A
+     * discount is a decision about ONE bill — a per-line one goes with the line
+     * that was just cleared, and this is the same thing at bill level. Carrying
+     * it forward gives money away without anyone typing anything.
+     */
+    form.setValue("discountPercent", "");
     form.clearErrors();
     setJustSaved(null);
   }
@@ -385,6 +413,62 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
               <Plus className="mr-2 size-4" aria-hidden />
               Add item
             </Button>
+          </section>
+
+          {/* Whole-bill discount + the breakdown -------------------------- */}
+          <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
+            <div className="space-y-1.5">
+              <Label htmlFor="bill-discount">
+                Whole-bill discount % (optional)
+              </Label>
+              <Input
+                id="bill-discount"
+                inputMode="decimal"
+                autoComplete="off"
+                placeholder="0"
+                className={cn(
+                  "num h-11 rounded-lg",
+                  form.formState.errors.discountPercent &&
+                    "border-rose-400 focus-visible:ring-rose-400"
+                )}
+                {...form.register("discountPercent")}
+              />
+              {form.formState.errors.discountPercent ? (
+                <p className="text-sm text-rose-600">
+                  {form.formState.errors.discountPercent.message}
+                </p>
+              ) : (
+                <p className="text-sm text-zinc-500">
+                  Applied after any per-line discounts.
+                </p>
+              )}
+            </div>
+
+            {/* The arithmetic, shown. The owner should be able to SEE how the
+                total was reached rather than trust a single figure — this is
+                the screen where a mistyped percentage costs real money. */}
+            <dl className="space-y-1.5 border-t border-zinc-100 pt-3 text-sm">
+              <div className="flex items-baseline justify-between">
+                <dt className="text-zinc-500">Subtotal after line discounts</dt>
+                <dd className="num font-medium text-zinc-900">
+                  {formatPKR(subtotal)}
+                </dd>
+              </div>
+              {billSaving > 0 ? (
+                <div className="flex items-baseline justify-between">
+                  <dt className="text-zinc-500">Bill discount</dt>
+                  <dd className="num font-medium text-emerald-600">
+                    −{formatPKR(billSaving)}
+                  </dd>
+                </div>
+              ) : null}
+              <div className="flex items-baseline justify-between border-t border-zinc-100 pt-1.5">
+                <dt className="font-medium text-zinc-900">Total</dt>
+                <dd className={cn("num font-semibold", accent.text)}>
+                  {formatPKR(runningTotal)}
+                </dd>
+              </div>
+            </dl>
           </section>
 
           <section className="space-y-1.5">

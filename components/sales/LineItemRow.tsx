@@ -63,10 +63,19 @@ export function LineItemRow({
   const productId = row?.productId ?? "";
   const quantity = row?.quantity ?? "";
   const unitPrice = row?.unitPrice ?? "";
+  const discountPercent = row?.discountPercent ?? "";
 
   const selected = productId ? optionsById.get(productId) : undefined;
   const unit = selected?.product.unit ?? null;
-  const lineTotal = previewLineTotal(quantity, unitPrice);
+  const lineTotal = previewLineTotal(quantity, unitPrice, discountPercent);
+  /**
+   * What the line WOULD have been without its discount, shown struck through
+   * beside the total. The discount is the thing the owner is most likely to
+   * mistype (a stray 0 turns 5% into 50%), and a bare "Rs. 465" gives them
+   * nothing to check it against — "Rs. 930 → Rs. 465" is immediately wrong-looking.
+   */
+  const undiscountedTotal = previewLineTotal(quantity, unitPrice);
+  const hasDiscount = lineTotal !== undiscountedTotal;
 
   const errors = form.formState.errors.items?.[index];
   const priceIsZero = unitPrice.trim() === "0";
@@ -181,12 +190,41 @@ export function LineItemRow({
           </div>
         </div>
 
+        {/* Line discount. Its own row rather than a third column: at 360px three
+            numeric fields would each be under the 44px touch target, and this is
+            the field most owners leave blank. */}
+        <div className="space-y-1.5">
+          <Label htmlFor={`item-${index}-discount`}>Discount % (optional)</Label>
+          <Input
+            id={`item-${index}-discount`}
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="0"
+            className={cn(
+              "num h-11 rounded-lg",
+              errors?.discountPercent &&
+                "border-rose-400 focus-visible:ring-rose-400"
+            )}
+            {...form.register(`items.${index}.discountPercent`)}
+          />
+          {errors?.discountPercent ? (
+            <p className="text-sm text-rose-600">
+              {errors.discountPercent.message}
+            </p>
+          ) : null}
+        </div>
+
         <div className="flex items-baseline justify-between border-t border-zinc-100 pt-3">
           <span className="num text-sm text-zinc-500">
             {/* Spells the unit out: "3 cottons", "12 pieces". */}
             {quantitySummary ? `${quantitySummary} · Line total` : "Line total"}
           </span>
           <span className="num text-[15px] font-semibold text-zinc-900">
+            {hasDiscount ? (
+              <span className="mr-2 font-normal text-zinc-400 line-through">
+                {formatPKR(undiscountedTotal)}
+              </span>
+            ) : null}
             {formatPKR(lineTotal)}
           </span>
         </div>

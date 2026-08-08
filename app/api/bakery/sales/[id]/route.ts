@@ -11,7 +11,7 @@ import {
   isSaleProblem,
   loadSaleProducts,
   reconcileSaleLines,
-  sumLineTotals,
+  computeSaleTotal,
 } from "@/lib/sales";
 import { serialize } from "@/lib/serialize";
 import { saleUpdateSchema } from "@/lib/validations/sales";
@@ -79,14 +79,25 @@ export async function PATCH(
     const parsed = saleUpdateSchema.safeParse(await request.json());
     if (!parsed.success) return fail(firstIssue(parsed.error), 400);
 
-    const { saleDate, notes, items } = parsed.data;
+    const { saleDate, notes, discountPercent, items } = parsed.data;
 
     const existing = await prisma.bakerySale.findUnique({
       where: { id: params.id },
       select: {
         id: true,
+        discountPercent: true,
         items: {
-          select: { id: true, productId: true, quantity: true, unitPrice: true },
+          select: {
+            id: true,
+            productId: true,
+            quantity: true,
+            unitPrice: true,
+            // The line's stored discount, so reconcile keeps it when the client
+            // edits a quantity without resending the discount.
+            discountPercent: true,
+            // Needed to re-foot the bill when ONLY the whole-bill % changes.
+            lineTotal: true,
+          },
         },
       },
     });
@@ -95,12 +106,32 @@ export async function PATCH(
     const header: Prisma.BakerySaleUpdateInput = {};
     if (saleDate !== undefined) header.saleDate = saleDate;
     if (notes !== undefined) header.notes = notes ?? null;
+    if (discountPercent !== undefined) header.discountPercent = discountPercent;
 
-    // ----- Header-only edit: lines untouched, nothing to recompute -----------
+    /**
+     * The bill discount that applies AFTER this edit: the submitted one if the
+     * client sent it, otherwise whatever is already stored.
+     */
+    const effectiveSaleDiscount = new Prisma.Decimal(
+      discountPercent ?? existing.discountPercent
+    );
+
+    // ----- Header-only edit: lines untouched --------------------------------
+    // NOT "nothing to recompute" any more. Changing the whole-bill discount
+    // without touching a single line still moves the total, and the stored
+    // lineTotals already carry their own line discounts — so the bill is
+    // re-footed from them rather than left stale at the old figure.
     if (items === undefined) {
+      const headerOnly = { ...header };
+      if (discountPercent !== undefined) {
+        const { total } = computeSaleTotal(existing.items, effectiveSaleDiscount);
+        const tooLargeNow = checkTotalFits(total);
+        if (tooLargeNow) return fail(tooLargeNow.message, tooLargeNow.status);
+        headerOnly.totalAmount = total;
+      }
       const sale = await prisma.bakerySale.update({
         where: { id: existing.id },
-        data: header,
+        data: headerOnly,
         select: SALE_DETAIL_SELECT,
       });
       return ok({ ...serialize(sale), repricedItemIds: [] as string[] });
@@ -136,7 +167,10 @@ export async function PATCH(
 
     const { updates, creates, removedIds, repricedItemIds } = reconciled;
 
-    const totalAmount = sumLineTotals([...updates, ...creates]);
+    const { total: totalAmount } = computeSaleTotal(
+      [...updates, ...creates],
+      effectiveSaleDiscount
+    );
     const tooLarge = checkTotalFits(totalAmount);
     if (tooLarge) return fail(tooLarge.message, tooLarge.status);
 

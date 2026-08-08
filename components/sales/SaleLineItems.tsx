@@ -54,8 +54,20 @@ export function SaleLineItems({
     );
   }
 
+  // `7.50` reads as a typo on a bill; `7.5` and `7` read as percentages. The
+  // column is DECIMAL(5,2), so trailing zeros arrive from the server.
+  function trimPercent(value: number): string {
+    return String(Number(value));
+  }
+
   const sale = saleQuery.data;
   if (!sale) return null;
+
+  // Derived for DISPLAY only — the stored `totalAmount` is the authority. This
+  // is the gap between the lines and the bottom line, which is exactly what the
+  // whole-bill discount took off.
+  const subtotal = sale.items.reduce((sum, item) => sum + item.lineTotal, 0);
+  const billSaving = subtotal - sale.totalAmount;
 
   return (
     <div className="space-y-2 border-t border-zinc-100 bg-zinc-50/60 p-4">
@@ -66,7 +78,14 @@ export function SaleLineItems({
           formatSize(item.product.size) !== "—" ? formatSize(item.product.size) : null,
           item.product.qualityTier ? titleCase(item.product.qualityTier) : null,
           item.product.shape ? titleCase(item.product.shape) : null,
-          item.product.discountPercent ? `${item.product.discountPercent}% off` : null,
+          // The discount stored ON THE LINE, not `product.discountPercent`.
+          // That distinction is the whole point of the rework: the product no
+          // longer carries a discount, and an old bill must keep showing the
+          // deal that was actually struck even after the owner's usual rate
+          // changes. Reading it off the product would make history mutable.
+          Number(item.discountPercent) > 0
+            ? `${trimPercent(item.discountPercent)}% off`
+            : null,
         ]
           .filter(Boolean)
           .join(" · ");
@@ -97,6 +116,20 @@ export function SaleLineItems({
           </div>
         );
       })}
+
+      {/* The whole-bill discount, if one was given. Shown as its own row rather
+          than folded into the total, so the bill explains itself: the lines sum
+          to the subtotal, and this is what came off the bottom. */}
+      {Number(sale.discountPercent) > 0 ? (
+        <div className="flex items-baseline justify-between gap-3 rounded-lg bg-white px-3 py-2.5">
+          <p className="text-sm text-zinc-500">
+            Whole-bill discount ({trimPercent(sale.discountPercent)}%)
+          </p>
+          <span className="num shrink-0 text-sm font-semibold text-emerald-600">
+            −{formatPKR(billSaving)}
+          </span>
+        </div>
+      ) : null}
 
       {sale.notes ? (
         <p className="px-1 pt-1 text-sm text-zinc-500">

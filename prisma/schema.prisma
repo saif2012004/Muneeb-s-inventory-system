@@ -89,6 +89,7 @@ model BeverageSale {
   customerId  String
   customer    Customer           @relation(fields: [customerId], references: [id])
   saleDate    DateTime           @default(now())
+  discountPercent Decimal          @default(0) @db.Decimal(5, 2)
   totalAmount Decimal            @db.Decimal(10, 2)
   notes       String?
   items       BeverageSaleItem[]
@@ -105,6 +106,7 @@ model BeverageSaleItem {
   product   Product      @relation(fields: [productId], references: [id])
   quantity  Int
   unitPrice Decimal      @db.Decimal(10, 2) // snapshot at time of sale
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
   lineTotal Decimal      @db.Decimal(10, 2)
 }
 
@@ -117,6 +119,7 @@ model BakerySale {
   customerId  String
   customer    Customer         @relation(fields: [customerId], references: [id])
   saleDate    DateTime         @default(now())
+  discountPercent Decimal        @default(0) @db.Decimal(5, 2)
   totalAmount Decimal          @db.Decimal(10, 2)
   notes       String?
   items       BakerySaleItem[]
@@ -133,6 +136,7 @@ model BakerySaleItem {
   product   Product    @relation(fields: [productId], references: [id])
   quantity  Int
   unitPrice Decimal    @db.Decimal(10, 2) // snapshot at time of sale
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
   lineTotal Decimal    @db.Decimal(10, 2)
 }
 

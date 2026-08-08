@@ -39,11 +39,43 @@ function toNumber(value: string): number | null {
  * server-side). This exists to answer "what am I charging?" as they type,
  * nothing more.
  */
-export function previewLineTotal(quantity: string, unitPrice: string): number {
+export function previewLineTotal(
+  quantity: string,
+  unitPrice: string,
+  discountPercent = ""
+): number {
   const qty = toNumber(quantity) ?? 0;
   const price = toNumber(unitPrice) ?? 0;
   if (qty <= 0 || price < 0) return 0;
-  return qty * price;
+  // Clamped rather than rejected: a half-typed "1000" in the discount box
+  // shouldn't blank the whole preview or show a negative line.
+  const discount = Math.min(Math.max(toNumber(discountPercent) ?? 0, 0), 100);
+  return round2(qty * price * (1 - discount / 100));
+}
+
+/**
+ * The whole-bill discount applied to a subtotal, for the live preview only.
+ *
+ * Mirrors `applySaleDiscount` in lib/sales.ts — line discounts first, then this
+ * on their subtotal. The server recomputes both on Decimal and its answer is the
+ * one that gets stored; this exists so the owner can watch the bill add up.
+ */
+export function previewSaleTotal(
+  subtotal: number,
+  discountPercent: string
+): number {
+  const discount = Math.min(Math.max(toNumber(discountPercent) ?? 0, 0), 100);
+  return round2(subtotal * (1 - discount / 100));
+}
+
+/**
+ * 2dp, half-up, matching the server's Decimal rounding closely enough for a
+ * preview. `Number.EPSILON` nudges the classic float case: 25.124999999999996
+ * would otherwise round DOWN to 25.12 while the server stores 25.13, and the
+ * owner would watch the total change by a paisa on save.
+ */
+function round2(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 const quantity = z
@@ -92,10 +124,38 @@ const unitPrice = z
     return parsed;
   });
 
+/**
+ * A discount percentage as typed. EMPTY MEANS NO DISCOUNT — the common case is
+ * no discount at all, so requiring a "0" in every box would be daily friction
+ * for the sake of the rare case. Blank transforms to 0.
+ */
+const discountPercent = z
+  .string()
+  .trim()
+  .transform((value, ctx) => {
+    if (value === "") return 0;
+    const parsed = toNumber(value);
+    if (parsed === null) {
+      ctx.addIssue({ code: "custom", message: "Discount must be a number" });
+      return z.NEVER;
+    }
+    if (parsed < 0) {
+      ctx.addIssue({ code: "custom", message: "Discount cannot be negative" });
+      return z.NEVER;
+    }
+    if (parsed > 100) {
+      ctx.addIssue({ code: "custom", message: "Discount cannot exceed 100%" });
+      return z.NEVER;
+    }
+    // Matches the DECIMAL(5,2) column, so what validates is what gets stored.
+    return Math.round(parsed * 100) / 100;
+  });
+
 export const saleLineSchema = z.object({
   productId: z.string().min(1, { message: "Choose a product" }),
   quantity,
   unitPrice,
+  discountPercent,
 });
 
 export const newSaleFormSchema = z.object({
@@ -107,6 +167,8 @@ export const newSaleFormSchema = z.object({
     .trim()
     .max(500, { message: "Notes must be 500 characters or fewer" })
     .optional(),
+  /** Whole-bill discount, applied to the subtotal of discounted lines. */
+  discountPercent,
   items: z
     .array(saleLineSchema)
     .min(1, { message: "Add at least one item to the sale." })
@@ -120,5 +182,5 @@ export type SaleFormOutput = z.output<typeof newSaleFormSchema>;
 
 /** A fresh, empty line. `unitPrice` is filled in when a product is chosen. */
 export function emptySaleLine(): SaleFormValues["items"][number] {
-  return { productId: "", quantity: "1", unitPrice: "" };
+  return { productId: "", quantity: "1", unitPrice: "", discountPercent: "" };
 }

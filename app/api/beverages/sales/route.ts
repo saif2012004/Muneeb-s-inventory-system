@@ -12,10 +12,10 @@ import {
   buildSaleDateWindow,
   checkTotalFits,
   computeLineTotal,
+  computeSaleTotal,
   isSaleProblem,
   loadSaleProducts,
   snapshotUnitPrice,
-  sumLineTotals,
   toSaleListRow,
   type SaleLine,
 } from "@/lib/sales";
@@ -116,7 +116,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const parsed = saleCreateSchema.safeParse(await request.json());
     if (!parsed.success) return fail(firstIssue(parsed.error), 400);
 
-    const { customerId, saleDate, notes, items } = parsed.data;
+    const { customerId, saleDate, notes, discountPercent, items } = parsed.data;
 
     const categoryId = await resolveModuleCategoryId("beverages");
     if (!categoryId) {
@@ -152,15 +152,22 @@ export async function POST(request: Request): Promise<NextResponse> {
       // Non-null: loadSaleProducts already proved every id resolves.
       const product = products.get(item.productId)!;
       const unitPrice = snapshotUnitPrice(product, item.unitPrice);
+      const lineDiscount = new Prisma.Decimal(item.discountPercent);
       return {
         productId: item.productId,
         quantity: item.quantity,
         unitPrice,
-        lineTotal: computeLineTotal(unitPrice, item.quantity),
+        discountPercent: lineDiscount,
+        lineTotal: computeLineTotal(unitPrice, item.quantity, lineDiscount),
       };
     });
 
-    const totalAmount = sumLineTotals(lines);
+    // Line discounts are already inside each lineTotal; this applies the
+    // whole-bill discount to their subtotal. Order is fixed in lib/sales.ts.
+    const { total: totalAmount } = computeSaleTotal(
+      lines,
+      new Prisma.Decimal(discountPercent)
+    );
     const tooLarge = checkTotalFits(totalAmount);
     if (tooLarge) return fail(tooLarge.message, tooLarge.status);
 
@@ -172,6 +179,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         customerId,
         saleDate,
         notes: notes ?? null,
+        discountPercent,
         totalAmount,
         items: { create: lines },
       },

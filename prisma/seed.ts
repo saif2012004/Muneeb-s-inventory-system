@@ -89,12 +89,22 @@ const BEVERAGE_SIZES = [
 ] as const;
 
 /**
- * 0 = full price. Discount variants are SEPARATE products holding the already
- * discounted price — there is no runtime discount maths anywhere in the app.
+ * NO DISCOUNT TIERS ANY MORE — this used to be `[0, 20, 30, 60]`, and each tier
+ * became its own Product row ("Pepsi 1.5L (30% off)").
+ *
+ * That produced 36 variant rows for 12 physical drinks, and it made a discount
+ * a property of the CATALOG rather than of the sale: the owner could only ever
+ * give 20/30/60%, and the same bottle was tracked under four ids. Discount is
+ * now entered on the sale — per line and per whole bill — so one product row
+ * means one real thing you can sell.
+ *
+ * The 36 existing variant rows were deleted from the development database by a
+ * one-off guarded script on 2026-08-09. This seed is the other half of that
+ * change: because it uses `upsert` on deterministic ids, leaving the tier loop
+ * in place would have resurrected every variant on the next re-seed.
  */
-const DISCOUNT_TIERS = [0, 20, 30, 60] as const;
 
-/** Brands sold in four sizes, each with the full set of discount tiers. */
+/** Brands sold in four sizes. One row per size — no variants. */
 const SIZED_BRANDS = ["Pepsi", "Coke Cola", "Gourmet"] as const;
 
 /** Juice comes in two sizes and has no discount variants. */
@@ -114,24 +124,21 @@ const beverageSubCategories: SubCategorySeed[] = [
 }));
 
 const beverageProducts: ProductSeed[] = [
-  // Pepsi / Coke Cola / Gourmet: 4 sizes x 4 discount tiers = 16 each.
+  // Pepsi / Coke Cola / Gourmet: 4 sizes each = 12 products.
+  // The ids are unchanged from the pre-rework base rows (`prod_pepsi_1_5l`),
+  // so a re-seed still matches the products already in the database and the
+  // owner's prices survive.
   ...SIZED_BRANDS.flatMap((brand) =>
-    BEVERAGE_SIZES.flatMap(({ size, label }) =>
-      DISCOUNT_TIERS.map((discountPercent) => ({
-        id:
-          `prod_${slug(brand)}_${slug(size)}` +
-          (discountPercent > 0 ? `_d${discountPercent}` : ""),
-        name:
-          `${brand} ${label}` +
-          (discountPercent > 0 ? ` (${discountPercent}% off)` : ""),
-        subCategoryId: `sub_${slug(brand)}`,
-        size,
-        discountPercent,
-        qualityTier: null,
-        shape: null,
-        unit: "bottle",
-      }))
-    )
+    BEVERAGE_SIZES.map(({ size, label }) => ({
+      id: `prod_${slug(brand)}_${slug(size)}`,
+      name: `${brand} ${label}`,
+      subCategoryId: `sub_${slug(brand)}`,
+      size,
+      discountPercent: 0,
+      qualityTier: null,
+      shape: null,
+      unit: "bottle",
+    }))
   ),
 
   // Juice: 2 sizes, full price only.
