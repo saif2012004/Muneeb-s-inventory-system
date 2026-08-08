@@ -484,6 +484,15 @@ UI can show which lines genuinely took a new price.
   on an HTML login page inside `res.json()`. Both paths are exercised by the Phase 2.1
   verification. Route handlers ALSO call `requireOwner()` for defence in depth: the
   middleware is the gate, the route check is the backstop if the matcher ever changes.
+- **`useSecureCookies` is PINNED in `/lib/auth.config.ts` — never let it be inferred.**
+  Auth.js derives the session-cookie NAME from whether it thinks the site is https
+  (`__Secure-authjs.session-token` vs `authjs.session-token`), and it reads that from the
+  resolved auth URL. `NEXTAUTH_URL` exists only for Production, so preview deployments picked
+  the insecure name while the edge middleware looked for the secure one — sign-in succeeded,
+  `/api/auth/session` returned the user, and every gated route still rejected it. Pinning the
+  value means middleware and route handlers read the same static field and cannot disagree.
+  Verified on a preview deployment: gated pages and APIs return 200 with a real session, and
+  signed-out still gives 307 / 401 respectively.
 - **`trustHost: true` is set explicitly in `/lib/auth.config.ts` and is the source of
   truth for host trust.** Auth.js v5 does NOT read `NEXTAUTH_URL` for this; it only
   auto-trusts when `AUTH_URL` / `AUTH_TRUST_HOST` / `VERCEL` is set, or when
@@ -721,6 +730,53 @@ use.* Upgrade **before** that moment, never after. Two independent reasons:
    is a terms violation, and enforcement would hit the system the client runs their books on.
 2. **Headroom** — Pro raises function duration/size limits and concurrency. Hobby's limits
    are fine for an idle build-phase app and not something to discover under live load.
+
+### ⚠️ HANDOFF INFRA ITEM — the function and the database are on different continents
+
+**Do not fix mid-build. Do it at go-live, with the Pro upgrade.**
+
+Measured on a real deployment, not inferred:
+
+| | |
+|---|---|
+| Serverless function region | **`iad1` — Washington DC** |
+| Supabase region | **`ap-northeast-2` — Seoul** |
+| Distance | ~11,000 km, every single query |
+
+`X-Vercel-Id: bom1::iad1::…` — the first segment is only the edge PoP that accepted the
+request (Mumbai, nearest to Pakistan); the second is where the function actually ran.
+
+**This is the ~1.1s/query floor, and it is NOT a dev-machine artifact.** Measured warm against
+the deployed function:
+
+| Endpoint | Queries | Deployed latency |
+|---|---|---|
+| `/api/reports/summary` | 1 | **~1.75s** |
+| `/api/reports/balances` | 6 | **~6.4s** (≈1.07s per query) |
+
+So production is no faster than local. Co-locating the function with the database at handoff —
+set the project's function region to `icn1` (Seoul), or move the Supabase project to a region
+near `iad1` — should collapse this outright and is the single highest-value performance change
+available. Everything else is working around it.
+
+Until then, the mitigation already in place is the progressive load on `/reports`: the page
+paints on the one-query summary and the six-query balances fill in behind their own skeletons.
+
+### Deployment reality check — read before trusting a green deploy
+
+- **Preview deploys were BUILD CHECKS ONLY until 8 Aug 2026.** Auth.js inferred the session
+  cookie name from the resolved auth URL, and `NEXTAUTH_URL` is set for Production only — so
+  preview issued `authjs.session-token` while the edge middleware looked for
+  `__Secure-authjs.session-token`. You could sign in, `/api/auth/session` would return your
+  user, and every page still 307'd to `/login` and every API call still 401'd. **Every "preview
+  READY" in Phases 1–7 proved only that the build compiles.**
+  **Fixed** by pinning `useSecureCookies` in `lib/auth.config.ts` (see the comment there);
+  preview now returns 200 on gated routes with a real session. Behavioural verification is
+  still primarily the local browser pass, but preview is now usable for it too.
+- **Production is deliberately a PHASE 1 BUILD.** Every route from Phases 2–7 returns 404
+  there, because only preview deploys have been run. That is by design: **production goes live
+  at client handoff, on Pro.** Do not `--prod` deploy to chase a number or to "check" something.
+  Auth itself works correctly on production (307 signed out, passes middleware signed in).
 
 ### Live project
 | | |

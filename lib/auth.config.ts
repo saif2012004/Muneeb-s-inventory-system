@@ -25,6 +25,34 @@ export default {
   // UntrustedHost inside middleware and every request reads as signed out.
   trustHost: true,
 
+  /**
+   * PINNED, not inferred — this is what makes preview deployments work.
+   *
+   * Auth.js decides the session-cookie NAME from whether it thinks the site is
+   * https: `__Secure-authjs.session-token` when it is, plain
+   * `authjs.session-token` when it isn't. Left to infer, it reads that from the
+   * resolved auth URL — and `NEXTAUTH_URL` is only set for Production.
+   *
+   * The result, measured on a real deployment:
+   *
+   *   production  ->  Set-Cookie: __Secure-authjs.session-token …; Secure
+   *   preview     ->  Set-Cookie: authjs.session-token …          (no Secure)
+   *
+   * The sign-in route and `/api/auth/*` both used the insecure name and worked,
+   * so you could sign in and `/api/auth/session` returned your user — but the
+   * EDGE MIDDLEWARE, handling an https request, looked for the `__Secure-`
+   * cookie, found nothing, and treated every request as signed out. Preview
+   * deployments therefore 307'd every page to /login and 401'd every API call
+   * to a perfectly valid session.
+   *
+   * Setting it explicitly removes the inference entirely: middleware and route
+   * handlers read the same static value from this one config object, so they
+   * cannot disagree. Vercel always serves https, so it is true there and false
+   * locally, where `next dev` is plain http and a Secure cookie would be
+   * dropped by the browser.
+   */
+  useSecureCookies: process.env.VERCEL === "1",
+
   session: { strategy: "jwt" },
 
   pages: {
