@@ -35,13 +35,14 @@ export type ReportSummary = {
 };
 
 /**
- * The all-time balances, fetched separately from the period flows.
+ * The all-time FARMER balances, fetched separately from the period flows.
  *
- * Six database queries versus the summary's one, so it gets its own request and
- * its own per-tile skeletons — otherwise the whole dashboard waits on it.
+ * Was six database queries (four for customer receivables, two for farmers);
+ * the receivables half was removed when sales became revenue-only, so it is now
+ * TWO. It keeps its own request and skeleton anyway: it is still slower than the
+ * summary, and it is all-time, so it survives a period change untouched.
  */
 export type BalanceTotals = {
-  receivables: { totalOutstanding: number };
   farmers: { totalOwed: number; totalAdvanced: number };
 };
 

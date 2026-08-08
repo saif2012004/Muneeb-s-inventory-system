@@ -79,12 +79,18 @@ export type LedgerEntry = {
   itemCount: number | null;
 };
 
+/**
+ * What /api/customers/[id] returns now: the customer and what they bought.
+ *
+ * `balance`, `payments` and `ledger` were removed when sales became
+ * revenue-only. The `Payment`, `CustomerBalance` and `LedgerEntry` types above
+ * are deliberately KEPT even though nothing reads them — they describe the
+ * dormant `CustomerPayment` table and lib/receivables.ts, and deleting them
+ * would make restoring receivables a rewrite rather than a re-wire.
+ */
 export type CustomerProfile = {
   customer: Customer;
-  balance: CustomerBalance;
   purchases: Purchase[];
-  payments: Payment[];
-  ledger: LedgerEntry[];
 };
 
 // ---------------------------------------------------------------------------

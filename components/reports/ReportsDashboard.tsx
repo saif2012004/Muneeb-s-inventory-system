@@ -36,10 +36,12 @@ import { cn } from "@/lib/utils";
  * NOTHING HERE COMPUTES A TOTAL
  * ---------------------------------------------------------------------------
  * Every figure comes from `/api/reports/*`, which calls lib/reports.ts, which
- * calls the receivables and milk-balance helpers. That is what makes
- * "Outstanding receivables" identical to the customers hub and "Owed to
- * farmers" identical to the balance sheet — they are the same calculation, not
- * two that happen to agree today.
+ * calls the milk-balance helper. That is what makes "Owed to farmers"
+ * identical to the balance sheet — the same calculation, not two that happen
+ * to agree today.
+ *
+ * There is no customer-receivables figure on this screen. Sales are revenue;
+ * the app does not track what a customer owes.
  *
  * ---------------------------------------------------------------------------
  * ACCENTS
@@ -231,27 +233,22 @@ export function ReportsDashboard() {
           }
           countUp
         />
-        {/* These two wait on `balancesQuery`, not on the page. Their own
-            skeletons mean the rest of the dashboard is usable while the six
-            balance queries are still running. */}
-        {/* `failed` is passed separately from `loading` on purpose. These are
-            money tiles: if the request fails, `data` is undefined and a naive
-            `?? 0` renders a confident "Rs. 0" — telling the owner nothing is
-            owed when the truth is simply unknown. A dash and a retry is honest;
-            a fabricated zero is not. */}
-        <StatCard
-          label="Outstanding receivables"
-          loading={balancesQuery.isPending}
-          failed={balancesQuery.isError}
-          onRetry={() => balancesQuery.refetch()}
-          value={balancesQuery.data?.receivables.totalOutstanding ?? 0}
-          tone="text-rose-600"
-          border="border-rose-100"
-          // Not period-scoped, and saying so avoids the owner reading it as
-          // "billed this month".
-          hint="owed to you right now, all time"
-          countUp
-        />
+        {/* This waits on `balancesQuery`, not on the page. Its own skeleton
+            means the rest of the dashboard is usable while the farmer balance
+            queries are still running.
+
+            There is deliberately NO "outstanding receivables" tile any more.
+            A sale is revenue, not a debt — the app no longer tracks what a
+            customer owes. The farmer tile STAYS, because the owner really does
+            owe farmers for milk delivered: that is a payable, not a receivable,
+            and the two are not symmetric. Removing the receivables half also
+            took FOUR queries off every cold dashboard load.
+
+            `failed` is passed separately from `loading` on purpose. This is a
+            money tile: if the request fails, `data` is undefined and a naive
+            `?? 0` renders a confident "Rs. 0" — telling the owner they owe
+            nothing when the truth is simply unknown. A dash and a retry is
+            honest; a fabricated zero is not. */}
         <StatCard
           label="Owed to farmers"
           loading={balancesQuery.isPending}
@@ -438,7 +435,13 @@ export function ReportsDashboard() {
             label="Farmer purchases"
           />
           <ExportCsvButton type="farmer_balances" label="Farmer balances" />
-          <ExportCsvButton type="customer_balances" label="Customer balances" />
+          {/* No "Customer balances" export any more. The CSV columns are
+              Total billed / Total paid / Outstanding — exactly the figures the
+              app stopped tracking, so offering the download would reintroduce
+              receivables through the back door and hand the owner a
+              spreadsheet the screens contradict. The `customer_balances` case
+              in /api/reports/export still exists, unreferenced, alongside
+              lib/receivables.ts. */}
         </div>
       </section>
     </>

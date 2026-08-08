@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 import { karachiRange, type DateRange } from "@/lib/format";
 import { getAllFarmerTotals } from "@/lib/milk";
 import { prisma } from "@/lib/prisma";
-import { getTotalOutstanding } from "@/lib/receivables";
+// NOTE: lib/receivables.ts is intentionally NOT imported any more. It still
+// exists and still works; nothing calls it. See getBalanceTotals() below.
 
 /**
  * THE REPORTS AGGREGATION. One place, so a figure is computed once and every
@@ -285,23 +286,38 @@ export type ReportSummary = {
  * total crept toward the 15s client timeout in lib/api-client.ts. Now the fast
  * half renders and these two tiles fill in behind their own skeletons.
  *
- * They are also NOT period-scoped, which is what makes the split free: a
- * balance is what is owed right now, not what accrued this month, so switching
- * period tabs does not invalidate this at all.
+ * It is also NOT period-scoped, which is what makes the split free: a balance
+ * is what is owed right now, not what accrued this month, so switching period
+ * tabs does not invalidate this at all.
  *
- * The arithmetic is unchanged and still delegated — `getTotalOutstanding` lives
- * in lib/receivables.ts and `getAllFarmerTotals` in lib/milk.ts. This is a
- * loading change, not a maths change.
+ * The arithmetic is still delegated — `getAllFarmerTotals` lives in
+ * lib/milk.ts. This is a loading change, not a maths change.
+ */
+/**
+ * FARMERS ONLY — the receivables half was removed deliberately.
+ *
+ * A sale is revenue, not a debt: the app no longer tracks what a customer owes,
+ * so there is no "outstanding receivables" figure to report. The FARMER side is
+ * untouched, because the owner genuinely does still owe farmers money for milk
+ * delivered, and that is a real payable.
+ *
+ * `getTotalOutstanding()` in lib/receivables.ts still exists and still works —
+ * it is simply no longer called. That is what makes this reversible: restoring
+ * the tile means adding the call back here and the tile back to the dashboard,
+ * with no migration and no lost data.
+ *
+ * The cost saving is the point of the change as much as the semantics:
+ * `getTotalOutstanding()` is FOUR queries, and at the measured ~1.05s per round
+ * trip that was 4+ seconds on every cold dashboard load. Measured before and
+ * after — see docs/responses/2026-08-09-batch-2-receivables-removed.md.
  */
 export type BalanceTotals = {
-  receivables: { totalOutstanding: Prisma.Decimal };
   farmers: { totalOwed: Prisma.Decimal; totalAdvanced: Prisma.Decimal };
 };
 
 export async function getBalanceTotals(): Promise<BalanceTotals> {
-  const totalOutstanding = await getTotalOutstanding();
   const farmers = await getAllFarmerTotals();
-  return { receivables: { totalOutstanding }, farmers };
+  return { farmers };
 }
 
 /**

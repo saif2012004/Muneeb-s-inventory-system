@@ -42,9 +42,10 @@ import { cn } from "@/lib/utils";
  * about farmers and money going OUT, and mixing the two directions on one
  * screen is how an owner reads a number with the wrong sign.
  *
- * Every sale here also lands in the customer's receivable — lib/receivables.ts
- * has summed MilkSale since Phase 4b — which is why the mutations invalidate
- * the customers cache as well as the milk one.
+ * A milk sale is REVENUE and nothing more. It no longer feeds any "outstanding"
+ * figure — there is none — but it still carries its customer, so it still shows
+ * up on that customer's purchase history and in reports revenue. That is why
+ * the mutations still invalidate the customers cache alongside the milk one.
  */
 export function MilkSalesList() {
   const reduceMotion = useReducedMotion();

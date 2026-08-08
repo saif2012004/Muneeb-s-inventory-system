@@ -107,7 +107,7 @@ export function MilkSaleDialog({
             {mode === "create" ? "Record milk sale" : "Edit milk sale"}
           </DialogTitle>
           <DialogDescription>
-            Milk you sold. This adds to what the customer owes you.
+            Milk you sold. Recorded as revenue against this customer.
           </DialogDescription>
         </DialogHeader>
 

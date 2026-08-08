@@ -2,12 +2,11 @@ import { NextResponse } from "next/server";
 
 import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
-import {
-  buildLedger,
-  getCustomerActivity,
-  getCustomerBalance,
-  summariseActivity,
-} from "@/lib/receivables";
+// `getCustomerActivity` is still THE single fetch of a customer's rows. The
+// balance/ledger helpers alongside it (`summariseActivity`, `buildLedger`,
+// `getCustomerBalance`) still exist and still work — they are simply no longer
+// called, because a sale is revenue rather than a debt. See the GET below.
+import { getCustomerActivity } from "@/lib/receivables";
 import { serialize } from "@/lib/serialize";
 import { customerUpdateSchema } from "@/lib/validations/customers";
 
@@ -28,10 +27,16 @@ const CUSTOMER_SELECT = {
 /**
  * GET /api/customers/[id]
  *
- * The profile: the customer, their balance, their purchases across all three
- * modules, their payments, and the running-balance ledger. One request, because
- * the profile screen shows all of it and three round trips would just be three
- * chances to render a half-loaded page.
+ * The profile: the customer, and their purchases across all three modules.
+ *
+ * It used to also return `balance`, `payments` and a running-balance `ledger`.
+ * Those were removed when sales became revenue-only — there is no outstanding
+ * figure any more, so computing one and shipping it to a UI that ignores it
+ * would be dead weight the owner pays for on every profile open.
+ *
+ * Reversing this is small on purpose: call `summariseActivity(activity)` and
+ * `buildLedger(activity)` again and put the fields back in the response. Both
+ * still exist, and `activity` below already carries the payments they need.
  */
 export async function GET(
   _request: Request,
@@ -47,13 +52,11 @@ export async function GET(
     });
     if (!customer) return fail("That customer no longer exists.", 404);
 
-    // ONE fetch of this customer's rows, reused for the balance, the purchases
-    // list and the ledger. Previously each of those queried independently —
-    // 12 concurrent queries against a `connection_limit=1` pool, which timed
-    // out in the browser while type-checking perfectly. See getCustomerActivity.
+    // ONE fetch of this customer's rows. Previously each consumer queried
+    // independently — 12 concurrent queries against a `connection_limit=1`
+    // pool, which timed out in the browser while type-checking perfectly. See
+    // getCustomerActivity.
     const activity = await getCustomerActivity(params.id);
-    const balance = summariseActivity(activity);
-    const ledger = buildLedger(activity);
 
     // Purchases from all three modules, merged newest-first and tagged with the
     // module so the UI can colour each row without guessing from its shape.
@@ -87,21 +90,11 @@ export async function GET(
       })),
     ].sort((a, b) => b.saleDate.getTime() - a.saleDate.getTime());
 
-    // Newest first for display; the ledger stays oldest-first because a running
-    // balance only reads correctly downwards.
-    const payments = [...activity.payments].sort((a, b) => {
-      const byDate = b.paymentDate.getTime() - a.paymentDate.getTime();
-      return byDate !== 0 ? byDate : b.createdAt.getTime() - a.createdAt.getTime();
-    });
-
     // Decimals -> numbers at the boundary (Gotcha 2), for every branch.
     return ok(
       serialize({
         customer,
-        balance,
         purchases,
-        payments,
-        ledger,
       })
     );
   } catch (error) {
@@ -180,26 +173,20 @@ export async function DELETE(
     });
     if (!customer) return fail("That customer no longer exists.", 404);
 
-    const balance = await getCustomerBalance(customer.id);
-
     const deactivated = await prisma.customer.update({
       where: { id: customer.id },
       data: { isActive: false },
       select: CUSTOMER_SELECT,
     });
 
-    // Retiring someone who still owes money is allowed — they may have stopped
-    // trading without settling — but the owner should be told, not have the
-    // debt quietly disappear from the active list.
-    const owes = balance.outstanding.greaterThan(0);
-
+    // No balance is fetched or reported any more. This used to warn that the
+    // customer still owed money before being retired; with sales as revenue
+    // there is no debt to strand, so the check would only cost a query to
+    // produce a sentence that can no longer be true.
     return ok({
       deleted: "soft" as const,
       customer: serialize(deactivated),
-      outstanding: serialize(balance.outstanding),
-      message: owes
-        ? `"${customer.name}" was deactivated, but still owes ${balance.outstanding.toFixed(2)}. Their history and balance are kept.`
-        : `"${customer.name}" was deactivated. Their history is kept.`,
+      message: `"${customer.name}" was deactivated. Their purchase history is kept.`,
     });
   } catch (error) {
     return serverError("customers.[id].DELETE", error);

@@ -1,139 +1,89 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { LogIn, Plus, RefreshCw, Search, Users, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
 import { CustomerDialog } from "@/components/customers/CustomerDialog";
-import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
-import { MoneyText } from "@/components/shared/MoneyText";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
-import { formatDate, formatPKR } from "@/lib/format";
 import {
   useCreateCustomer,
   useCustomers,
-  type CustomerWithBalance,
+  type Customer,
 } from "@/lib/hooks/use-customers";
-import {
-  BALANCE_TEXT_CLASS,
-  balanceLabel,
-  balanceMagnitude,
-  balanceMoneyTone,
-  balanceTone,
-} from "@/lib/receivables-display";
-import { cn } from "@/lib/utils";
 import { CUSTOMER_TYPE_LABELS } from "@/lib/validations/customers";
 
 /**
- * The customers hub. Its one job is answering "who owes me money", so the
- * default sort is by outstanding, biggest debtor first — not alphabetical.
- * Alphabetical is what a contact list does; this is a receivables ledger.
+ * The customers DIRECTORY.
  *
- * Every figure shown comes from the server's calculation (lib/receivables.ts).
- * Nothing here derives a balance, including the summary total.
+ * ---------------------------------------------------------------------------
+ * THIS IS NO LONGER A DEBTORS LIST
+ * ---------------------------------------------------------------------------
+ * It used to exist to answer "who owes me money", and everything about it was
+ * shaped by that: it sorted by outstanding balance so the biggest debtor sat on
+ * top, it carried a "total outstanding" headline, and it deliberately pulled in
+ * deactivated customers so their unpaid balances still counted.
+ *
+ * None of that applies now. A sale is revenue, not a debt — the app does not
+ * track what a customer owes. So this is a contact list: who you sell to, how to
+ * reach them, and a way through to what they have bought.
+ *
+ * Three consequences follow, and they are all deliberate:
+ *
+ *  1. Sorted ALPHABETICALLY. Sorting by balance was right for a ledger and is
+ *     meaningless for a directory; a contact list you scan by name must be in
+ *     name order.
+ *  2. `withBalances: false`. This is not just tidiness — it takes the request
+ *     from FIVE database queries to ONE. Measured against the live database:
+ *     5.6s -> 1.0s. The four aggregate queries existed solely to compute
+ *     balances nothing renders any more.
+ *  3. Active only, with no `includeInactive`. That flag existed so retired
+ *     customers' debts still counted toward the total. There is no total and no
+ *     debt, so the list is simply the people you currently sell to.
+ *
+ * lib/receivables.ts is untouched and still works. Nothing here calls it.
  */
 export function CustomersHub() {
-  const reduceMotion = useReducedMotion();
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
-  /**
-   * `includeInactive` — the totals must cover deactivated customers who still
-   * owe. Deactivating retires someone from new sales; it does not settle their
-   * bill, and the delete route says exactly that in its own toast. Fetching
-   * active-only made this tile understate the receivable, the same bug that was
-   * fixed on the milk hub in Phase 6, and it would also have made the reports
-   * dashboard disagree with this screen.
-   */
-  const customersQuery = useCustomers({
-    withBalances: true,
-    includeInactive: true,
-  });
+  const customersQuery = useCustomers();
   const createCustomer = useCreateCustomer();
 
-  const customers = useMemo(() => customersQuery.data ?? [], [customersQuery.data]);
-
-  /** The LIST stays active-only — this is the working list of who you sell to. */
-  const activeCustomers = useMemo(
-    () => customers.filter((customer) => customer.isActive),
-    [customers]
-  );
-
-  /** Deactivated customers who still owe — the tile says so out loud. */
-  const inactiveWithBalance = useMemo(
-    () =>
-      customers.filter(
-        (customer) => !customer.isActive && customer.outstanding !== 0
-      ),
-    [customers]
+  const customers = useMemo(
+    () => customersQuery.data ?? [],
+    [customersQuery.data]
   );
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     const filtered = term
-      ? activeCustomers.filter(
+      ? customers.filter(
           (customer) =>
             customer.name.toLowerCase().includes(term) ||
             (customer.phone ?? "").toLowerCase().includes(term)
         )
-      : activeCustomers;
+      : customers;
 
-    // Biggest debtor first; ties broken by name so the order is stable.
-    return [...filtered].sort((a, b) => {
-      if (b.outstanding !== a.outstanding) return b.outstanding - a.outstanding;
-      return a.name.localeCompare(b.name);
-    });
-  }, [activeCustomers, search]);
-
-  /**
-   * The headline number: what the whole book is owed.
-   *
-   * Summing the per-customer outstandings is safe here — they are already
-   * numbers the server calculated, not Decimals, and this is a display total
-   * over a list already in memory rather than a balance being derived from raw
-   * rows in the browser.
-   *
-   * Customers in CREDIT are excluded deliberately. "Total outstanding" means
-   * money the owner is owed; letting one customer's Rs. 500 credit cancel
-   * another's Rs. 500 debt would report Rs. 0 owed while someone still owes
-   * Rs. 500. The credit total is shown separately.
-   */
-  const totals = useMemo(() => {
-    let owed = 0;
-    let credit = 0;
-    let owingCount = 0;
-    for (const customer of customers) {
-      if (customer.outstanding > 0) {
-        owed += customer.outstanding;
-        owingCount += 1;
-      } else if (customer.outstanding < 0) {
-        credit += -customer.outstanding;
-      }
-    }
-    return { owed, credit, owingCount };
-  }, [customers]);
+    return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  }, [customers, search]);
 
   const header = (
     <PageHeader
       title="Customers"
-      description="Who owes you money, across beverages, bakery and milk."
+      description="Everyone you sell to, across beverages, bakery and milk."
       action={
-        <div className="flex gap-2">
-          <ExportCsvButton type="customer_balances" label="Export" />
-          <Button className="h-11 rounded-lg" onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 size-4" aria-hidden />
-            Add customer
-          </Button>
-        </div>
+        <Button className="h-11 rounded-lg" onClick={() => setAddOpen(true)}>
+          <Plus className="mr-2 size-4" aria-hidden />
+          Add customer
+        </Button>
       }
     />
   );
@@ -193,72 +143,6 @@ export function CustomersHub() {
     <>
       {header}
 
-      {/* Summary bar -------------------------------------------------- */}
-      <motion.div
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 420, damping: 34 }}
-        className="mb-4 grid gap-3 sm:grid-cols-3"
-      >
-        <div className="rounded-xl border border-rose-100 bg-white p-5 shadow-sm">
-          <p className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">
-            Total outstanding
-          </p>
-          {customersQuery.isPending ? (
-            <Skeleton className="mt-3 h-9 w-32 rounded-lg" />
-          ) : (
-            <AnimatedMoney
-              value={totals.owed}
-              // A summary tile, fetched once — so it counts up from 0 rather
-              // than appearing at its final value.
-              countUpOnMount
-              className="mt-2 block text-[28px] font-bold leading-tight text-rose-600"
-            />
-          )}
-          <p className="num mt-1 text-sm text-zinc-500">
-            {totals.owingCount} {totals.owingCount === 1 ? "customer" : "customers"} owing
-            {/* Said out loud when the total covers someone who is no longer in
-                the list below, so the two don't look like they disagree. */}
-            {inactiveWithBalance.length > 0 ? (
-              <>
-                <span className="mx-1.5 text-zinc-300">·</span>
-                includes {inactiveWithBalance.length} inactive
-              </>
-            ) : null}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <p className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">
-            Customers
-          </p>
-          {customersQuery.isPending ? (
-            <Skeleton className="mt-3 h-9 w-16 rounded-lg" />
-          ) : (
-            <p className="num mt-2 text-[28px] font-bold leading-tight text-zinc-900">
-              {/* ACTIVE only — the query now also fetches deactivated customers
-                  for the totals above, and this tile is labelled "active". */}
-              {activeCustomers.length}
-            </p>
-          )}
-          <p className="mt-1 text-sm text-zinc-500">active</p>
-        </div>
-
-        <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <p className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">
-            In credit
-          </p>
-          {customersQuery.isPending ? (
-            <Skeleton className="mt-3 h-9 w-24 rounded-lg" />
-          ) : (
-            <p className="num mt-2 text-[28px] font-bold leading-tight text-emerald-600">
-              {formatPKR(totals.credit)}
-            </p>
-          )}
-          <p className="mt-1 text-sm text-zinc-500">paid ahead</p>
-        </div>
-      </motion.div>
-
       {/* Search ------------------------------------------------------- */}
       <div className="relative mb-4">
         <Search
@@ -284,23 +168,31 @@ export function CustomersHub() {
         ) : null}
       </div>
 
+      {/* Count -------------------------------------------------------- */}
+      {customersQuery.isPending ? null : (
+        <p className="num mb-3 text-sm text-zinc-500">
+          {/* Counts what is ON SCREEN, not what was fetched — a "12 customers"
+              line above 3 search results reads as a bug. */}
+          {visible.length} {visible.length === 1 ? "customer" : "customers"}
+          {search ? " match" : ""}
+        </p>
+      )}
+
       {/* List --------------------------------------------------------- */}
       {customersQuery.isPending ? (
         <div className="space-y-3">
           {[0, 1, 2].map((row) => (
-            <Skeleton key={row} className="h-[88px] w-full rounded-xl" />
+            <Skeleton key={row} className="h-[72px] w-full rounded-xl" />
           ))}
         </div>
       ) : visible.length === 0 ? (
         <EmptyState
           icon={Users}
-          title={
-            search ? "No customers match that search" : "No customers yet"
-          }
+          title={search ? "No customers match that search" : "No customers yet"}
           description={
             search
               ? "Try a different name or phone number."
-              : "Add your first customer to start tracking who owes you."
+              : "Add your first customer to start recording sales against them."
           }
           action={
             search ? (
@@ -312,7 +204,10 @@ export function CustomersHub() {
                 Clear search
               </Button>
             ) : (
-              <Button className="h-11 rounded-lg" onClick={() => setAddOpen(true)}>
+              <Button
+                className="h-11 rounded-lg"
+                onClick={() => setAddOpen(true)}
+              >
                 <Plus className="mr-2 size-4" aria-hidden />
                 Add customer
               </Button>
@@ -357,22 +252,19 @@ export function CustomersHub() {
   );
 }
 
-/** One customer row. A card at every width — money must never scroll out of view. */
-function CustomerCard({ customer }: { customer: CustomerWithBalance }) {
-  const tone = balanceTone(customer.outstanding);
-
-  // The most recent thing that happened, either side of the ledger.
-  const lastActivity = [customer.lastSaleDate, customer.lastPaymentDate]
-    .filter((value): value is string => Boolean(value))
-    .sort()
-    .pop();
-
+/**
+ * One directory row: name, what kind of customer, how to reach them.
+ *
+ * No money. Deliberately — the whole point of the change is that a customer
+ * carries no balance. What they bought lives on their profile.
+ */
+function CustomerCard({ customer }: { customer: Customer }) {
   return (
     <Link
       href={`/customers/${customer.id}`}
       className="block rounded-xl border border-zinc-200 bg-white p-4 shadow-sm transition-colors hover:bg-zinc-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900"
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <p className="truncate text-[15px] font-medium text-zinc-900">
@@ -386,26 +278,13 @@ function CustomerCard({ customer }: { customer: CustomerWithBalance }) {
             </Badge>
           </div>
           <p className="num mt-1 text-sm text-zinc-500">
-            {customer.phone ? (
-              <>
-                {customer.phone}
-                <span className="mx-1.5 text-zinc-300">·</span>
-              </>
-            ) : null}
-            {lastActivity ? `Last activity ${formatDate(lastActivity)}` : "No activity yet"}
+            {customer.phone ?? "No phone number"}
           </p>
         </div>
 
-        <div className="shrink-0 text-right">
-          <MoneyText
-            value={balanceMagnitude(customer.outstanding)}
-            tone={balanceMoneyTone(customer.outstanding)}
-            className="text-[17px] font-semibold"
-          />
-          <p className={cn("mt-0.5 text-xs", BALANCE_TEXT_CLASS[tone])}>
-            {balanceLabel(customer.outstanding)}
-          </p>
-        </div>
+        <span className="shrink-0 text-sm font-medium text-zinc-400">
+          View →
+        </span>
       </div>
     </Link>
   );

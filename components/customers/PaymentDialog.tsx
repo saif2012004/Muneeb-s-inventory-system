@@ -34,6 +34,21 @@ import { cn } from "@/lib/utils";
 const NO_METHOD = "__none__";
 
 /**
+ * ⚠️ DORMANT — nothing renders this component.
+ *
+ * Customer payments were removed from the UI when sales became revenue-only:
+ * there is no outstanding balance to settle, so there is nothing to record a
+ * payment against. The file is kept, wired and working, for the same reason the
+ * `CustomerPayment` table and lib/receivables.ts are kept — so restoring
+ * receivables is re-mounting a component rather than rewriting one.
+ *
+ * If you are here because payments are coming back: this and the payment
+ * mutations in lib/hooks/use-customers.ts are both intact. What was removed is
+ * the Payments tab in CustomerProfile and the balance fields on
+ * /api/customers/[id].
+ *
+ * ---------------------------------------------------------------------------
+ *
  * Record or correct a payment.
  *
  * The amount is held as a STRING while typing, for the same reason the sale
