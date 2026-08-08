@@ -7,6 +7,7 @@ import Link from "next/link";
 
 import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { MoneyText } from "@/components/shared/MoneyText";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Badge } from "@/components/ui/badge";
@@ -150,6 +151,7 @@ export function FarmerBalanceSheet() {
         title="Balance sheet"
         accent="emerald"
         description="What you owe every farmer, biggest first."
+        action={<ExportCsvButton type="farmer_balances" label="Export" />}
       />
     </>
   );

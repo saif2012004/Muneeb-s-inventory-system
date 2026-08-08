@@ -110,13 +110,28 @@ export const customerKeys = {
  * true. The flag is part of the query key so the two never share a cache entry
  * and the picker can't accidentally read a balance-less list as complete.
  */
-export function useCustomers(options?: { withBalances?: boolean }) {
+export function useCustomers(options?: {
+  withBalances?: boolean;
+  /**
+   * Include deactivated customers. Needed wherever money is TOTALLED:
+   * deactivating a customer retires them from new sales, it does not settle
+   * their bill, so a receivables total that omitted them would understate what
+   * is owed. Same rule as retired farmers on the milk side.
+   */
+  includeInactive?: boolean;
+}) {
   const withBalances = options?.withBalances ?? false;
+  const includeInactive = options?.includeInactive ?? false;
+  const params = new URLSearchParams();
+  if (!withBalances) params.set("withBalances", "false");
+  if (includeInactive) params.set("includeInactive", "true");
+  const query = params.toString();
+
   return useQuery({
-    queryKey: customerKeys.list(withBalances),
+    queryKey: [...customerKeys.list(withBalances), includeInactive] as const,
     queryFn: () =>
       api.get<CustomerWithBalance[]>(
-        `/api/customers${withBalances ? "" : "?withBalances=false"}`
+        `/api/customers${query ? `?${query}` : ""}`
       ),
   });
 }

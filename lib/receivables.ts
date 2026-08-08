@@ -225,6 +225,57 @@ export async function getCustomerBalances(
   return balances;
 }
 
+/**
+ * Total money owed across the whole book, in FOUR queries and without loading
+ * or even listing customers.
+ *
+ * Lives here rather than in lib/reports.ts on purpose: it is a receivables
+ * figure, and the rule is that receivables arithmetic has exactly one home.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS ISN'T (SUM(billed) - SUM(paid))
+ * ---------------------------------------------------------------------------
+ * Only POSITIVE balances count. A customer in credit must not cancel another
+ * customer's debt — netting them globally would report "nothing owed" while
+ * someone still owes real money. So the grouping has to happen per customer
+ * first, then the positives are summed. That is also exactly what the customers
+ * hub does, which is what makes the two agree.
+ *
+ * No `in` filter and no id list: a customer with no rows at all contributes 0
+ * to a sum of positives, so enumerating them first would be a wasted query.
+ */
+export async function getTotalOutstanding(): Promise<Prisma.Decimal> {
+  const money = { _sum: { totalAmount: true } } as const;
+
+  const beverage = await prisma.beverageSale.groupBy({ by: ["customerId"], ...money });
+  const bakery = await prisma.bakerySale.groupBy({ by: ["customerId"], ...money });
+  const milk = await prisma.milkSale.groupBy({ by: ["customerId"], ...money });
+  const payments = await prisma.customerPayment.groupBy({
+    by: ["customerId"],
+    _sum: { amount: true },
+  });
+
+  const net = new Map<string, Prisma.Decimal>();
+  for (const group of [...beverage, ...bakery, ...milk]) {
+    net.set(
+      group.customerId,
+      (net.get(group.customerId) ?? ZERO).add(sumOrZero(group._sum?.totalAmount))
+    );
+  }
+  for (const group of payments) {
+    net.set(
+      group.customerId,
+      (net.get(group.customerId) ?? ZERO).sub(sumOrZero(group._sum?.amount))
+    );
+  }
+
+  let total = ZERO;
+  net.forEach((outstanding) => {
+    if (outstanding.greaterThan(0)) total = total.add(outstanding);
+  });
+  return total;
+}
+
 // ---------------------------------------------------------------------------
 // The running-balance timeline
 // ---------------------------------------------------------------------------

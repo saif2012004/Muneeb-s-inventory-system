@@ -18,6 +18,7 @@ import { MilkSaleDialog } from "@/components/milk/MilkSaleDialog";
 import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { MoneyText } from "@/components/shared/MoneyText";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -85,13 +86,16 @@ export function MilkSalesList() {
         accent="emerald"
         description="Milk you sold to hotels, shops and individuals."
         action={
-          <Button
-            className={cn("h-11 rounded-lg", MODULE_BUTTON_CLASS.emerald)}
-            onClick={() => setDialog({ open: true, target: null })}
-          >
-            <Plus className="mr-2 size-4" aria-hidden />
-            Record sale
-          </Button>
+          <div className="flex gap-2">
+            <ExportCsvButton type="milk_sales" label="Export" />
+            <Button
+              className={cn("h-11 rounded-lg", MODULE_BUTTON_CLASS.emerald)}
+              onClick={() => setDialog({ open: true, target: null })}
+            >
+              <Plus className="mr-2 size-4" aria-hidden />
+              Record sale
+            </Button>
+          </div>
         }
       />
     </>

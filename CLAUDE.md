@@ -640,6 +640,33 @@ Found the hard way in Phase 3.2: the new-sale Save button hung indefinitely offl
 feedback. Verified fixed in-browser — recovery in ~305ms. See
 `docs/phase-3.2-fixes-verified.md` §4.
 
+### One database round trip costs ~1.1s — the QUERY COUNT is the whole budget
+
+**Measured, Phase 7: a single Prisma query against this Supabase project takes about
+1.1 seconds.** Not the query — the round trip. That number, multiplied by
+`connection_limit=1` forcing everything into series, is the performance model for this app:
+
+| Queries in a request | Roughly |
+|---|---|
+| 3 (a normal screen) | ~3s |
+| 7 | ~9s |
+| 18 | **~19s — past the 15s client timeout in `lib/api-client.ts`** |
+
+The reports summary shipped its first draft at **18 queries / 19.2s** and the dashboard
+rendered *"Can't reach the server. Check your connection."* against a perfectly healthy
+database. Cutting it to **7 queries / 9.5s** fixed it. Two techniques did the work, and both
+are reusable:
+
+- **Collapse independent aggregates into ONE statement.** Five `prisma.aggregate` calls over
+  five tables became one `SELECT (subquery), (subquery), …` — five round trips to one. See
+  `getReportSummary` in `lib/reports.ts`.
+- **Don't compute the same thing twice.** The summary was calculating each module's top
+  product (4 queries) that the dashboard was already fetching for its charts.
+
+**Before adding a query to an existing route, count what is already there.** A route that
+creeps past ~12 queries will start failing in the browser while every test you have still
+passes, because `tsc`, lint and the API itself are all perfectly happy at 19 seconds.
+
 ### Structural sharing: a refetch that changes nothing keeps the SAME object reference
 
 **Any screen that seeds local form state from server data with
@@ -774,7 +801,7 @@ defect — an operational trap that cost real time in Phase 5.
 | 4b | Customers hub + receivables (payments, outstanding balances) | ✅ Done |
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ✅ Done |
 | 6  | Farmer net-balance ledger + all-farmers balance sheet | ✅ Done |
-| 7  | Reports dashboard + charts + CSV export | ⬜ Todo |
+| 7  | Reports dashboard + charts + CSV export | ✅ Done |
 | 8  | Polish: mobile nav, states, a11y, PWA, **login POST-only security fix**, final validation | ⬜ Todo |
 
 Update this table as phases complete. Change ⬜ to ✅.
@@ -910,6 +937,29 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
     and the tile says "includes N retired" when relevant), and any per-screen count must be
     derived from the set that screen actually shows — the balance sheet's context line counts
     the farmers ON the sheet, not every farmer fetched, or it reads "7 farmers" above 6 rows.
+- **Phase 7 delivered:** the reports dashboard at `/reports`, `/api/reports/{summary,trend,
+  top-products,export}`, `lib/reports.ts`, `lib/csv.ts`, and Export CSV buttons on six
+  screens. Report: `docs/responses/2026-08-08-phase-7-reports.md`. What carries forward:
+  - **`lib/reports.ts` owns the NEW aggregates only** (revenue per period, top products).
+    Balances are delegated: `getTotalOutstanding()` lives in `lib/receivables.ts` and
+    `getAllFarmerTotals()` in `lib/milk.ts`, so the reports figures are the SAME calculation
+    the customers hub and balance sheet use. Verified equal in-browser: 14,100 and 13,000 on
+    all three screens.
+  - **Karachi day bucketing is done in SQL**, not in JS:
+    `date_trunc(unit, ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Karachi')`, returned
+    via `to_char(...,'YYYY-MM-DD')` so a naive timestamp is never re-interpreted by the
+    driver. Verified on the live DB before use, and end-to-end: a 1am PKT sale counts as that
+    Karachi day, an 11pm-the-night-before sale does not.
+  - **`prisma.groupBy` cannot group by an expression**, which is why the trend is raw SQL.
+    The alternative — a query per day — is the trap this phase was told to avoid.
+  - **CSV lives in `lib/csv.ts`** and is RFC 4180: values containing a comma, quote or
+    newline are quoted, internal quotes doubled, CRLF endings, UTF-8 BOM so Excel doesn't
+    mangle non-ASCII names. Verified with a customer literally named `ZZ_TEST_Ali, Sons` and
+    a multi-line note — columns held. The formula guard skips `-` deliberately so negative
+    money stays numeric.
+  - **The export route does NOT return the `{ data, error }` envelope on success** (it
+    returns a file) but DOES on failure, and `useExportCSV` checks the content type before
+    saving — otherwise a 400 gets written to disk as a `.csv` full of JSON.
 - **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
   **Deployment posture** section above — single source of truth, don't duplicate it here.
 - **Phase 8 (touch targets) — QUEUED, found in 4b:** several controls sit under the Design

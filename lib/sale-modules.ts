@@ -35,6 +35,14 @@ export type SaleModule = {
   formDescription: string;
   /** Empty-state copy when the module has no sales at all. */
   emptyTitle: string;
+  /**
+   * CSV export type for this module's sales list.
+   *
+   * Lives on the config rather than as a branch inside the shared list, for the
+   * same reason everything else here does: the list must not learn which module
+   * it is rendering.
+   */
+  exportType: "beverages_sales" | "bakery_sales";
 };
 
 export const BEVERAGES_MODULE: SaleModule = {
@@ -48,6 +56,7 @@ export const BEVERAGES_MODULE: SaleModule = {
   formDescription:
     "Beverages. Prices default to the catalog and can be changed per sale.",
   emptyTitle: "No sales yet",
+  exportType: "beverages_sales",
 };
 
 export const BAKERY_MODULE: SaleModule = {
@@ -61,6 +70,7 @@ export const BAKERY_MODULE: SaleModule = {
   formDescription:
     "Bakery. Prices default to the catalog and can be changed per sale.",
   emptyTitle: "No sales yet",
+  exportType: "bakery_sales",
 };
 
 /** Accent-matched classes for the module's primary button. */

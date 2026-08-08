@@ -18,6 +18,7 @@ import { CustomerDialog } from "@/components/customers/CustomerDialog";
 import { PaymentDialog } from "@/components/customers/PaymentDialog";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { MoneyText } from "@/components/shared/MoneyText";
+import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
@@ -186,14 +187,20 @@ export function CustomerProfile({ customerId }: { customerId: string }) {
             .join(" · ")
         }
         action={
-          <Button
-            variant="outline"
-            className="h-11 rounded-lg"
-            onClick={() => setEditOpen(true)}
-          >
-            <Pencil className="mr-2 size-4" aria-hidden />
-            Edit
-          </Button>
+          <div className="flex gap-2">
+            {/* The balances export is a full snapshot across every customer,
+                not just this one — there is no per-customer CSV type, and
+                inventing one would mean a second shape to keep in step. */}
+            <ExportCsvButton type="customer_balances" label="Export" />
+            <Button
+              variant="outline"
+              className="h-11 rounded-lg"
+              onClick={() => setEditOpen(true)}
+            >
+              <Pencil className="mr-2 size-4" aria-hidden />
+              Edit
+            </Button>
+          </div>
         }
       />
 

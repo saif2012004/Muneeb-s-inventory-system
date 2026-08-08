@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { DeleteSaleDialog } from "@/components/sales/DeleteSaleDialog";
 import { SaleLineItems } from "@/components/sales/SaleLineItems";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -118,12 +119,24 @@ export function SalesList({ module }: { module: SaleModule }) {
       description={module.listDescription}
       accent={module.accent}
       action={
-        <Button asChild className={cn("h-11 rounded-lg", primaryButton)}>
-          <Link href={module.newSaleRoute}>
-            <Plus className="mr-2 size-4" aria-hidden />
-            New sale
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          {/* Exports exactly what the filters currently show. Passing the same
+              dateFrom/dateTo the list is using is what keeps the file and the
+              screen in agreement; with no range set it exports everything. */}
+          <ExportCsvButton
+            type={module.exportType}
+            dateFrom={dateFrom || undefined}
+            dateTo={dateTo || undefined}
+            label="Export"
+            disabled={invalidRange}
+          />
+          <Button asChild className={cn("h-11 rounded-lg", primaryButton)}>
+            <Link href={module.newSaleRoute}>
+              <Plus className="mr-2 size-4" aria-hidden />
+              New sale
+            </Link>
+          </Button>
+        </div>
       }
     />
   );

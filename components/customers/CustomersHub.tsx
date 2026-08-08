@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { CustomerDialog } from "@/components/customers/CustomerDialog";
 import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { MoneyText } from "@/components/shared/MoneyText";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Badge } from "@/components/ui/badge";
@@ -45,27 +46,53 @@ export function CustomersHub() {
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
-  const customersQuery = useCustomers({ withBalances: true });
+  /**
+   * `includeInactive` — the totals must cover deactivated customers who still
+   * owe. Deactivating retires someone from new sales; it does not settle their
+   * bill, and the delete route says exactly that in its own toast. Fetching
+   * active-only made this tile understate the receivable, the same bug that was
+   * fixed on the milk hub in Phase 6, and it would also have made the reports
+   * dashboard disagree with this screen.
+   */
+  const customersQuery = useCustomers({
+    withBalances: true,
+    includeInactive: true,
+  });
   const createCustomer = useCreateCustomer();
 
   const customers = useMemo(() => customersQuery.data ?? [], [customersQuery.data]);
 
+  /** The LIST stays active-only — this is the working list of who you sell to. */
+  const activeCustomers = useMemo(
+    () => customers.filter((customer) => customer.isActive),
+    [customers]
+  );
+
+  /** Deactivated customers who still owe — the tile says so out loud. */
+  const inactiveWithBalance = useMemo(
+    () =>
+      customers.filter(
+        (customer) => !customer.isActive && customer.outstanding !== 0
+      ),
+    [customers]
+  );
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     const filtered = term
-      ? customers.filter(
+      ? activeCustomers.filter(
           (customer) =>
             customer.name.toLowerCase().includes(term) ||
             (customer.phone ?? "").toLowerCase().includes(term)
         )
-      : customers;
+      : activeCustomers;
 
     // Biggest debtor first; ties broken by name so the order is stable.
     return [...filtered].sort((a, b) => {
       if (b.outstanding !== a.outstanding) return b.outstanding - a.outstanding;
       return a.name.localeCompare(b.name);
     });
-  }, [customers, search]);
+  }, [activeCustomers, search]);
 
   /**
    * The headline number: what the whole book is owed.
@@ -100,10 +127,13 @@ export function CustomersHub() {
       title="Customers"
       description="Who owes you money, across beverages, bakery and milk."
       action={
-        <Button className="h-11 rounded-lg" onClick={() => setAddOpen(true)}>
-          <Plus className="mr-2 size-4" aria-hidden />
-          Add customer
-        </Button>
+        <div className="flex gap-2">
+          <ExportCsvButton type="customer_balances" label="Export" />
+          <Button className="h-11 rounded-lg" onClick={() => setAddOpen(true)}>
+            <Plus className="mr-2 size-4" aria-hidden />
+            Add customer
+          </Button>
+        </div>
       }
     />
   );
@@ -187,6 +217,14 @@ export function CustomersHub() {
           )}
           <p className="num mt-1 text-sm text-zinc-500">
             {totals.owingCount} {totals.owingCount === 1 ? "customer" : "customers"} owing
+            {/* Said out loud when the total covers someone who is no longer in
+                the list below, so the two don't look like they disagree. */}
+            {inactiveWithBalance.length > 0 ? (
+              <>
+                <span className="mx-1.5 text-zinc-300">·</span>
+                includes {inactiveWithBalance.length} inactive
+              </>
+            ) : null}
           </p>
         </div>
 
@@ -198,7 +236,9 @@ export function CustomersHub() {
             <Skeleton className="mt-3 h-9 w-16 rounded-lg" />
           ) : (
             <p className="num mt-2 text-[28px] font-bold leading-tight text-zinc-900">
-              {customers.length}
+              {/* ACTIVE only — the query now also fetches deactivated customers
+                  for the totals above, and this tile is labelled "active". */}
+              {activeCustomers.length}
             </p>
           )}
           <p className="mt-1 text-sm text-zinc-500">active</p>

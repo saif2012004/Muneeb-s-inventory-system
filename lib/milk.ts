@@ -352,6 +352,57 @@ export function summariseFarmerBalances(
   return summary;
 }
 
+/**
+ * The owed/advanced split across EVERY farmer, in two queries and without
+ * listing farmers first.
+ *
+ * Same shape as `summariseFarmerBalances`, and it must stay in step with it:
+ * debts and advances are accumulated separately and never netted, and a farmer
+ * with no rows contributes nothing to either, so there is no need to enumerate
+ * farmers before aggregating.
+ *
+ * Exists because the reports summary only needs the two totals, and going via
+ * `getFarmerBalances` would cost an extra query building a per-farmer map that
+ * is then thrown away — which matters when a single round trip to the database
+ * costs about a second.
+ */
+export async function getAllFarmerTotals(): Promise<{
+  totalOwed: Prisma.Decimal;
+  totalAdvanced: Prisma.Decimal;
+}> {
+  const deliveries = await prisma.milkDelivery.groupBy({
+    by: ["farmerId"],
+    _sum: { totalAmount: true },
+  });
+  const purchases = await prisma.farmerPurchase.groupBy({
+    by: ["farmerId"],
+    _sum: { amount: true },
+  });
+
+  const net = new Map<string, Prisma.Decimal>();
+  for (const group of deliveries) {
+    net.set(
+      group.farmerId,
+      (net.get(group.farmerId) ?? ZERO).add(sumOrZero(group._sum?.totalAmount))
+    );
+  }
+  for (const group of purchases) {
+    net.set(
+      group.farmerId,
+      (net.get(group.farmerId) ?? ZERO).sub(sumOrZero(group._sum?.amount))
+    );
+  }
+
+  let totalOwed = ZERO;
+  let totalAdvanced = ZERO;
+  net.forEach((balance) => {
+    if (balance.greaterThan(0)) totalOwed = totalOwed.add(balance);
+    else if (balance.lessThan(0)) totalAdvanced = totalAdvanced.add(balance.negated());
+  });
+
+  return { totalOwed, totalAdvanced };
+}
+
 // ---------------------------------------------------------------------------
 // The running-balance timeline
 // ---------------------------------------------------------------------------
