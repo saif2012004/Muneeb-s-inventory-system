@@ -265,12 +265,44 @@ export type ReportSummary = {
     litersSold: Prisma.Decimal;
     milkSalesRevenue: Prisma.Decimal;
   };
-  /** ALL-TIME, not period-scoped — a balance is not a flow. */
-  receivables: { totalOutstanding: Prisma.Decimal };
-  /** ALL-TIME, same reason. */
-  farmers: { totalOwed: Prisma.Decimal; totalAdvanced: Prisma.Decimal };
   combined: { totalRevenue: Prisma.Decimal };
 };
+
+/**
+ * The two ALL-TIME balances, split out of the summary on purpose.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS IS A SEPARATE CALL
+ * ---------------------------------------------------------------------------
+ * These are the expensive half. The period flows above are ONE query; these two
+ * figures are SIX, because a total of positive balances has to be grouped per
+ * customer and per farmer before it can be summed (a credit must not cancel
+ * someone else's debt). At roughly a second per round trip that is the
+ * difference between a dashboard that paints immediately and one that waits.
+ *
+ * Keeping them in the same response meant the whole landing page — revenue,
+ * trend, charts, everything — was held hostage by the slowest query, and the
+ * total crept toward the 15s client timeout in lib/api-client.ts. Now the fast
+ * half renders and these two tiles fill in behind their own skeletons.
+ *
+ * They are also NOT period-scoped, which is what makes the split free: a
+ * balance is what is owed right now, not what accrued this month, so switching
+ * period tabs does not invalidate this at all.
+ *
+ * The arithmetic is unchanged and still delegated — `getTotalOutstanding` lives
+ * in lib/receivables.ts and `getAllFarmerTotals` in lib/milk.ts. This is a
+ * loading change, not a maths change.
+ */
+export type BalanceTotals = {
+  receivables: { totalOutstanding: Prisma.Decimal };
+  farmers: { totalOwed: Prisma.Decimal; totalAdvanced: Prisma.Decimal };
+};
+
+export async function getBalanceTotals(): Promise<BalanceTotals> {
+  const totalOutstanding = await getTotalOutstanding();
+  const farmers = await getAllFarmerTotals();
+  return { receivables: { totalOutstanding }, farmers };
+}
 
 /**
  * Everything the dashboard's top half needs.
@@ -353,10 +385,8 @@ export async function getReportSummary(
          WHERE "saleDate" >= ${start} AND "saleDate" < ${end})     AS sold_revenue
   `;
 
-  // Balances stay delegated — one implementation each, in their own modules.
-  const totalOutstanding = await getTotalOutstanding();
-  const farmers = await getAllFarmerTotals();
-
+  // Balances are NOT fetched here — they are six queries and would hold the
+  // whole dashboard on the slowest thing it needs. See getBalanceTotals().
   const beverageRevenue = dec(flows.bev_revenue);
   const bakeryRevenue = dec(flows.bak_revenue);
   const milkSalesRevenue = dec(flows.sold_revenue);
@@ -387,8 +417,6 @@ export async function getReportSummary(
       litersSold: dec(flows.sold_liters),
       milkSalesRevenue,
     },
-    receivables: { totalOutstanding },
-    farmers,
     combined: {
       totalRevenue: beverageRevenue.add(bakeryRevenue).add(milkSalesRevenue),
     },

@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatLiters, formatPKR, toDateKey } from "@/lib/format";
 import {
+  useReportBalances,
   useReportSummary,
   useTopProducts,
   useTrend,
@@ -69,6 +70,14 @@ export function ReportsDashboard() {
   const groupBy = TREND_GROUPING[period];
 
   const summaryQuery = useReportSummary(period);
+  /**
+   * Separate query on purpose. These two figures cost six database round trips
+   * against the summary's one, so holding the page for them made the whole
+   * dashboard as slow as its slowest number. They now stream in behind their
+   * own skeletons, and because they are all-time they survive a period change
+   * untouched.
+   */
+  const balancesQuery = useReportBalances();
   const beveragesTrend = useTrend({ module: "beverages", groupBy, period });
   const bakeryTrend = useTrend({ module: "bakery", groupBy, period });
   const milkTrend = useTrend({ module: "milk", groupBy, period });
@@ -222,10 +231,13 @@ export function ReportsDashboard() {
           }
           countUp
         />
+        {/* These two wait on `balancesQuery`, not on the page. Their own
+            skeletons mean the rest of the dashboard is usable while the six
+            balance queries are still running. */}
         <StatCard
           label="Outstanding receivables"
-          loading={loading}
-          value={summary?.receivables.totalOutstanding ?? 0}
+          loading={balancesQuery.isPending}
+          value={balancesQuery.data?.receivables.totalOutstanding ?? 0}
           tone="text-rose-600"
           border="border-rose-100"
           // Not period-scoped, and saying so avoids the owner reading it as
@@ -235,8 +247,8 @@ export function ReportsDashboard() {
         />
         <StatCard
           label="Owed to farmers"
-          loading={loading}
-          value={summary?.farmers.totalOwed ?? 0}
+          loading={balancesQuery.isPending}
+          value={balancesQuery.data?.farmers.totalOwed ?? 0}
           tone="text-emerald-600"
           border="border-emerald-100"
           hint="what you must pay out, all time"

@@ -31,9 +31,18 @@ export type ReportSummary = {
     litersSold: number;
     milkSalesRevenue: number;
   };
+  combined: { totalRevenue: number };
+};
+
+/**
+ * The all-time balances, fetched separately from the period flows.
+ *
+ * Six database queries versus the summary's one, so it gets its own request and
+ * its own per-tile skeletons — otherwise the whole dashboard waits on it.
+ */
+export type BalanceTotals = {
   receivables: { totalOutstanding: number };
   farmers: { totalOwed: number; totalAdvanced: number };
-  combined: { totalRevenue: number };
 };
 
 export type TrendPoint = { period: string; revenue: number; count: number };
@@ -49,6 +58,11 @@ export const reportKeys = {
   all: ["reports"] as const,
   summary: (period: ReportPeriod) =>
     [...reportKeys.all, "summary", period] as const,
+  /**
+   * NO period segment — these balances are all-time, so switching period tabs
+   * reuses the cached value instead of re-running six queries.
+   */
+  balances: () => [...reportKeys.all, "balances"] as const,
   trend: (module: TrendModule, groupBy: TrendGrouping, period: ReportPeriod) =>
     [...reportKeys.all, "trend", module, groupBy, period] as const,
   topProducts: (module: ProductModule, period: ReportPeriod, limit: number) =>
@@ -60,6 +74,17 @@ export function useReportSummary(period: ReportPeriod) {
     queryKey: reportKeys.summary(period),
     queryFn: () =>
       api.get<ReportSummary>(`/api/reports/summary?period=${period}`),
+  });
+}
+
+/**
+ * The slow half. Deliberately its own query so the dashboard can paint without
+ * it, and deliberately not keyed on period so tab switches are free.
+ */
+export function useReportBalances() {
+  return useQuery({
+    queryKey: reportKeys.balances(),
+    queryFn: () => api.get<BalanceTotals>("/api/reports/balances"),
   });
 }
 
