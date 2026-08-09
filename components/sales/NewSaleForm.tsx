@@ -9,6 +9,7 @@ import { useForm, useFieldArray, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 
 import { CustomerCombobox } from "@/components/sales/CustomerCombobox";
+import { StockBlockAlert } from "@/components/sales/StockBlockAlert";
 import { LineItemRow } from "@/components/sales/LineItemRow";
 import { SaleDatePicker } from "@/components/sales/SaleDatePicker";
 import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
@@ -18,7 +19,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ApiError, redirectToLogin } from "@/lib/api-client";
+import {
+  ApiError,
+  redirectToLogin,
+  type StockShortfall,
+} from "@/lib/api-client";
 import { formatPKR, karachiToday, toDateKey } from "@/lib/format";
 import { useProducts } from "@/lib/hooks/use-catalog";
 import { useCustomers } from "@/lib/hooks/use-customers";
@@ -55,6 +60,15 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
   const [justSaved, setJustSaved] = useState<{ id: string; total: number } | null>(
     null
   );
+  /**
+   * The last stock refusal, kept so the owner can restock and retry WITHOUT
+   * losing the sale they have already typed. Cleared on every fresh submit and
+   * on a successful save.
+   */
+  const [stockBlock, setStockBlock] = useState<{
+    message: string;
+    shortfalls: StockShortfall[];
+  } | null>(null);
 
   const accent = ACCENTS[module.accent];
   const primaryButton = MODULE_BUTTON_CLASS[module.accent];
@@ -192,6 +206,9 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
 
   const onSubmit = form.handleSubmit(
     (values) => {
+      // A retry starts from a clean slate: the alert must never outlive the
+      // problem it describes.
+      setStockBlock(null);
       createSale.mutate(
         {
           customerId: values.customerId,
@@ -211,12 +228,25 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
         {
           onSuccess: (sale) => {
             toast.success(`Sale recorded for ${sale.customer.name}`);
+            setStockBlock(null);
             setJustSaved({ id: sale.id, total: sale.totalAmount });
           },
           onError: (error) => {
             if (error instanceof ApiError && error.isSessionExpired) {
               toast.error(error.message);
               redirectToLogin();
+              return;
+            }
+            /**
+             * Insufficient stock is NOT a toast. A toast disappears, and this
+             * one carries the numbers the owner needs plus the controls to fix
+             * them — so it is rendered into the form and stays until resolved.
+             */
+            if (error instanceof ApiError && error.isBlockedByStock) {
+              setStockBlock({
+                message: error.message,
+                shortfalls: error.shortBy,
+              });
               return;
             }
             // The API's messages are specific and actionable — "X is
@@ -414,6 +444,18 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
               Add item
             </Button>
           </section>
+
+          {/* Stock refusal. Sits directly above the bill so it is the last
+              thing read before the Save button, and the sale it refers to is
+              still on screen underneath, untouched. */}
+          {stockBlock ? (
+            <StockBlockAlert
+              shortfalls={stockBlock.shortfalls}
+              message={stockBlock.message}
+              isRetrying={createSale.isPending}
+              onRetry={() => onSubmit()}
+            />
+          ) : null}
 
           {/* Whole-bill discount + the breakdown -------------------------- */}
           <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">

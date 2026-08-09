@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { InlinePriceEditor } from "@/components/catalog/InlinePriceEditor";
+import { InlineStockEditor } from "@/components/catalog/InlineStockEditor";
 import {
   formatDiscount,
   formatQualityShape,
@@ -65,6 +66,9 @@ export function ProductTable({
             </TableHead>
             <TableHead className="text-right text-[13px] font-medium uppercase tracking-wide text-zinc-500">
               Price (PKR)
+            </TableHead>
+            <TableHead className="text-right text-[13px] font-medium uppercase tracking-wide text-zinc-500">
+              Stock
             </TableHead>
             <TableHead className="w-12 text-right text-[13px] font-medium uppercase tracking-wide text-zinc-500">
               <span className="sr-only">Actions</span>
@@ -124,6 +128,19 @@ export function ProductTable({
                     productId={product.id}
                     productName={product.name}
                     price={product.price}
+                    includeInactive={includeInactive}
+                    disabled={!product.isActive}
+                  />
+                </TableCell>
+
+                {/* Stock sits next to price on purpose: they are the two numbers
+                    the owner maintains per product, and they are edited the same
+                    way. Every other movement of this figure comes from a sale. */}
+                <TableCell className="text-right">
+                  <InlineStockEditor
+                    productId={product.id}
+                    productName={product.name}
+                    stock={product.stock}
                     includeInactive={includeInactive}
                     disabled={!product.isActive}
                   />

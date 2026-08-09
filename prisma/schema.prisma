@@ -41,6 +41,9 @@ model Product {
   qualityTier     String? // "premium" | "simple" | null
   shape           String? // "circle" | "rectangular_round" | null (russ)
   unit            String? // "cotton" (eggs) | "piece" | "bottle" | null
+  /// Units on hand. TEMPORARY seed value of 100 — the owner sets real numbers
+  /// via the catalog stock editor. Beverages + bakery only; milk has no products.
+  stock           Int         @default(100)
   isActive        Boolean     @default(true)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt

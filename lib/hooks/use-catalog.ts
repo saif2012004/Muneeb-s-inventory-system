@@ -41,6 +41,8 @@ export type Product = {
   price: number;
   size: string | null;
   discountPercent: number | null;
+  /** Units on hand. Beverages + bakery; milk has no products. */
+  stock: number;
   qualityTier: string | null;
   shape: string | null;
   unit: string | null;
@@ -166,6 +168,12 @@ export type ProductWriteInput = {
   price: number;
   size: string | null;
   discountPercent: number | null;
+  /**
+   * OPTIONAL on write. A new product takes the column default rather than the
+   * dialog inventing a number — stock is counted on the shelf, through the
+   * inline editor, not guessed at the moment a catalog row is created.
+   */
+  stock?: number;
   qualityTier: string | null;
   shape: string | null;
   unit: string | null;
@@ -216,6 +224,48 @@ export function useUpdateProductPrice(includeInactive: boolean) {
       queryClient.setQueryData<Product[]>(productsKey, (current) =>
         current?.map((product) =>
           product.id === id ? { ...product, price } : product
+        )
+      );
+
+      return { previous };
+    },
+
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(productsKey, context.previous);
+      }
+    },
+
+    onSettled: () => invalidateCatalog(queryClient),
+  });
+}
+
+/**
+ * Set a product's stock outright — the owner counting the shelf, not a sale.
+ *
+ * A SET, not an adjustment: the sale routes own every +/- movement, inside their
+ * own transactions. If this offered "add 20" as well there would be two ways
+ * stock changes and a race between them the moment a sale lands mid-edit.
+ *
+ * Optimistic, exactly like the price editor, and for the same reason — the
+ * number changes under the owner's finger and rolls back if the save fails, so
+ * a failed write can never leave a wrong figure on screen.
+ */
+export function useUpdateProductStock(includeInactive: boolean) {
+  const queryClient = useQueryClient();
+  const productsKey = catalogKeys.products(includeInactive);
+
+  return useMutation({
+    mutationFn: ({ id, stock }: { id: string; stock: number }) =>
+      api.patch<Product>(`/api/products/${id}`, { stock }),
+
+    onMutate: async ({ id, stock }) => {
+      await queryClient.cancelQueries({ queryKey: productsKey });
+      const previous = queryClient.getQueryData<Product[]>(productsKey);
+
+      queryClient.setQueryData<Product[]>(productsKey, (current) =>
+        current?.map((product) =>
+          product.id === id ? { ...product, stock } : product
         )
       );
 

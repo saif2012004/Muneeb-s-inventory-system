@@ -15,6 +15,7 @@ const PRODUCT_SELECT = {
   id: true,
   name: true,
   price: true,
+  stock: true,
   size: true,
   discountPercent: true,
   qualityTier: true,

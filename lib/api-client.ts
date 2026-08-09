@@ -13,12 +13,28 @@ import { LOGIN_ROUTE } from "@/lib/routes";
 /** A product blocking a delete, as returned in a 409 `blockedBy`. */
 export type BlockingProduct = { id: string; name: string; saleCount: number };
 
+/**
+ * A product with insufficient stock, as returned in a 409 `shortBy`.
+ *
+ * Kept separate from BlockingProduct: that means "has sale history, cannot be
+ * deleted", this means "not enough units". Different problems, different fixes.
+ */
+export type StockShortfall = {
+  productId: string;
+  name: string;
+  available: number;
+  requested: number;
+  shortfall: number;
+};
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
     /** Populated on a 409 from the catalog delete guard. */
-    readonly blockedBy: BlockingProduct[] = []
+    readonly blockedBy: BlockingProduct[] = [],
+    /** Populated on a 409 from the sale stock check. */
+    readonly shortBy: StockShortfall[] = []
   ) {
     super(message);
     this.name = "ApiError";
@@ -35,7 +51,16 @@ export class ApiError extends Error {
    * instead — so it must be shown verbatim, never replaced with "Delete failed".
    */
   get isBlockedByHistory(): boolean {
-    return this.status === 409;
+    return this.status === 409 && this.blockedBy.length > 0;
+  }
+
+  /**
+   * The sale was refused for insufficient stock. The UI offers RESTOCK for the
+   * named products and a retry — not a generic "try again", which would just
+   * fail identically.
+   */
+  get isBlockedByStock(): boolean {
+    return this.shortBy.length > 0;
   }
 }
 
@@ -44,7 +69,12 @@ export const SESSION_EXPIRED_MESSAGE =
 
 type ApiEnvelope<T> =
   | { data: T; error: null }
-  | { data: null; error: string; blockedBy?: BlockingProduct[] };
+  | {
+      data: null;
+      error: string;
+      blockedBy?: BlockingProduct[];
+      shortBy?: StockShortfall[];
+    };
 
 /**
  * How long to wait before giving up on a request.
@@ -98,7 +128,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       response.status,
       envelope.error ?? "Something went wrong. Please try again.",
       // Present only on a 409 from the delete guard; [] everywhere else.
-      "blockedBy" in envelope ? (envelope.blockedBy ?? []) : []
+      "blockedBy" in envelope ? (envelope.blockedBy ?? []) : [],
+      // Present only on a 409 from the sale stock check.
+      "shortBy" in envelope ? (envelope.shortBy ?? []) : []
     );
   }
 

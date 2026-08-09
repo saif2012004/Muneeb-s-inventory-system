@@ -22,6 +22,17 @@ const price = z
   .min(0, { message: "Price cannot be negative" })
   .max(99_999_999.99, { message: "Price is too large" });
 
+/**
+ * Units on hand. A WHOLE, NON-NEGATIVE count — you cannot have 2.5 bottles on a
+ * shelf, and negative stock is the exact state the sale block exists to prevent,
+ * so it must not be reachable through the editor either.
+ */
+const stock = z
+  .number({ message: "Stock must be a number" })
+  .int({ message: "Stock must be a whole number" })
+  .min(0, { message: "Stock cannot be negative" })
+  .max(1_000_000, { message: "Stock is too large" });
+
 const id = z.string().min(1, { message: "A valid id is required" });
 
 export const PRODUCT_SIZES = [
@@ -112,6 +123,7 @@ export const productUpdateSchema = z
     name: name.optional(),
     subCategoryId: id.optional(),
     price: price.optional(),
+    stock: stock.optional(),
     size,
     discountPercent,
     qualityTier,

@@ -1,13 +1,24 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
+import {
+  fail,
+  failStockBlocked,
+  firstIssue,
+  ok,
+  requireOwner,
+  serverError,
+} from "@/lib/api";
 import { resolveModuleCategoryId } from "@/lib/modules";
 import { prisma } from "@/lib/prisma";
 import {
   SALE_DETAIL_SELECT,
   SALE_PRODUCT_SELECT,
+  applyStockDeltas,
   checkTotalFits,
+  computeStockDeltas,
+  findStockShortfalls,
+  stockBlockMessage,
   isSaleProblem,
   loadSaleProducts,
   reconcileSaleLines,
@@ -186,7 +197,23 @@ export async function PATCH(
     const tooLarge = checkTotalFits(totalAmount);
     if (tooLarge) return fail(tooLarge.message, tooLarge.status);
 
+    /**
+     * STOCK, from the SAME reconciliation that produced the line writes — not a
+     * second walk over the submitted items. A quantity edit moves stock by the
+     * DIFFERENCE (12 -> 8 gives 4 back), a removed line restores its full stored
+     * quantity, a new line takes its own, and a product swap does both.
+     */
+    const stockDeltas = computeStockDeltas(existing.items, reconciled);
+    const shortfalls = findStockShortfalls(stockDeltas, products);
+    if (shortfalls.length > 0) {
+      return failStockBlocked(stockBlockMessage(shortfalls), shortfalls);
+    }
+
     const sale = await prisma.$transaction(async (tx) => {
+      // Stock first: its conditional update aborts the whole transaction
+      // before any line is touched if the numbers moved underneath us.
+      await applyStockDeltas(tx, stockDeltas);
+
       if (removedIds.length > 0) {
         // `saleId` in the filter as well as the ids: a scoped delete can never
         // reach a line on someone else's sale, whatever the payload said.
@@ -247,13 +274,40 @@ export async function DELETE(
   try {
     const sale = await prisma.beverageSale.findUnique({
       where: { id: params.id },
-      select: { id: true, _count: { select: { items: true } } },
+      // The line productIds and quantities are what gets GIVEN BACK to stock —
+      // fetched here rather than counted, because a deleted sale must return
+      // exactly what it took.
+      select: {
+        id: true,
+        items: { select: { id: true, productId: true, quantity: true } },
+        _count: { select: { items: true } },
+      },
     });
     if (!sale) return fail("That sale no longer exists.", 404);
+
+    /**
+     * Deleting a sale RESTORES its stock. Every delta here is positive, which is
+     * why a delete can never be blocked and needs no shortfall check — giving
+     * units back always succeeds.
+     */
+    const stockDeltas = computeStockDeltas(
+      sale.items.map((line) => ({
+        id: line.id,
+        productId: line.productId,
+        quantity: line.quantity,
+        // Not used by the stock maths; present to satisfy ExistingSaleLine.
+        unitPrice: new Prisma.Decimal(0),
+        discountPercent: new Prisma.Decimal(0),
+      })),
+      { updates: [], creates: [], removedIds: sale.items.map((l) => l.id) }
+    );
 
     await prisma.$transaction(async (tx) => {
       await tx.beverageSaleItem.deleteMany({ where: { saleId: sale.id } });
       await tx.beverageSale.delete({ where: { id: sale.id } });
+      // Same transaction as the deletion: the sale and the restock commit
+      // together or not at all.
+      await applyStockDeltas(tx, stockDeltas);
     });
 
     return ok({ deleted: "hard" as const, id: sale.id, itemCount: sale._count.items });

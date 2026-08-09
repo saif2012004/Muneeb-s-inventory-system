@@ -38,6 +38,33 @@ export function failBlocked(
 }
 
 /**
+ * 409 for a sale refused because a product has insufficient stock.
+ *
+ * Same contract as `failBlocked` and for the same reason: `error` is the
+ * sentence to show, `shortBy` is the machine-readable list the UI acts on. The
+ * Restock action needs the product ID and the numbers — scraping them back out
+ * of the prose is how a UI ends up subtly disagreeing with the server about
+ * what is short and by how much.
+ *
+ * A SEPARATE field from `blockedBy` deliberately: that one means "this product
+ * has sale history, you may not delete it", this one means "there aren't enough
+ * units". Different problems, different remedies, and collapsing them into one
+ * field would force every consumer to guess which it received.
+ */
+export function failStockBlocked(
+  error: string,
+  shortBy: {
+    productId: string;
+    name: string;
+    available: number;
+    requested: number;
+    shortfall: number;
+  }[]
+): NextResponse {
+  return NextResponse.json({ data: null, error, shortBy }, { status: 409 });
+}
+
+/**
  * Logs the real error server-side and returns a generic message. Raw Prisma
  * errors carry column names and connection details — never send them out.
  */

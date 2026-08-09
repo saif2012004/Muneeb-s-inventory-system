@@ -32,15 +32,26 @@ export type SaleProduct = {
   id: string;
   name: string;
   price: Prisma.Decimal;
+  /** Units on hand, for the stock check. See computeStockDeltas below. */
+  stock: number;
   isActive: boolean;
   subCategory: { categoryId: string };
 };
 
-/** The Prisma `select` that produces a {@link SaleProduct}. */
+/**
+ * The Prisma `select` that produces a {@link SaleProduct}.
+ *
+ * `stock` rides along here on purpose. Every sale route already loads its
+ * products through `loadSaleProducts` to validate them, so adding the column to
+ * that existing select means the stock check costs **zero extra queries** — which
+ * matters at `connection_limit=1`, where an extra read is a real ~1s of the
+ * owner's time rather than a rounding error.
+ */
 export const SALE_PRODUCT_SELECT = {
   id: true,
   name: true,
   price: true,
+  stock: true,
   isActive: true,
   subCategory: { select: { categoryId: true } },
 } as const;
@@ -502,4 +513,204 @@ export function reconcileSaleLines(
     .filter((id) => !kept.has(id));
 
   return { updates, creates, removedIds, repricedItemIds };
+}
+
+// ---------------------------------------------------------------------------
+// Stock
+// ---------------------------------------------------------------------------
+
+/**
+ * STOCK IS DERIVED FROM THE RECONCILIATION. There is no second diff.
+ *
+ * `reconcileSaleLines` already decided which lines are new, which changed and
+ * which went away. Stock is a pure function of that same split plus the
+ * quantities already stored, so it is computed FROM it rather than re-derived —
+ * a parallel walk over the submitted lines is exactly how stock drifts away from
+ * the sale it is supposed to describe.
+ *
+ * ---------------------------------------------------------------------------
+ * THE EDIT CASE IS THE WHOLE POINT
+ * ---------------------------------------------------------------------------
+ * A create decrements by the quantity sold. An EDIT must move stock by the
+ * DIFFERENCE against what was stored, never by the submitted quantity:
+ *
+ *   12 -> 8    frees 4 units    (+4)     NOT -8
+ *   8  -> 12   takes 4 more     (-4)     NOT -12
+ *
+ * Decrementing by the submitted quantity looks perfectly correct on create and
+ * only goes wrong on edit, silently. Worth stating twice.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A MAP KEYED BY PRODUCT
+ * ---------------------------------------------------------------------------
+ * A sale may list the same product on two lines, and an edit may move quantity
+ * between them. Accumulating per PRODUCT nets those into a single adjustment:
+ * two lines of the same drink, 5 and 3, is one `-8` rather than two writes
+ * racing to read-modify-write the same row. A product swap then falls out
+ * naturally as `+old` and `-new` on two different keys.
+ *
+ * Sign convention: NEGATIVE consumes stock, POSITIVE restores it.
+ */
+export type StockDeltas = Map<string, number>;
+
+export function computeStockDeltas(
+  existing: ExistingSaleLine[],
+  result: {
+    updates: (SaleLine & { id: string })[];
+    creates: SaleLine[];
+    removedIds: string[];
+  }
+): StockDeltas {
+  const priorById = new Map(existing.map((line) => [line.id, line]));
+  const deltas: StockDeltas = new Map();
+
+  const add = (productId: string, amount: number) => {
+    deltas.set(productId, (deltas.get(productId) ?? 0) + amount);
+  };
+
+  // New lines take stock.
+  for (const line of result.creates) add(line.productId, -line.quantity);
+
+  // Removed lines give their full stored quantity back.
+  for (const id of result.removedIds) {
+    const prior = priorById.get(id);
+    if (prior) add(prior.productId, prior.quantity);
+  }
+
+  // Kept lines move by the DIFFERENCE — or, when the product changed, give the
+  // old product's units back in full and take the new product's in full.
+  for (const line of result.updates) {
+    const prior = priorById.get(line.id);
+    if (!prior) {
+      add(line.productId, -line.quantity);
+      continue;
+    }
+    if (prior.productId === line.productId) {
+      add(line.productId, prior.quantity - line.quantity);
+    } else {
+      add(prior.productId, prior.quantity);
+      add(line.productId, -line.quantity);
+    }
+  }
+
+  // A net-zero product is not a write. Dropping it keeps the transaction to the
+  // rows that actually move — re-saving an unchanged 100-line sale writes none.
+  // Array.from so the map is not mutated while being iterated.
+  for (const [productId, delta] of Array.from(deltas.entries())) {
+    if (delta === 0) deltas.delete(productId);
+  }
+
+  return deltas;
+}
+
+/** One product that cannot cover what this save would take from it. */
+export type StockShortfall = {
+  productId: string;
+  name: string;
+  /** Units on hand right now. */
+  available: number;
+  /** Units this save needs to take — on an edit, the ADDITIONAL units. */
+  requested: number;
+  /** How many short. Always >= 1. */
+  shortfall: number;
+};
+
+/**
+ * Which products cannot cover the save, if any.
+ *
+ * Only NEGATIVE deltas can block — restoring stock never fails. That is why a
+ * delete never needs this, and why every product it must inspect is already
+ * among the ones the route loaded: a removed line only ever gives units back.
+ *
+ * Returns the FULL list, not the first failure, so the owner can fix everything
+ * in one pass instead of resubmitting to discover the next short product. Same
+ * reasoning as the catalog delete guard returning every blocking product.
+ */
+export function findStockShortfalls(
+  deltas: StockDeltas,
+  products: Map<string, SaleProduct>
+): StockShortfall[] {
+  const shortfalls: StockShortfall[] = [];
+
+  for (const [productId, delta] of Array.from(deltas.entries())) {
+    if (delta >= 0) continue;
+    const product = products.get(productId);
+    if (!product) continue;
+
+    const requested = -delta;
+    const remaining = product.stock - requested;
+    if (remaining < 0) {
+      shortfalls.push({
+        productId,
+        name: product.name,
+        available: product.stock,
+        requested,
+        shortfall: -remaining,
+      });
+    }
+  }
+
+  // Biggest shortfall first, name as a stable tiebreak so the alert does not
+  // reshuffle between retries.
+  return shortfalls.sort(
+    (a, b) => b.shortfall - a.shortfall || a.name.localeCompare(b.name)
+  );
+}
+
+/** The prose half of the block. The structured `blockedBy` is the contract. */
+export function stockBlockMessage(shortfalls: StockShortfall[]): string {
+  if (shortfalls.length === 1) {
+    const only = shortfalls[0];
+    return `Not enough stock for "${only.name}" — ${only.available} in stock but this sale needs ${only.requested}. Restock it and try again.`;
+  }
+  return `Not enough stock for ${shortfalls.length} products on this sale. Restock them and try again.`;
+}
+
+/**
+ * Thrown when the conditional update below matched nothing — stock moved between
+ * the check and the write. Its own class so the route answers 409 "reload and
+ * try again" rather than a 500: nothing is broken, the number changed.
+ */
+export class StockConflictError extends Error {
+  constructor(public readonly productId: string) {
+    super("Stock changed while this sale was being saved. Reload and try again.");
+    this.name = "StockConflictError";
+  }
+}
+
+/**
+ * Apply the deltas. MUST be called inside the sale's own transaction.
+ *
+ * Uses a CONDITIONAL `updateMany` rather than a plain `update`, so "never
+ * negative" lives in the WHERE clause and is enforced by the database:
+ *
+ *   UPDATE "Product" SET stock = stock + d WHERE id = ? AND stock >= -d
+ *
+ * `findStockShortfalls` has already produced the friendly structured rejection
+ * by this point; this covers the gap between that read and this write. The
+ * pre-check exists for the message, the WHERE clause exists for the guarantee —
+ * a `count` of 0 aborts the whole transaction rather than committing a sale
+ * against stock that was not there.
+ *
+ * One statement PER PRODUCT, not per line (see the Map above), awaited in
+ * SERIES: at `connection_limit=1` a Promise.all would queue on the one
+ * connection anyway, and inside a transaction it risks the pool timeout.
+ */
+export async function applyStockDeltas(
+  tx: Prisma.TransactionClient,
+  deltas: StockDeltas
+): Promise<void> {
+  for (const [productId, delta] of Array.from(deltas.entries())) {
+    if (delta === 0) continue;
+
+    const result = await tx.product.updateMany({
+      where:
+        delta < 0
+          ? { id: productId, stock: { gte: -delta } }
+          : { id: productId },
+      data: { stock: { increment: delta } },
+    });
+
+    if (result.count === 0) throw new StockConflictError(productId);
+  }
 }

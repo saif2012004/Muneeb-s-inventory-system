@@ -1,7 +1,14 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
+import {
+  fail,
+  failStockBlocked,
+  firstIssue,
+  ok,
+  requireOwner,
+  serverError,
+} from "@/lib/api";
 import { resolveModuleCategoryId } from "@/lib/modules";
 import { prisma } from "@/lib/prisma";
 import {
@@ -11,9 +18,13 @@ import {
   SALE_PRODUCT_SELECT,
   buildSaleDateWindow,
   checkTotalFits,
+  applyStockDeltas,
   computeLineTotal,
   computeSaleTotal,
+  computeStockDeltas,
+  findStockShortfalls,
   isSaleProblem,
+  stockBlockMessage,
   loadSaleProducts,
   snapshotUnitPrice,
   toSaleListRow,
@@ -171,19 +182,39 @@ export async function POST(request: Request): Promise<NextResponse> {
     const tooLarge = checkTotalFits(totalAmount);
     if (tooLarge) return fail(tooLarge.message, tooLarge.status);
 
-    // A nested `create` IS a single transaction — Prisma wraps the parent row
-    // and its children in one, so the sale and its lines commit or fail
-    // together. No sale can ever exist without its items.
-    const sale = await prisma.beverageSale.create({
-      data: {
-        customerId,
-        saleDate,
-        notes: notes ?? null,
-        discountPercent,
-        totalAmount,
-        items: { create: lines },
-      },
-      select: SALE_DETAIL_SELECT,
+    /**
+     * STOCK. On a create every line simply takes its quantity, so the delta is
+     * the reconciliation against nothing — the SAME function the edit path
+     * uses, rather than a special case written twice.
+     */
+    const stockDeltas = computeStockDeltas([], {
+      updates: [],
+      creates: lines,
+      removedIds: [],
+    });
+    const shortfalls = findStockShortfalls(stockDeltas, products);
+    if (shortfalls.length > 0) {
+      // Blocked — never negative stock, never warn-and-proceed.
+      return failStockBlocked(stockBlockMessage(shortfalls), shortfalls);
+    }
+
+    // The nested `create` is atomic on its own, but stock must commit WITH it:
+    // a sale recorded against stock that was never decremented is exactly the
+    // drift this feature exists to prevent. The stock write goes first so its
+    // conditional guard aborts before any sale row exists.
+    const sale = await prisma.$transaction(async (tx) => {
+      await applyStockDeltas(tx, stockDeltas);
+      return tx.beverageSale.create({
+        data: {
+          customerId,
+          saleDate,
+          notes: notes ?? null,
+          discountPercent,
+          totalAmount,
+          items: { create: lines },
+        },
+        select: SALE_DETAIL_SELECT,
+      });
     });
 
     return ok(serialize(sale), 201);

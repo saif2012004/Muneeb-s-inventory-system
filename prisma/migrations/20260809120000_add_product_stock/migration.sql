@@ -1,0 +1,29 @@
+-- Stock tracking: units on hand, per product.
+--
+-- A PLAIN INTEGER PER PRODUCT ROW is only correct because the discount rework
+-- (migration 20260809000000 + the guarded variant delete) removed the 36
+-- discount-variant products first. Before that, "Pepsi 1.5L" existed as four
+-- rows — full price, 20%, 30% and 60% off — all describing the SAME physical
+-- bottle. A per-row integer would then have claimed 4 x 100 = 400 bottles for a
+-- shelf holding 100, and a sale of the discounted row would not have reduced the
+-- full-price row's stock. All 27 surviving products are real SKUs, so one row is
+-- one thing you can count. Do not reintroduce variant products.
+--
+-- THE DEFAULT OF 100 IS A TEMPORARY TEST VALUE. It exists so the app is not
+-- sitting at zero stock during development, where every sale would be blocked.
+-- The owner sets real numbers through the catalog stock editor in production.
+-- It is NOT a business default and should not be treated as one.
+--
+-- Beverages + bakery only in practice: milk has no Product rows at all (milk is
+-- delivered by farmers and sold by the litre), so no milk screen has, or should
+-- gain, a stock concept.
+--
+-- Additive and safe on existing rows: NOT NULL with a default backfills every
+-- existing product in place. Verified before running by generating this SQL
+-- twice with `prisma migrate diff` — once file-to-file and once against the LIVE
+-- datasource — and getting byte-identical output, which proves both that there
+-- was no schema drift and that this migration adds one column and does nothing
+-- else. Saif's records are untouched.
+
+-- AlterTable
+ALTER TABLE "Product" ADD COLUMN     "stock" INTEGER NOT NULL DEFAULT 100;
