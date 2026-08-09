@@ -1041,25 +1041,47 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
   turn up.** Raise them app-wide in the a11y/mobile sweep, ideally by overriding the `TabsTrigger`
   default once in `components/ui/tabs.tsx` rather than per usage. Everything else measured
   clean: inputs, buttons and cards are all ≥44px.
-- **`Product.discountPercent` COLUMN DROP — QUEUED, and deliberately NOT done yet.** The discount
-  rework (2026-08-09) made discount a sale-time percentage and deleted the 36 variant products, so
-  the column has no remaining purpose. It is still on the table on purpose:
-  - **Do it AFTER stock**, as its own migration. Dropping a column is irreversible, and that
-    migration should not also be carrying a data delete or competing with a feature.
-  - **Two things to clean up together:** the column itself (**6 files still read it** —
+- **`Product.discountPercent` COLUMN DROP — NEXT IN LINE.** The discount rework (2026-08-09) made
+  discount a sale-time percentage and deleted the 36 variant products, so the column has no
+  remaining purpose. It was held back behind stock; **stock shipped on 2026-08-09, so the only
+  thing still gating this is finding a slot for it.** Its own migration, nothing else in it.
+  - **Three things to clean up together:** the column itself (**6 files still read it** —
     `components/catalog/ProductTable.tsx`, `lib/sale-catalog.ts`, `lib/catalog-display.ts`,
-    `lib/validations/catalog.ts`, and the two `/api/products` routes), and
+    `lib/validations/catalog.ts`, and the two `/api/products` routes);
     **`SALE_DETAIL_SELECT` in `lib/sales.ts`, which still joins `product.discountPercent`** even
-    though the UI now reads the line's own snapshotted value. Harmless today, but it is the last
-    thing making a sale line look like it takes its discount from the product.
+    though the UI reads the line's own snapshotted value; and the **catalog's "Discount" COLUMN,
+    which now renders "—" on all 27 rows** and is pure noise. They go in one change — dropping the
+    column without removing the table column would just break the page.
   - **Not urgent, because the entry point is already closed:** `ProductDialog`'s discount field was
     removed in the same commit, so the owner cannot create a new variant in the meantime. All 27
     surviving products carry `discountPercent` 0 or null.
   - **Do NOT read `product.discountPercent` for a sale line.** The line's own `discountPercent` is
     the snapshot; the product's is a dead field awaiting removal. Reading it would make an old
     bill's discount mutable, which is the exact thing the rework fixed.
+- **⚠️ THE BEVERAGES/BAKERY SALE `PATCH` IS FULLY IMPLEMENTED AND HAS NO UI. IT IS NOT DEAD CODE.**
+  This is the single easiest thing in the repo to mistake for cruft and delete. Do not.
+  - **What exists:** `PATCH /api/{beverages,bakery}/sales/[id]` is complete and server-verified.
+    It reconciles line edits through `reconcileSaleLines`, carries the **discount** snapshot
+    through, and reconciles **stock** by delta — quantity up/down adjusts by the difference, a
+    removed line restores its full quantity, a new line decrements, a product swap restores the
+    old product and takes the new, and two lines of the same product net to one adjustment. All
+    inside one transaction.
+  - **What does not exist:** any way for the owner to reach it. There is no `useUpdateSale` hook
+    and the beverages/bakery sale lists offer Delete only. (Milk sales *do* have an edit dialog —
+    the two modules that share `reconcileSaleLines` are the ones without.)
+  - **Verified how:** the edit paths were exercised against the API over real HTTP in an
+    authenticated browser session, with before/after stock numbers, on 2026-08-09. Server logic is
+    proven; the screen is what is missing. See
+    `docs/responses/2026-08-09-stock-tracking-shipped.md` §3–4.
+  - **Where the UI lands: with the UNIFIED CROSS-CATEGORY SALE, not before.** Deliberately not
+    built standalone — that rework rebuilds the sale form anyway, and an edit screen written
+    against the current per-module structure would be built to be thrown away. The route being
+    already stock- and discount-aware is what makes deferring it safe.
+  - Consequence worth stating: **the hardest behaviour in the stock feature (12 -> 8 freeing 4) is
+    currently correct and unreachable.** If someone reports "editing a sale doesn't work", the
+    answer is that there is no edit screen yet — not that the reconciliation is broken.
 - **Phase 8 (Context7) — DIAGNOSE THE CONNECTION, don't keep routing around it.** The Context7 MCP
-  server has failed to connect for **6 consecutive sessions** (3–9 Aug 2026), staying in
+  server has failed to connect for **8 consecutive sessions** (3–9 Aug 2026), staying in
   "connecting" with no tools ever exposed. The `node_modules` fallback above is working and has
   genuinely been the stronger source — the discount migration SQL was generated by the real Prisma
   6 CLI via `migrate diff`, `Prisma.Decimal`'s `ROUND_HALF_UP` default was confirmed by executing
