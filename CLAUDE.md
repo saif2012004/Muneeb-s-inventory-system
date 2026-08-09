@@ -32,6 +32,10 @@ guardrail in the same pass.
 the file is part of the diff. If you are unsure whether a rule is still true, **verify it against
 the code before repeating it** — including the rules in this file.
 
+**Open work is tracked in ONE place: the `✅ PRE-HANDOFF CHECKLIST` near the end of this file.**
+Three of its items block go-live. Do not record an open item anywhere else — a task written into a
+prose section is a task that gets lost, which is exactly how the checklist came to be needed.
+
 ## Project Overview
 
 A full-stack business management web app for a single owner who runs three business units:
@@ -603,41 +607,11 @@ same commit.
 
 ### 🔴 OPEN SECURITY ITEM — login form falls back to a GET with credentials in the URL
 
-**MUST FIX before client handoff. Do not close Phase 8 with this outstanding.**
+**The login form has no `method`, so with JS absent it submits GET and puts the email and password
+in the query string. Reproduced, unfixed, and it BLOCKS GO-LIVE.**
 
-**Symptom.** When the client JS bundle is absent or has not hydrated, the login form submits
-NATIVELY. There is no `method` on the `<form>`, so the browser defaults to **GET**, and the
-email and password land in the query string:
-
-```
-/login?email=owner%40example.com&password=<the actual password>
-```
-
-**Why it matters.** A password in a URL is not a cosmetic problem — it is written to browser
-history, server and proxy access logs, and any `Referer` header sent onward. Those are places
-credentials are never rotated out of, and the owner reuses passwords like everyone else.
-
-**Status.** Found during Phase 5 mobile verification (2026-08-08) and **reproduced**: the URL
-above is what the address bar actually showed. It only appeared while every client chunk was
-404ing from a corrupted `.next` (see the dev-server note below), and it did NOT recur once
-the chunks served 200 — so in normal operation the React `onSubmit` handler intercepts and
-this path is not taken. It is a **degraded-state** exposure, not an everyday one.
-
-That is a reason to schedule it, not to dismiss it: "only when JS fails" still includes a
-failed deploy, a CDN hiccup, an ad-blocker or a locked-down corporate browser — exactly the
-moments a user retypes their password.
-
-**The fix (not applied yet — deliberately deferred, Phase 1 code, out of Phase 5 scope):**
-the login form must never be capable of sending credentials via GET.
-- Put `method="post"` on the `<form>` so the no-JS fallback can never serialise fields into
-  the URL, and
-- ensure the no-JS path cannot post credentials anywhere that isn't a real handler — prefer
-  a server action / route that accepts POST only, and reject non-POST outright.
-- Re-test with JavaScript disabled in the browser, not just with JS working. The bug is
-  invisible in the working case.
-
-Owner: whoever picks up Phase 8, or a standalone task before handoff. **Do not let this get
-lost in the a11y sweep.**
+**→ Full write-up, fix and re-test instructions: PRE-HANDOFF CHECKLIST item 1.** Tracked there, not
+here — do not add status notes to this section.
 
 ---
 
@@ -828,44 +802,20 @@ for "what will actually run at the pinned version". **Say which source you used*
 No client is using the app and there is no real business data, so Hobby is fine and no
 upgrade is pending work. Do not raise it as a blocker on every deploy.
 
-**Upgrade to Vercel Pro at CLIENT HANDOFF — event-triggered, not date-triggered.**
-The trigger is: *the client starts entering real records and relying on the app for daily
-use.* Upgrade **before** that moment, never after. Two independent reasons:
-1. **Terms** — Vercel Hobby forbids commercial use. Once it is a live business tool, Hobby
-   is a terms violation, and enforcement would hit the system the client runs their books on.
-2. **Headroom** — Pro raises function duration/size limits and concurrency. Hobby's limits
-   are fine for an idle build-phase app and not something to discover under live load.
+**Upgrade to Vercel Pro + Supabase Pro at CLIENT HANDOFF — event-triggered, not date-triggered.**
+The trigger is *the client starting to enter real records and rely on the app*. Hobby forbids
+commercial use, and the free Supabase tier keeps zero backups.
+**→ PRE-HANDOFF CHECKLIST item 3.** Not tracked here.
 
 ### ⚠️ HANDOFF INFRA ITEM — the function and the database are on different continents
 
-**Do not fix mid-build. Do it at go-live, with the Pro upgrade.**
+Function in **`iad1`** (Washington DC), Supabase in **`ap-northeast-2`** (Seoul): ~11,000 km on
+every query, measured at **≈1.07s each** against the deployed function. **This is the ~1.1s/query
+floor the whole app is designed around** — see "One database round trip costs ~1.1s" in API Route
+Conventions, which is the practical consequence, and the progressive load on `/reports`, which is
+the mitigation already in place.
 
-Measured on a real deployment, not inferred:
-
-| | |
-|---|---|
-| Serverless function region | **`iad1` — Washington DC** |
-| Supabase region | **`ap-northeast-2` — Seoul** |
-| Distance | ~11,000 km, every single query |
-
-`X-Vercel-Id: bom1::iad1::…` — the first segment is only the edge PoP that accepted the
-request (Mumbai, nearest to Pakistan); the second is where the function actually ran.
-
-**This is the ~1.1s/query floor, and it is NOT a dev-machine artifact.** Measured warm against
-the deployed function:
-
-| Endpoint | Queries | Deployed latency |
-|---|---|---|
-| `/api/reports/summary` | 1 | **~1.75s** |
-| `/api/reports/balances` | 6 | **~6.4s** (≈1.07s per query) |
-
-So production is no faster than local. Co-locating the function with the database at handoff —
-set the project's function region to `icn1` (Seoul), or move the Supabase project to a region
-near `iad1` — should collapse this outright and is the single highest-value performance change
-available. Everything else is working around it.
-
-Until then, the mitigation already in place is the progressive load on `/reports`: the page
-paints on the one-query summary and the six-query balances fill in behind their own skeletons.
+**→ Measurements, the fix (`icn1`), and its go-live timing: PRE-HANDOFF CHECKLIST item 14.**
 
 ### Deployment reality check — read before trusting a green deploy
 
@@ -904,16 +854,12 @@ Note: a project's FIRST CLI deployment is assigned to production automatically, 
   `prisma generate` only.
 
 ### PWA (Phase 8)
-Manifest `start_url` must be **`"/"`**, and `scope: "/"`. The app is served at the root;
-`(dashboard)` is a layout group that contributes nothing to the URL, and no `/dashboard`
-route exists. A wrong `start_url` 404s every installed home-screen launch, and only breaks
-after install — easy to miss.
+Manifest `start_url` and `scope` must both be **`"/"`** — the app is served at the root.
+**→ PRE-HANDOFF CHECKLIST item 11** for the full item and why a wrong value only breaks after
+install.
 
 ### Still true regardless of plan
-- **Supabase free tier pauses after 7 days of inactivity and keeps zero backups.** For real
-  financial data use **Supabase Pro (~$25/mo)** — removes the pause, adds daily backups — OR
-  at minimum a scheduled keep-alive ping plus a weekly DB export. Do not ship a business's
-  money records on a zero-backup tier. Same handoff trigger as the Vercel upgrade.
+- **Supabase free tier pauses after 7 days and keeps zero backups** → CHECKLIST item 3.
 - Prisma on Vercel: `prisma generate` runs in BOTH `postinstall` and the build command.
   Vercel caches dependencies, which can skip `postinstall` and ship a stale client — the
   build-command copy is the guard. Pooled `DATABASE_URL` at runtime, `DIRECT_URL` for
@@ -967,10 +913,12 @@ defect — an operational trap that cost real time in Phase 5.
 
 Update this table as phases complete. Change ⬜ to ✅.
 
-**Phase 8 cannot be marked ✅ while the login GET-fallback is unfixed.** It is a real
-credential-exposure path (email + password in the URL when JS is absent) and is written up in
-full in the Authentication section above. Fix it as its own task before handoff, or inside
-Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
+**Phase 8 cannot be marked ✅ while the login GET-fallback is unfixed.** A real credential-exposure
+path, not a nice-to-have. **→ PRE-HANDOFF CHECKLIST item 1.**
+
+**Before declaring the project ready for the client, work the PRE-HANDOFF CHECKLIST**, not this
+table. Phase 8 is polish; the checklist is everything that must be true at handoff, including three
+items that block go-live outright.
 
 ### Carried-forward notes
 
@@ -1121,33 +1069,13 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
   - **The export route does NOT return the `{ data, error }` envelope on success** (it
     returns a file) but DOES on failure, and `useExportCSV` checks the content type before
     saving — otherwise a 400 gets written to disk as a `.csv` full of JSON.
-- **Phase 8 (PWA):** `start_url` and `scope` must both be `"/"`. Full reasoning in the
-  **Deployment posture** section above — single source of truth, don't duplicate it here.
-- **Phase 8 (touch targets) — QUEUED, found in 4b:** several controls sit under the Design
-  System's 44px minimum. Measured on the customer profile at 360px: **shadcn `TabsTrigger` is
-  28px** and the **"All customers" back link is 20px**. These are framework/text defaults rather
-  than one-off mistakes, so the same undersized tabs and inline links will exist wherever they
-  are used — Phase 5's milk tabs will inherit it too. **Do NOT patch these piecemeal as they
-  turn up.** Raise them app-wide in the a11y/mobile sweep, ideally by overriding the `TabsTrigger`
-  default once in `components/ui/tabs.tsx` rather than per usage. Everything else measured
-  clean: inputs, buttons and cards are all ≥44px.
-- **`Product.discountPercent` COLUMN DROP — NEXT IN LINE.** The discount rework (2026-08-09) made
-  discount a sale-time percentage and deleted the 36 variant products, so the column has no
-  remaining purpose. It was held back behind stock; **stock shipped on 2026-08-09, so the only
-  thing still gating this is finding a slot for it.** Its own migration, nothing else in it.
-  - **Three things to clean up together:** the column itself (**6 files still read it** —
-    `components/catalog/ProductTable.tsx`, `lib/sale-catalog.ts`, `lib/catalog-display.ts`,
-    `lib/validations/catalog.ts`, and the two `/api/products` routes);
-    **`SALE_DETAIL_SELECT` in `lib/sales.ts`, which still joins `product.discountPercent`** even
-    though the UI reads the line's own snapshotted value; and the **catalog's "Discount" COLUMN,
-    which now renders "—" on all 27 rows** and is pure noise. They go in one change — dropping the
-    column without removing the table column would just break the page.
-  - **Not urgent, because the entry point is already closed:** `ProductDialog`'s discount field was
-    removed in the same commit, so the owner cannot create a new variant in the meantime. All 27
-    surviving products carry `discountPercent` 0 or null.
-  - **Do NOT read `product.discountPercent` for a sale line.** The line's own `discountPercent` is
-    the snapshot; the product's is a dead field awaiting removal. Reading it would make an old
-    bill's discount mutable, which is the exact thing the rework fixed.
+- **Phase 8 tasks (PWA, touch targets, date locale, on-device mobile) → PRE-HANDOFF CHECKLIST**
+  items 11, 10, 12, 13. Not restated here; the checklist is the only place they are tracked.
+- **`Product.discountPercent` is a DEAD COLUMN awaiting its own migration → CHECKLIST item 9.**
+  The one rule that stays here because it is about how to write code today, not about the task:
+  **do NOT read `product.discountPercent` for a sale line.** The line's own `discountPercent` is
+  the snapshot; the product's is dead. Reading it would make an old bill's discount mutable, which
+  is the exact thing the discount rework fixed.
 - **⚠️ THE BEVERAGES/BAKERY SALE `PATCH` IS FULLY IMPLEMENTED AND HAS NO UI. IT IS NOT DEAD CODE.**
   This is the single easiest thing in the repo to mistake for cruft and delete. Do not.
   - **What exists:** `PATCH /api/{beverages,bakery}/sales/[id]` is complete and server-verified.
@@ -1170,76 +1098,247 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
   - Consequence worth stating: **the hardest behaviour in the stock feature (12 -> 8 freeing 4) is
     currently correct and unreachable.** If someone reports "editing a sale doesn't work", the
     answer is that there is no edit screen yet — not that the reconciliation is broken.
-- **PRE-HANDOFF: ONE DELIBERATE DATA RESET before go-live. NOT before then.**
-  The development database carries months of exploratory build data — seeded catalog rows, prices
-  and stock values set to whatever a test needed, and whatever sales survive from verification
-  passes. The owner should start on a clean database holding only his own real records, not a
-  working set that accumulated while the app was being built.
-  - **Do it ONCE, deliberately, at handoff** — not incrementally along the way. Piecemeal cleanup
-    is how you lose a row that turned out to matter, and every verification pass so far has
-    cleaned up after itself (`ZZ_TEST_`-scoped) precisely so this can be one decision at the end.
-  - **Decide explicitly what survives**: the owner account, the catalog (categories,
-    sub-categories, products) with real prices, and real customers/farmers — versus everything
-    transactional (sales, deliveries, purchases, payments), which almost certainly should not.
-  - **Stock is the subtle one.** Every product currently sits at the migration's temporary
-    default of 100, which is not a real count. The reset is the moment the owner walks the shelf
-    and enters actual numbers, so plan for that to be a task he does, not a number we invent.
-  - **Confirm the exact delete set with the owner before running it**, the same way the
-    36-variant delete and every other destructive step in this project was confirmed.
-- **Phase 8 (Context7) — ✅ CLOSED 2026-08-10.** The server was down for 8 consecutive sessions
-  (3–9 Aug), staying in "connecting" with no tools exposed. It reconnected on its own and was
-  verified live this session. No diagnosis was needed in the end. The `node_modules` fallback
-  earned its keep while it was out — the discount migration SQL came from the real Prisma 6 CLI via
-  `migrate diff`, `Prisma.Decimal`'s `ROUND_HALF_UP` default was confirmed by executing it, and the
-  Recharts animation bug in batch 1 was found by reading
+- **The one deliberate data reset before go-live → PRE-HANDOFF CHECKLIST item 2** (a blocker).
+  The habit that supports it stays here: **every verification pass `ZZ_TEST_`-scopes what it
+  creates and removes only that**, precisely so the reset can be one decision at the end rather
+  than a series of small ones. Keep doing that.
+- **Context7 → CHECKLIST, closed items.** It reconnected on 2026-08-10. The `node_modules`
+  fallback earned its keep while it was out — the discount migration SQL came from the real Prisma
+  6 CLI via `migrate diff`, `Prisma.Decimal`'s `ROUND_HALF_UP` default was confirmed by executing
+  it, and the Recharts animation bug in batch 1 was found by reading
   `node_modules/recharts/es6/cartesian/Line.js` — and it remains the sanctioned source when the
-  question is "what will actually run at the pinned version". See the MCP Tools section for the
-  v6-branch pin.
+  question is "what will actually run at the pinned version". See MCP Tools for the v6-branch pin.
 
 ---
 
-## 📋 PRE-HANDOFF OPEN ITEMS — the single list
+## ✅ PRE-HANDOFF CHECKLIST — THE single source of truth for what is left
 
-Everything not yet done, in one place, so a cold session does not have to reconstruct it from the
-carried-forward notes. Details live in the sections linked; this is the index, and it is the thing
-to check against before declaring the project ready for the client.
+**Every open item lives HERE and nowhere else.** These were previously scattered across the
+Authentication section, the Deployment posture section and the carried-forward notes; those places
+now hold only the technical rule and a pointer back to this checklist. **If you close an item,
+close it here.** If you find an open item somewhere else in this file, it is a leak — move it in.
 
-**Verified against the repo and the live database on 2026-08-10.**
+The failure this section exists to prevent: **a BLOCKER getting lost in prose.** Two of these
+cannot be handed to the client under any circumstances, and one of them is a credential exposure.
 
-### 🔴 Blockers — cannot hand over with these open
+**Verified against the repo and the live database on 2026-08-10.** Status is what is TRUE now, not
+what was planned.
 
-| # | Item | Where it's written up |
-|---|---|---|
-| 1 | **Login GET-fallback**: with JS absent the form submits `GET`, putting email + password in the URL. Needs `method="post"` + a POST-only handler, re-tested with JS disabled. **Blocks closing Phase 8.** | Authentication → OPEN SECURITY ITEM |
-| 2 | **One deliberate data reset** before go-live: decide explicitly what survives (owner account, catalog with real prices, real customers/farmers) vs everything transactional. **Stock is the subtle one** — all 27 products sit at the temporary default of 100, which is not a real count; the owner walks the shelf, we do not invent numbers. Confirm the exact delete set first. | Carried-forward → PRE-HANDOFF DATA RESET |
-| 3 | **Vercel Pro + Supabase Pro upgrade**, event-triggered at handoff, not date-triggered. Hobby forbids commercial use; the free Supabase tier pauses after 7 days and keeps **zero backups**. | Deployment posture |
+Legend: `[ ]` open · `[~]` in flight · `[x]` closed · **[BLOCKS GO-LIVE]** = do not hand over
 
-### 🟠 In-flight — the unified sale rework is HALF DONE
+---
 
-| # | Item | State on 2026-08-10 |
-|---|---|---|
-| 4 | **Unified `Sale` build** — API, `/sales` form + edit UI, old routes redirecting, reports rewritten to line-level `Σ netLineTotal` by `moduleKey` | **NOT STARTED.** Migration A (additive) is applied; `Sale`/`SaleItem` exist with `moduleKey` + `netLineTotal` and **nothing reads or writes them**. The app still runs entirely on `BeverageSale`/`BakerySale` |
-| 5 | **Migration B** — drop `BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem` | **NOT WRITTEN, NOT RUN.** Point of no return. Gated on #4 being built AND browser-verified — the old tables are the only thing left to reconcile against |
-| 6 | **`lib/receivables.ts` still sums `BeverageSale` + `BakerySale`** | Dormant (receivables removed from the UI in batch 2), so harmless today — but Migration B would leave it referencing dropped tables. Repoint at `Sale` or delete it as part of #5 |
-| 7 | **Harden the client `unitPrice` override on UPDATE** — keep it on create, ignore it on PATCH | Decided, not implemented. One change in the update branch of `reconcileSaleLines()`. See Price snapshot → "the one un-hardened edge" |
-| 8 | **Sale edit UI** for beverages/bakery — the `PATCH` route is complete, stock- and discount-aware, server-verified, and **has no screen** | Deliberately lands WITH #4, not before. "Editing a sale doesn't work" means there is no screen, not that reconciliation is broken |
+### 🔴 Blockers
+
+#### `[ ]` **1. [BLOCKS GO-LIVE] Login POST-only security fix**
+
+**Status:** open, reproduced, unfixed. **Also blocks closing Phase 8** — do not mark the phase ✅
+while this is outstanding, and do not let it get absorbed into the a11y sweep.
+
+With the client JS bundle absent or unhydrated, the login form submits **natively**. There is no
+`method` on the `<form>`, so the browser defaults to **GET** and the credentials land in the query
+string:
+
+```
+/login?email=owner%40example.com&password=<the actual password>
+```
+
+**Why it is not cosmetic:** a password in a URL is written to browser history, server and proxy
+access logs, and any `Referer` sent onward — places credentials are never rotated out of.
+
+**Found** during Phase 5 mobile verification (2026-08-08) and **reproduced** — that URL is what the
+address bar actually showed. It appeared only while every client chunk was 404ing from a corrupted
+`.next`, and did not recur once chunks served 200. So it is a **degraded-state** exposure, not an
+everyday one — which is a reason to schedule it, not to dismiss it. "Only when JS fails" includes a
+failed deploy, a CDN hiccup, an ad-blocker, or a locked-down corporate browser: exactly the moments
+someone retypes their password.
+
+**The fix:** the form must never be *capable* of sending credentials by GET.
+- `method="post"` on the `<form>`, so the no-JS fallback cannot serialise fields into the URL.
+- The no-JS path must post to a real handler that **accepts POST only** and rejects anything else
+  outright — a server action or a POST-only route.
+- **Re-test with JavaScript disabled in the browser**, not just with JS working. The bug is
+  invisible in the working case, which is how it survived this long.
+
+#### `[ ]` **2. [BLOCKS GO-LIVE] One deliberate data reset before go-live**
+
+**Status:** open. **Do it ONCE, at handoff — never incrementally.** Piecemeal cleanup is how a row
+that turned out to matter gets lost; every verification pass so far has been `ZZ_TEST_`-scoped
+precisely so this can be a single decision at the end.
+
+The owner should start on a database holding only his own real records, not the working set that
+accumulated while the app was built.
+
+**Decide explicitly what survives:** the owner account, the catalog (categories, sub-categories,
+products) with real prices, and real customers/farmers — versus everything transactional (sales,
+deliveries, purchases, payments), which almost certainly should not.
+
+**Stock is the subtle one.** All 27 products sit at the migration's temporary default of **100**,
+which is not a real count. The reset is the moment the owner walks the shelf and enters actual
+numbers — **his task, not a figure for us to invent.**
+
+**Confirm the exact delete set with the owner before running it**, the same way the 36-variant
+delete and every other destructive step here was confirmed.
+
+> ⚠️ **Confirm the count against the environment actually being handed over.** In the database this
+> repo points at (project `wcfdtxalwlztfsbepkrr`, the ref in `.env`), 2026-08-10 shows **1 sale, 1
+> customer (Saif), Rs. 5,000** — with the sale still in the OLD `BakerySale` table. Session briefs
+> have repeatedly described **5 sales across 3 customers**, which no query here has reproduced. Do
+> not run a delete set sized from the wrong environment.
+
+#### `[ ]` **3. [BLOCKS GO-LIVE] Vercel Pro + Supabase backups at handoff**
+
+**Status:** open, event-triggered. **The trigger is the client starting to enter real records and
+rely on the app** — upgrade *before* that moment, never after. Not date-triggered; do not raise it
+as a blocker on ordinary build-phase deploys.
+
+- **Vercel Pro.** Hobby **forbids commercial use** — once this is a live business tool, Hobby is a
+  terms violation, and enforcement would hit the system the client runs their books on. Pro also
+  raises function duration/size limits and concurrency, which are not things to discover under live
+  load.
+- **Supabase Pro (~$25/mo).** The free tier **pauses after 7 days of inactivity and keeps ZERO
+  backups.** Do not ship a business's money records on a zero-backup tier. Minimum acceptable
+  alternative: a scheduled keep-alive ping **plus** a weekly database export — Pro is the better
+  answer.
+
+---
+
+### 🟠 In flight — the unified sale rework is HALF DONE
+
+Not blockers to the app *working* (it runs entirely on the old tables), but it must be **finished
+or deliberately abandoned** before handoff. Leaving it half-done hands over two parallel sale
+schemas, one of them empty.
+
+#### `[~]` **4. Unified `Sale` build** — API, `/sales` form + edit UI, redirects, line-level reports
+
+**NOT STARTED.** Migration A (additive) is applied and `Sale` / `SaleItem` exist with `moduleKey`
+and `netLineTotal` — and **nothing reads or writes them**. The app still runs entirely on
+`BeverageSale` / `BakerySale`. Reports still group by `beverageSaleItem` / `bakerySaleItem`
+(`lib/reports.ts:217,224`). Scope when it runs: unified API reusing `reconcileSaleLines` / discount
+/ stock unchanged, `netLineTotal` apportioned pro-rata with the residue on the largest line, the
+`/sales` form and edit UI, old routes redirecting, reports rewritten to `Σ netLineTotal` by
+`moduleKey`.
+
+#### `[ ]` **5. Migration B** — drop `BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem`
+
+**NOT WRITTEN, NOT RUN.** The point of no return. **Gated on #4 being built AND browser-verified**
+— the old tables are the only copy left to reconcile against, and the one real sale currently lives
+in one of them. See the data-count warning under #2 before dropping anything.
+
+#### `[ ]` **6. `lib/receivables.ts` still sums `BeverageSale` + `BakerySale`**
+
+Dormant — receivables was removed from the UI in batch 2 — so harmless today, but **Migration B
+would leave it referencing dropped tables**. Repoint at `Sale` or delete it, as part of #5.
+
+#### `[ ]` **7. Harden the client `unitPrice` override on UPDATE**
+
+Decided, not implemented. Keep the override on **create** (the seed ships products at price 0),
+ignore it on **PATCH** so the server always re-snapshots from the DB. One change in the update
+branch of `reconcileSaleLines()`. Full reasoning: **Price snapshot → "the one un-hardened edge"**.
+Update that rule table in the same commit as the code.
+
+#### `[ ]` **8. Sale edit UI for beverages/bakery**
+
+The `PATCH` route is complete, stock- and discount-aware and server-verified; **there is no
+screen.** Lands WITH #4, deliberately — an edit screen written against the current per-module
+structure would be built to be thrown away. See the carried-forward "PATCH has no UI" note before
+assuming it is dead code.
+
+---
 
 ### 🟡 Phase 8 polish
 
-| # | Item | Note |
-|---|---|---|
-| 9 | **`Product.discountPercent` column drop** — one change, three parts: the column (6 files still read it), the `product.discountPercent` join in `SALE_DETAIL_SELECT`, and the catalog's **"Discount" column, which now renders "—" on all 27 rows**. Dropping the column without removing the table column just breaks the page | Not urgent — the entry point is closed, `ProductDialog`'s discount field is already gone |
-| 10 | **Touch targets app-wide** — `TabsTrigger` is 28px and inline back-links 20px against a 44px minimum. Fix **once** in `components/ui/tabs.tsx`, not piecemeal per screen | Found in 4b, inherited by every module since |
-| 11 | **PWA manifest** — `start_url` and `scope` both `"/"`. A wrong value 404s every installed launch and only breaks after install | Deployment posture |
-| 12 | **Native date format** — dates render `DD/MM/YYYY` per the Design System; confirm every date input/display honours it (and Asia/Karachi bucketing) on a real device, not just in the formatter | |
-| 13 | **On-device mobile pass** — the whole app on a real cheap Android phone in daylight, not a desktop viewport resized to 360px. Loading / empty / error states, bottom nav, numeric keypads (`inputMode="decimal"`), and reduced-motion | The verification rule below applies: a green build has never once caught these |
+#### `[ ]` **9. `Product.discountPercent` column drop + catalog "Discount" column removal — ONE change**
+
+The discount rework (2026-08-09) made discount a sale-time percentage and deleted the 36 variant
+products, so the column has no remaining purpose. Its own migration, nothing else in it.
+
+**Three parts, and they must go together** — dropping the column without removing the table column
+just breaks the page:
+1. **The column itself.** 6 files still read it: `components/catalog/ProductTable.tsx`,
+   `lib/sale-catalog.ts`, `lib/catalog-display.ts`, `lib/validations/catalog.ts`, and the two
+   `/api/products` routes.
+2. **`SALE_DETAIL_SELECT` in `lib/sales.ts`**, which still joins `product.discountPercent` even
+   though the UI reads the line's own snapshotted value.
+3. **The catalog's "Discount" COLUMN**, which now renders "—" on all 27 rows and is pure noise.
+
+**Not urgent** — the entry point is already closed (`ProductDialog`'s discount field went in the
+same commit), and all 27 surviving products carry `discountPercent` 0 or null.
+
+#### `[ ]` **10. Touch targets — app-wide, in one place**
+
+`shadcn TabsTrigger` measures **28px** and inline back-links **20px** against the Design System's
+**44px** minimum (measured on the customer profile at 360px). These are framework/text defaults,
+not one-off mistakes, so they exist wherever those primitives are used.
+
+**Do NOT patch piecemeal as they turn up.** Override the `TabsTrigger` default **once** in
+`components/ui/tabs.tsx`. Everything else measured clean — inputs, buttons and cards are all ≥44px.
+
+#### `[ ]` **11. PWA — manifest, service worker, install prompt**
+
+**`start_url` and `scope` must BOTH be `"/"`.** The app is served at the root; `(dashboard)` is a
+layout group contributing nothing to the URL, and no `/dashboard` route exists. A wrong `start_url`
+**404s every installed home-screen launch and only breaks after install** — easy to miss, because
+it cannot be seen in the browser.
+
+#### `[ ]` **12. Native date input locale — `DD/MM/YYYY` consistency**
+
+The Design System specifies `DD/MM/YYYY`. Confirm every date **input** as well as every display
+honours it — a native `<input type="date">` renders in the *device's* locale, which is not
+something the formatter controls. Check alongside Asia/Karachi day bucketing (Gotcha 4).
+
+#### `[ ]` **13. On-device mobile check — a real phone**
+
+The whole app on a real cheap Android phone in daylight, **not a desktop viewport resized to
+360px**. *Emulation is geometry, not a device*: it does not reproduce the on-screen keyboard, touch
+accuracy, real network latency, or actual paint performance. **Quick entry especially** — it is the
+densest screen and the one the owner uses twice a day. Cover loading / empty / error states, the
+bottom nav, numeric keypads (`inputMode="decimal"`), and reduced-motion.
+
+---
 
 ### ⚪ Handoff infra
 
-| # | Item | Note |
-|---|---|---|
-| 14 | **Function and database are on different continents** — function in `iad1` (Washington DC), Supabase in `ap-northeast-2` (Seoul), ~11,000 km per query. This is the ~1.1s/query floor. Co-locate at go-live: set the function region to `icn1`, or move the Supabase project near `iad1` | Highest-value performance change available; everything else is a workaround |
-| 15 | **Data API surface** — `anon`/`authenticated` keep table-level GRANTs on all 17 tables. RLS makes them useless for reading rows, so not a leak, but restricting exposed schemas / disabling the Data API is a pending owner decision | Would not affect Prisma, which never goes through PostgREST |
+#### `[ ]` **14. Region co-location — the function and the database are on different continents**
+
+**Do not fix mid-build. Do it at go-live, with the Pro upgrade.** Measured on a real deployment,
+not inferred:
+
+| | |
+|---|---|
+| Serverless function region | **`iad1` — Washington DC** |
+| Supabase region | **`ap-northeast-2` — Seoul** |
+| Distance | ~11,000 km, every single query |
+
+`X-Vercel-Id: bom1::iad1::…` — the first segment is only the edge PoP that accepted the request
+(Mumbai, nearest to Pakistan); the second is where the function actually ran.
+
+**This is the ~1.1s/query floor, and it is not a dev-machine artifact.** Measured warm against the
+deployed function: `/api/reports/summary` (1 query) **~1.75s**; `/api/reports/balances` (6 queries)
+**~6.4s ≈ 1.07s per query**. Production is no faster than local.
+
+**The fix:** set the project's function region to `icn1` (Seoul), or move the Supabase project near
+`iad1`. **Single highest-value performance change available** — everything else in the app is a
+workaround for it (see "One database round trip costs ~1.1s" in API Route Conventions, and the
+progressive load on `/reports`).
+
+#### `[ ]` **15. Data API surface — an owner decision, not a leak**
+
+`anon` / `authenticated` retain table-level GRANTs on all 17 tables (Supabase's default for
+`public`). RLS makes those grants useless for reading rows, so this is **not** a leak — but the
+PostgREST surface still exists. Restricting the exposed schemas or disabling the Data API is
+pending the owner's call; it would not affect Prisma, which never goes through PostgREST.
+
+---
+
+### `[x]` Closed — recorded so they are not re-opened
+
+- **`[x]` Context7 connection diagnosis** (was: down 8 consecutive sessions, 3–9 Aug). **Closed
+  2026-08-10** — it reconnected on its own and was verified live with a `resolve-library-id` call.
+  No diagnosis was needed. Pin Prisma lookups to `/prisma/prisma/__branch__6.19.x`; see MCP Tools.
+- **`[x]` Delete-guard 409 / soft-delete re-test.** Closed 2026-08-04, all three levels passed.
+- **`[x]` Preview-deploy auth** (`useSecureCookies` pinned). Closed 2026-08-08.
+- **`[x]` Milk hub / balance-sheet payable mismatch** (17,000 vs 21,000). Closed in Phase 6.
 
 ---
 
