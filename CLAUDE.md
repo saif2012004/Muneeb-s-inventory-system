@@ -1210,9 +1210,10 @@ delete and every other destructive step here was confirmed.
 
 #### `[ ]` **2b. [BLOCKS GO-LIVE] Owner sets his real shop details in Settings**
 
-**Status:** open, and **depends on the Settings table shipping first**. Sits with #2 deliberately —
-both are "the owner's real data replaces our build-time stand-ins", and they are done in the same
-sitting at handoff.
+**Status:** open. **The Settings table and screen SHIPPED 2026-08-10** (`/settings`, migration
+`20260810120000_add_settings`) — what remains is the owner typing his own details in. Sits with #2
+deliberately: both are "the owner's real data replaces our build-time stand-ins", and they are done
+in the same sitting at handoff.
 
 `Settings` seeds with **deliberately unmistakable placeholders** —
 `SET SHOP NAME IN SETTINGS`, `SET PHONE IN SETTINGS`, `SET ADDRESS IN SETTINGS`. That is a design
@@ -1220,6 +1221,37 @@ choice, not laziness: a receipt printed before setup must be **obviously unconfi
 plausibly real**. A friendly placeholder like "Your Shop Name" would print a receipt that looks
 finished and is wrong — the failure mode we are buying our way out of is a customer walking away
 holding one.
+
+##### 🔒 Two decisions here are LOAD-BEARING. Do not soften either one.
+
+**1. The placeholders stay jarring, and they are defined ONCE.**
+`SETTINGS_PLACEHOLDERS` in `lib/settings-display.ts` is the single constant; the seed INSERT in the
+migration must match it exactly. Do NOT "improve" the copy to something friendly — the whole value
+of the string is that it cannot be mistaken for a real shop name on a printed receipt.
+
+They behave differently in the two places they surface, and that asymmetry is intentional:
+
+| Where | Behaviour |
+|---|---|
+| **The Settings form** | Treated as EMPTY — the input renders blank with the sentinel as its `placeholder` attribute, plus a rose warning banner. Pre-filling them would let "fix the name and save" silently promote the untouched phone sentinel into a real value |
+| **The receipt** | Printed verbatim, shouting |
+
+The server also **rejects a submitted placeholder** as a backstop
+(`lib/validations/settings.ts`). Browser-verified 2026-08-10.
+
+**2. NO FORMAT VALIDATION on phone or address. Only trim + a max length.**
+These are the owner's own contact details, entered once, printed on his own receipt. There is no
+standard format — two numbers, a landline plus a mobile, an extension, an address written however
+his customers recognise it. **A format check is far more likely to reject something valid than to
+catch a real error**, and a real error is one he sees on his own receipt and fixes in thirty
+seconds. A phone regex would be a stranger telling a shop owner his own phone number is wrong.
+
+Caps are **80 / 60 / 200** (name / phone / address), there only so a huge paste cannot break the
+receipt layout. The phone cap is 60 rather than 30 because
+`0300-1234567 / 042-35678901` is already 27 characters — 30 would reject an ordinary two-number
+listing, which is precisely the false rejection this rule exists to prevent.
+
+Strictness belongs in the money maths, not in free-text contact details.
 
 **The check is exact, so run it rather than eyeballing the screen:**
 

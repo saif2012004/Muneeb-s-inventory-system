@@ -62,7 +62,7 @@ const formSchema = z.object({
   shopPhone: z
     .string()
     .trim()
-    .max(30, { message: "Phone must be 30 characters or fewer" }),
+    .max(60, { message: "Phone must be 60 characters or fewer" }),
   shopAddress: z
     .string()
     .trim()

@@ -8,6 +8,27 @@ import { isPlaceholderValue } from "@/lib/settings-display";
  * All three fields are sent together — the screen is one small form with one
  * Save, so there is no partial-update case to support and no reason to let a
  * caller send half a shop.
+ *
+ * ---------------------------------------------------------------------------
+ * NO FORMAT VALIDATION ON PHONE OR ADDRESS. DECIDED — DO NOT ADD IT LATER.
+ * ---------------------------------------------------------------------------
+ * These are the owner's own contact details, entered once, printed on his own
+ * receipt. There is no standard format: he may list two numbers, a landline and
+ * a mobile, a number with an extension, or an address written however his
+ * customers recognise it. Any pattern check is far more likely to reject
+ * something valid than to catch a real mistake — and a real mistake is one he
+ * sees on his own receipt and fixes himself in thirty seconds.
+ *
+ * A phone regex here would be a stranger telling a shop owner his own phone
+ * number is wrong. Strictness belongs in the money maths, not in free text.
+ *
+ * The only two constraints are therefore:
+ *   - TRIM, so a stray leading space does not shift the receipt line, and
+ *   - a MAX LENGTH, so a huge paste cannot break the receipt layout.
+ *
+ * The phone cap is 60 rather than 30 deliberately: "0300-1234567 / 042-35678901"
+ * is already 27 characters, so 30 would reject a perfectly ordinary two-number
+ * listing — the exact false rejection this rule exists to avoid.
  */
 
 /**
@@ -50,7 +71,7 @@ export const settingsUpdateSchema = z.object({
       (value) => notPlaceholder("shop name")(value) === true,
       { message: "That is the placeholder text — enter your real shop name." }
     ),
-  shopPhone: optionalText("Phone", 30).refine(
+  shopPhone: optionalText("Phone", 60).refine(
     (value) => notPlaceholder("phone number")(value) === true,
     { message: "That is the placeholder text — enter your real phone number." }
   ),
