@@ -33,7 +33,7 @@ the file is part of the diff. If you are unsure whether a rule is still true, **
 the code before repeating it** — including the rules in this file.
 
 **Open work is tracked in ONE place: the `✅ PRE-HANDOFF CHECKLIST` near the end of this file.**
-Three of its items block go-live. Do not record an open item anywhere else — a task written into a
+Four of its items block go-live. Do not record an open item anywhere else — a task written into a
 prose section is a task that gets lost, which is exactly how the checklist came to be needed.
 
 **The one sanctioned exception:** two go-live blockers (the login POST-only fix and the data reset)
@@ -934,11 +934,13 @@ table. Phase 8 is polish; the checklist is everything that must be true at hando
 | | Blocker | Status | Full item |
 |---|---|---|---|
 | 🔴 | **Login POST-only security fix.** With JS absent the form submits GET and puts the owner's email and password in the URL. Reproduced. **Phase 8 cannot be marked ✅ while this is open.** | `[ ]` open | CHECKLIST #1 |
-| 🔴 | **Data reset before go-live.** The owner must start on a database holding only his own real records. Once, deliberately, with the delete set confirmed first. | `[ ]` open | CHECKLIST #2 |
+| 🔴 | **Data reset before go-live**, and with it **the owner's real shop details saved in Settings** (the seeded `SET SHOP NAME IN SETTINGS` placeholders must be gone — `configuredAt IS NOT NULL`). The owner must start on a database holding only his own real records. Once, deliberately, with the delete set confirmed first. | `[ ]` open | CHECKLIST #2 + #2b |
 
-(The third go-live blocker — the Vercel Pro / Supabase backup upgrade, CHECKLIST #3 — is not
+(The other go-live blocker — the Vercel Pro / Supabase backup upgrade, CHECKLIST #3 — is not
 duplicated here: it is a billing action at handoff rather than something that can be silently
-shipped past.)
+shipped past. Shop details ride along on the data-reset row above rather than taking a third row,
+because they are the same "owner's real data replaces our stand-ins" sitting — and a third row
+would start diluting the two that matter.)
 
 ### Carried-forward notes
 
@@ -1205,6 +1207,32 @@ delete and every other destructive step here was confirmed.
 > customer (Saif), Rs. 5,000** — with the sale still in the OLD `BakerySale` table. Session briefs
 > have repeatedly described **5 sales across 3 customers**, which no query here has reproduced. Do
 > not run a delete set sized from the wrong environment.
+
+#### `[ ]` **2b. [BLOCKS GO-LIVE] Owner sets his real shop details in Settings**
+
+**Status:** open, and **depends on the Settings table shipping first**. Sits with #2 deliberately —
+both are "the owner's real data replaces our build-time stand-ins", and they are done in the same
+sitting at handoff.
+
+`Settings` seeds with **deliberately unmistakable placeholders** —
+`SET SHOP NAME IN SETTINGS`, `SET PHONE IN SETTINGS`, `SET ADDRESS IN SETTINGS`. That is a design
+choice, not laziness: a receipt printed before setup must be **obviously unconfigured, never
+plausibly real**. A friendly placeholder like "Your Shop Name" would print a receipt that looks
+finished and is wrong — the failure mode we are buying our way out of is a customer walking away
+holding one.
+
+**The check is exact, so run it rather than eyeballing the screen:**
+
+```sql
+SELECT "configuredAt", "shopName" FROM "Settings" WHERE id = 'app';
+```
+
+`configuredAt IS NULL` means the owner has never saved his details — **not go-live ready**, whatever
+is on screen. The column records the fact directly rather than string-matching the placeholder text,
+which would silently stop detecting anything the day someone edits the placeholder wording.
+
+The Settings screen must also **visibly flag placeholder state** so the owner sees it without being
+told, and the receipt is not the first place it shows up.
 
 #### `[ ]` **3. [BLOCKS GO-LIVE] Vercel Pro + Supabase backups at handoff**
 
