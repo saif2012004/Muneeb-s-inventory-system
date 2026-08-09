@@ -51,6 +51,7 @@ model Product {
   // REQUIRED back-relations (do not remove, migration fails without them)
   beverageSaleItems BeverageSaleItem[]
   bakerySaleItems   BakerySaleItem[]
+  saleItems         SaleItem[]
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,7 @@ model Customer {
   isActive      Boolean           @default(true)
   beverageSales BeverageSale[]
   bakerySales   BakerySale[]
+  sales         Sale[]
   milkSales     MilkSale[]
   payments      CustomerPayment[]
   createdAt     DateTime          @default(now())
@@ -144,6 +146,67 @@ model BakerySaleItem {
 }
 
 // ---------------------------------------------------------------------------
+// Sales — ONE table for beverages AND bakery
+// ---------------------------------------------------------------------------
+// A bill can hold beverage and bakery lines together; the client orders across
+// categories routinely. Milk is NOT here — it has no products, no stock, and
+// its own MilkSale table, and nothing in this merge touches it.
+//
+// Replaces BeverageSale/BakerySale, which encoded the module in the TABLE. That
+// made per-module revenue a sale-level SUM, which cannot survive a mixed bill.
+// The module now lives on the LINE (see SaleItem.moduleKey).
+
+model Sale {
+  id              String     @id @default(cuid())
+  customerId      String
+  customer        Customer   @relation(fields: [customerId], references: [id])
+  saleDate        DateTime   @default(now())
+  discountPercent Decimal    @default(0) @db.Decimal(5, 2)
+  totalAmount     Decimal    @db.Decimal(10, 2)
+  notes           String?
+  items           SaleItem[]
+  createdAt       DateTime   @default(now())
+
+  @@index([customerId, saleDate])
+  @@index([saleDate])
+}
+
+model SaleItem {
+  id              String  @id @default(cuid())
+  saleId          String
+  sale            Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product @relation(fields: [productId], references: [id])
+  /// "beverages" | "bakery" — a SNAPSHOT of what this line was sold as.
+  ///
+  /// NOT derived from the product’s category at report time. The catalog lets
+  /// the owner move a product between sub-categories, and deriving would then
+  /// silently re-attribute closed months between modules. A line’s module is
+  /// the same kind of fact as its unitPrice and its discount: what it was sold
+  /// as, fixed at the moment of sale.
+  moduleKey       String
+  quantity        Int
+  unitPrice       Decimal @db.Decimal(10, 2)
+  discountPercent Decimal @default(0) @db.Decimal(5, 2)
+  lineTotal       Decimal @db.Decimal(10, 2)
+  /// This line’s share of the bill AFTER the whole-bill discount.
+  ///
+  /// PER-MODULE REVENUE IS SUM(netLineTotal), NEVER SUM(lineTotal). Line totals
+  /// add up to the SUBTOTAL, so summing them per module would overstate revenue
+  /// on every bill-discounted sale and break the dashboard’s claim that
+  /// beverages + bakery + milk equals total revenue. Apportioned pro-rata by
+  /// lineTotal, 2dp, residue to the largest line so the parts sum to
+  /// totalAmount exactly. Allocation lives beside the discount maths in
+  /// lib/sales.ts — one implementation.
+  netLineTotal    Decimal @db.Decimal(10, 2)
+
+  @@index([saleId])
+  @@index([productId])
+  @@index([moduleKey])
+}
+
+
+// ---------------------------------------------------------------------------
 // Milk Shop
 // ---------------------------------------------------------------------------
 
@@ -200,6 +263,43 @@ model MilkSale {
   createdAt    DateTime @default(now())
 
   @@index([customerId, saleDate])
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+/// Owner-editable app settings. EXACTLY ONE ROW, id = "app".
+///
+/// The home for anything the owner must be able to change without a redeploy —
+/// starting with the receipt header. Not a config file, deliberately: a typo in
+/// the shop name should be a 5-second edit on his phone, not a code change and a
+/// deploy he has to ask someone else for.
+///
+/// The singleton is enforced by a CHECK constraint in the migration, not just by
+/// this default, so a stray create() cannot give the app a second row for the
+/// receipt to disagree with.
+model Settings {
+  id String @id @default("app")
+
+  /// NOT NULL: a receipt always has a name line, so there is always something to
+  /// print and no call site needs a fallback. Seeded with a jarring placeholder
+  /// rather than a plausible one — see configuredAt.
+  shopName String
+  /// Nullable, because "the shop has no phone" is a legitimate final state and
+  /// the receipt should omit the line rather than print an empty one.
+  shopPhone   String?
+  shopAddress String?
+
+  /// NULL until the owner saves his real details for the first time.
+  ///
+  /// This is the go-live check (PRE-HANDOFF CHECKLIST #2b) and the source of the
+  /// in-app placeholder banner. It records the FACT of configuration rather than
+  /// string-matching the seeded placeholder text, which would silently stop
+  /// detecting anything the day someone edits that wording — reporting
+  /// "configured" for a shop that is not.
+  configuredAt DateTime?
+  updatedAt    DateTime  @updatedAt
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Milk,
   Package,
+  Settings,
   ShoppingBag,
   Users,
   type LucideIcon,
@@ -66,6 +67,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/customers", label: "Customers", icon: Users, accent: "zinc" },
   { href: "/catalog", label: "Catalog", icon: Package, accent: "zinc" },
   { href: "/reports", label: "Reports", icon: BarChart2, accent: "zinc" },
+  { href: "/settings", label: "Settings", icon: Settings, accent: "zinc" },
 ];
 
 /** The four thumb-reachable tabs on mobile. */
@@ -75,7 +77,7 @@ export const PRIMARY_NAV: NavItem[] = NAV_ITEMS.filter((item) =>
 
 /** The rest, reached through the mobile "More" sheet. */
 export const SECONDARY_NAV: NavItem[] = NAV_ITEMS.filter((item) =>
-  ["/customers", "/catalog", "/reports"].includes(item.href)
+  ["/customers", "/catalog", "/reports", "/settings"].includes(item.href)
 );
 
 /**
