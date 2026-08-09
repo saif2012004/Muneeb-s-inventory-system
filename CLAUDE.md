@@ -7,6 +7,31 @@
 
 ---
 
+## 🔁 PROCESS RULE: updating this file is PART OF the change, not a follow-up
+
+**If a change alters a rule documented here, the CLAUDE.md edit ships in the SAME commit as the
+code. Not "next session", not a docs pass at the end of the phase.**
+
+This is not a tidiness preference. **A cold session trusts this file completely** — it is read
+before any code, and it is the only thing a new session has before it starts making decisions. A
+stale line here is worse than no line: it is a confident, specific instruction to do the wrong
+thing, and it gets followed.
+
+It has already drifted three times, each caught by accident rather than by process:
+
+| Drift | What the file said | What was true |
+|---|---|---|
+| Context7 | "DOWN since 3 Aug, 6+ sessions" | Reconnected — and can be pinned to the v6 branch |
+| Discount variants | "separate Product records with the discounted price" | Deleted 2026-08-09; discount is a sale-time % |
+| Stock | listed under **Out of scope**, "no stock table" | Shipped 2026-08-09, with delta reconciliation |
+
+All three were fixed on 2026-08-10, and the snapshot rule was hardened with the stable-line-id
+guardrail in the same pass.
+
+**The check before you finish a task:** did I change behaviour that this file describes? If yes,
+the file is part of the diff. If you are unsure whether a rule is still true, **verify it against
+the code before repeating it** — including the rules in this file.
+
 ## Project Overview
 
 A full-stack business management web app for a single owner who runs three business units:
@@ -449,15 +474,16 @@ outstanding      = totalBilled - totalPaid
 - Historical records always read `unitPrice`, never re-join to product.
 - Editing a sale is allowed. Totals are always recomputed inside a transaction.
 
-**Exactly when a line re-snapshots the current price (decided Phase 3.1 — do not loosen):**
+**Exactly when a line re-snapshots the current price (decided Phase 3.1 — do not loosen).
+Verified against `lib/sales.ts` on 2026-08-10; this table is what the code does today:**
 
 | Edit to a line | Price behaviour |
 |---|---|
 | New line added | **Re-snapshot** — copy current `product.price` |
-| Line's `productId` changed | **Re-snapshot** — it is a different item, the old price is meaningless for it |
+| Line's `productId` changed (in place) | **Re-snapshot** — it is a different item, the old price is meaningless for it |
 | Line's `quantity` changed, same product | **KEEP the stored `unitPrice`** |
 | Line untouched | **KEEP the stored `unitPrice`** |
-| Explicit `unitPrice` sent for the line | That value wins over every row above |
+| Explicit `unitPrice` sent for the line | That value wins over every row above — ⚠️ see "the one un-hardened edge" below |
 
 **Quantity is NOT a re-price trigger, deliberately.** Correcting "12 crates" to "15" on a
 months-old sale is a typo fix, not a re-sale; re-pricing it at today's catalog price would
@@ -469,13 +495,70 @@ function so it can be tested without HTTP. Beverages uses it; Bakery (Phase 4) m
 rather than re-implement the predicate. Sale PATCH responses return `repricedItemIds` so the
 UI can show which lines genuinely took a new price.
 
+**A product swap re-snapshots the PRICE but deliberately NOT the DISCOUNT.** A discount is a
+decision about the bill, not a property of the product; swapping the item on a line does not
+undo the deal the owner struck. Send a `discountPercent` to change it, omit it to keep the
+stored one.
+
+#### 🔒 LOAD-BEARING: the reconciler matches lines by STABLE LINE ID, never by array index
+
+**Do not "simplify" `reconcileSaleLines()` into an index walk over the submitted array. This is
+the single easiest cleanup in the repo to make, and it silently rewrites history.**
+
+The submitted array is the COMPLETE desired set of lines, and identity comes from the `id`
+field alone:
+
+```
+entry WITH an id     -> that stored line, kept or edited   (looked up in currentById)
+entry WITHOUT an id  -> a new line
+stored line absent   -> removed from the sale
+```
+
+Index-matching breaks the moment a line is deleted from the middle of a bill: every line below
+the gap shifts up one, gets compared against a DIFFERENT stored line, reads as
+"productId changed", and **re-snapshots at today's catalog price** — silently moving the total
+of a closed sale that the owner only opened to delete one row from. Nothing about that is
+visible in the response; the bill just quietly becomes worth something else.
+
+Two guards go with the id lookup and must stay:
+
+- the same `id` submitted twice → **400**, "The same sale line was submitted twice."
+- an `id` that is not on this sale → **409**, "Reload and try again." (someone else's line, or a
+  stale form)
+
+#### ⚠️ The one un-hardened edge: a client-supplied `unitPrice` is still honoured on UPDATE
+
+**Current behaviour, stated plainly so no session mistakes it for already-fixed:**
+`snapshotUnitPrice()` lets an explicit `unitPrice` from the request body win over the stored
+snapshot on a PATCH, and `components/sales/NewSaleForm.tsx` **always sends one**.
+
+The override exists for a real reason — the seed ships every product at `price 0`, so the owner
+must be able to bill a real price before walking the whole catalog — but that reason only
+applies to **creating** a sale. On an **edit** it means a client can set any price on a
+historical line, which is the exact mutation the snapshot rule exists to prevent.
+
+**DECIDED, NOT YET IMPLEMENTED (needs a code change, tracked in the open-items list):** keep the
+override on **create**, drop it on **update** — the server re-reads `product.price` from the DB
+for a re-snapshotting line and ignores any client price on PATCH. One change, in the update
+branch of `reconcileSaleLines()`. When that ships, update the last row of the table above in the
+same commit.
+
 ### Discounts, russ, eggs
-- Discount variants (20/30/60%) are separate Product records with the discounted price stored directly. No runtime discount math.
+- **Discount is a SALE-TIME PERCENTAGE, not a product variant** (reworked 2026-08-09). It is
+  snapshotted in two places: `discountPercent` on the LINE and `discountPercent` on the SALE
+  (whole-bill). Stacking order is line-first, then bill, with a rounding point at each —
+  `computeLineTotal` / `applySaleDiscount` in `lib/sales.ts`, one implementation.
+  ~~Discount variants are separate Product records~~ — **the 36 variant products were deleted in
+  that rework.** `Product.discountPercent` is a dead column awaiting its own migration (see the
+  open-items list); never read it for a sale line.
 - Russ = 2 sizes (large/small) x 2 shapes (circle/rectangular_round) = 4 products, differentiated by `size` and `shape`.
 - Eggs sold by the cotton: `unit: "cotton"`, quantity = number of cottons.
 
 ### Out of scope (do not build unless asked)
-- Physical stock / inventory counts (no stock table). The app tracks sales and prices, not remaining quantity on hand.
+- ~~Physical stock / inventory counts~~ — **STOCK SHIPPED 2026-08-09.** `Product.stock`, decremented
+  on sale, blocked with a structured `blockedBy` shortfall list when short, restored on delete, and
+  reconciled BY DELTA on edit (`computeStockDeltas` / `applyStockDeltas` in `lib/sales.ts`).
+  Beverages + bakery only; milk has no products and no stock.
 - Multi-user roles, supplier invoicing, tax/GST.
 
 ---
@@ -726,9 +809,16 @@ NEXTAUTH_URL=     # http://localhost:3000 dev, production URL on Vercel
 
 **Rule: before writing any API route or Prisma query, run `use context7` for current Prisma/Supabase docs. Before any auth work, pull current NextAuth v5 docs.**
 
-**Context7 has been DOWN since 3 Aug 2026 (6+ consecutive sessions).** Try it first every time —
-then fall back to the installed source in `node_modules`, per the fallback rule in the Tech Stack
-section. Fixing the connection is a Phase 8 item; see the carried-forward notes.
+**Context7 is BACK UP as of 2026-08-10** (it was down 3–9 Aug, 8+ consecutive sessions). Verified
+this session with a live `resolve-library-id` call.
+
+**Pin Prisma lookups to the v6 branch.** Context7 serves v7 by default, which does not apply here
+(see the Prisma version guardrail). `/prisma/prisma` exposes **`__branch__6.19.x`** and `6.19.2` as
+selectable versions — request one of those rather than reading v7 docs and filtering mentally.
+`/prisma/prisma/__branch__6.19.x` is the one to use.
+
+The `node_modules` fallback in the Tech Stack section still stands and is still the stronger source
+for "what will actually run at the pinned version". **Say which source you used** either way.
 
 ---
 
@@ -1096,16 +1186,60 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
     and enters actual numbers, so plan for that to be a task he does, not a number we invent.
   - **Confirm the exact delete set with the owner before running it**, the same way the
     36-variant delete and every other destructive step in this project was confirmed.
-- **Phase 8 (Context7) — DIAGNOSE THE CONNECTION, don't keep routing around it.** The Context7 MCP
-  server has failed to connect for **8 consecutive sessions** (3–9 Aug 2026), staying in
-  "connecting" with no tools ever exposed. The `node_modules` fallback above is working and has
-  genuinely been the stronger source — the discount migration SQL was generated by the real Prisma
-  6 CLI via `migrate diff`, `Prisma.Decimal`'s `ROUND_HALF_UP` default was confirmed by executing
-  it, and the Recharts animation bug in batch 1 was found by reading
-  `node_modules/recharts/es6/cartesian/Line.js`. That is why this is a cleanup item and not a
-  blocker. But six sessions is a broken tool, not a blip: spend a few minutes in the polish phase
-  checking the MCP config, the server's install/auth state and whether it needs a key, rather than
-  leaving the rule permanently unmet.
+- **Phase 8 (Context7) — ✅ CLOSED 2026-08-10.** The server was down for 8 consecutive sessions
+  (3–9 Aug), staying in "connecting" with no tools exposed. It reconnected on its own and was
+  verified live this session. No diagnosis was needed in the end. The `node_modules` fallback
+  earned its keep while it was out — the discount migration SQL came from the real Prisma 6 CLI via
+  `migrate diff`, `Prisma.Decimal`'s `ROUND_HALF_UP` default was confirmed by executing it, and the
+  Recharts animation bug in batch 1 was found by reading
+  `node_modules/recharts/es6/cartesian/Line.js` — and it remains the sanctioned source when the
+  question is "what will actually run at the pinned version". See the MCP Tools section for the
+  v6-branch pin.
+
+---
+
+## 📋 PRE-HANDOFF OPEN ITEMS — the single list
+
+Everything not yet done, in one place, so a cold session does not have to reconstruct it from the
+carried-forward notes. Details live in the sections linked; this is the index, and it is the thing
+to check against before declaring the project ready for the client.
+
+**Verified against the repo and the live database on 2026-08-10.**
+
+### 🔴 Blockers — cannot hand over with these open
+
+| # | Item | Where it's written up |
+|---|---|---|
+| 1 | **Login GET-fallback**: with JS absent the form submits `GET`, putting email + password in the URL. Needs `method="post"` + a POST-only handler, re-tested with JS disabled. **Blocks closing Phase 8.** | Authentication → OPEN SECURITY ITEM |
+| 2 | **One deliberate data reset** before go-live: decide explicitly what survives (owner account, catalog with real prices, real customers/farmers) vs everything transactional. **Stock is the subtle one** — all 27 products sit at the temporary default of 100, which is not a real count; the owner walks the shelf, we do not invent numbers. Confirm the exact delete set first. | Carried-forward → PRE-HANDOFF DATA RESET |
+| 3 | **Vercel Pro + Supabase Pro upgrade**, event-triggered at handoff, not date-triggered. Hobby forbids commercial use; the free Supabase tier pauses after 7 days and keeps **zero backups**. | Deployment posture |
+
+### 🟠 In-flight — the unified sale rework is HALF DONE
+
+| # | Item | State on 2026-08-10 |
+|---|---|---|
+| 4 | **Unified `Sale` build** — API, `/sales` form + edit UI, old routes redirecting, reports rewritten to line-level `Σ netLineTotal` by `moduleKey` | **NOT STARTED.** Migration A (additive) is applied; `Sale`/`SaleItem` exist with `moduleKey` + `netLineTotal` and **nothing reads or writes them**. The app still runs entirely on `BeverageSale`/`BakerySale` |
+| 5 | **Migration B** — drop `BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem` | **NOT WRITTEN, NOT RUN.** Point of no return. Gated on #4 being built AND browser-verified — the old tables are the only thing left to reconcile against |
+| 6 | **`lib/receivables.ts` still sums `BeverageSale` + `BakerySale`** | Dormant (receivables removed from the UI in batch 2), so harmless today — but Migration B would leave it referencing dropped tables. Repoint at `Sale` or delete it as part of #5 |
+| 7 | **Harden the client `unitPrice` override on UPDATE** — keep it on create, ignore it on PATCH | Decided, not implemented. One change in the update branch of `reconcileSaleLines()`. See Price snapshot → "the one un-hardened edge" |
+| 8 | **Sale edit UI** for beverages/bakery — the `PATCH` route is complete, stock- and discount-aware, server-verified, and **has no screen** | Deliberately lands WITH #4, not before. "Editing a sale doesn't work" means there is no screen, not that reconciliation is broken |
+
+### 🟡 Phase 8 polish
+
+| # | Item | Note |
+|---|---|---|
+| 9 | **`Product.discountPercent` column drop** — one change, three parts: the column (6 files still read it), the `product.discountPercent` join in `SALE_DETAIL_SELECT`, and the catalog's **"Discount" column, which now renders "—" on all 27 rows**. Dropping the column without removing the table column just breaks the page | Not urgent — the entry point is closed, `ProductDialog`'s discount field is already gone |
+| 10 | **Touch targets app-wide** — `TabsTrigger` is 28px and inline back-links 20px against a 44px minimum. Fix **once** in `components/ui/tabs.tsx`, not piecemeal per screen | Found in 4b, inherited by every module since |
+| 11 | **PWA manifest** — `start_url` and `scope` both `"/"`. A wrong value 404s every installed launch and only breaks after install | Deployment posture |
+| 12 | **Native date format** — dates render `DD/MM/YYYY` per the Design System; confirm every date input/display honours it (and Asia/Karachi bucketing) on a real device, not just in the formatter | |
+| 13 | **On-device mobile pass** — the whole app on a real cheap Android phone in daylight, not a desktop viewport resized to 360px. Loading / empty / error states, bottom nav, numeric keypads (`inputMode="decimal"`), and reduced-motion | The verification rule below applies: a green build has never once caught these |
+
+### ⚪ Handoff infra
+
+| # | Item | Note |
+|---|---|---|
+| 14 | **Function and database are on different continents** — function in `iad1` (Washington DC), Supabase in `ap-northeast-2` (Seoul), ~11,000 km per query. This is the ~1.1s/query floor. Co-locate at go-live: set the function region to `icn1`, or move the Supabase project near `iad1` | Highest-value performance change available; everything else is a workaround |
+| 15 | **Data API surface** — `anon`/`authenticated` keep table-level GRANTs on all 17 tables. RLS makes them useless for reading rows, so not a leak, but restricting exposed schemas / disabling the Data API is a pending owner decision | Would not affect Prisma, which never goes through PostgREST |
 
 ---
 
