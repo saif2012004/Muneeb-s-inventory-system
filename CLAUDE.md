@@ -1080,6 +1080,22 @@ Phase 8 — but it is a blocker for closing the phase, not a nice-to-have.
   - Consequence worth stating: **the hardest behaviour in the stock feature (12 -> 8 freeing 4) is
     currently correct and unreachable.** If someone reports "editing a sale doesn't work", the
     answer is that there is no edit screen yet — not that the reconciliation is broken.
+- **PRE-HANDOFF: ONE DELIBERATE DATA RESET before go-live. NOT before then.**
+  The development database carries months of exploratory build data — seeded catalog rows, prices
+  and stock values set to whatever a test needed, and whatever sales survive from verification
+  passes. The owner should start on a clean database holding only his own real records, not a
+  working set that accumulated while the app was being built.
+  - **Do it ONCE, deliberately, at handoff** — not incrementally along the way. Piecemeal cleanup
+    is how you lose a row that turned out to matter, and every verification pass so far has
+    cleaned up after itself (`ZZ_TEST_`-scoped) precisely so this can be one decision at the end.
+  - **Decide explicitly what survives**: the owner account, the catalog (categories,
+    sub-categories, products) with real prices, and real customers/farmers — versus everything
+    transactional (sales, deliveries, purchases, payments), which almost certainly should not.
+  - **Stock is the subtle one.** Every product currently sits at the migration's temporary
+    default of 100, which is not a real count. The reset is the moment the owner walks the shelf
+    and enters actual numbers, so plan for that to be a task he does, not a number we invent.
+  - **Confirm the exact delete set with the owner before running it**, the same way the
+    36-variant delete and every other destructive step in this project was confirmed.
 - **Phase 8 (Context7) — DIAGNOSE THE CONNECTION, don't keep routing around it.** The Context7 MCP
   server has failed to connect for **8 consecutive sessions** (3–9 Aug 2026), staying in
   "connecting" with no tools ever exposed. The `node_modules` fallback above is working and has
