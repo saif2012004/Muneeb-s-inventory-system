@@ -36,6 +36,12 @@ the code before repeating it** — including the rules in this file.
 Three of its items block go-live. Do not record an open item anywhere else — a task written into a
 prose section is a task that gets lost, which is exactly how the checklist came to be needed.
 
+**The one sanctioned exception:** two go-live blockers (the login POST-only fix and the data reset)
+are *deliberately* mirrored as one-line stubs in the Development Phases table, because that table is
+where someone looks when they think they are done. The stubs are labelled as intentional; the
+checklist remains authoritative and is the copy you update. That is the only duplication in this
+file — do not add a third.
+
 ## Project Overview
 
 A full-stack business management web app for a single owner who runs three business units:
@@ -913,12 +919,26 @@ defect — an operational trap that cost real time in Phase 5.
 
 Update this table as phases complete. Change ⬜ to ✅.
 
-**Phase 8 cannot be marked ✅ while the login GET-fallback is unfixed.** A real credential-exposure
-path, not a nice-to-have. **→ PRE-HANDOFF CHECKLIST item 1.**
-
 **Before declaring the project ready for the client, work the PRE-HANDOFF CHECKLIST**, not this
-table. Phase 8 is polish; the checklist is everything that must be true at handoff, including three
-items that block go-live outright.
+table. Phase 8 is polish; the checklist is everything that must be true at handoff.
+
+### 🔴 The two go-live blockers — *deliberately duplicated here*
+
+> **INTENTIONAL DUPLICATION. Do not "clean this up" to a pointer.** The rest of this file follows a
+> strict one-place rule (see the process rule at the top), and these two lines break it **on
+> purpose**: they are the items whose cost of being forgotten is unrecoverable, and the phase table
+> is where someone looks when they think they are finished. Belt and suspenders. **Everything
+> below is a stub — the authoritative write-up, and the status you update, stay in the
+> PRE-HANDOFF CHECKLIST.** If these two ever disagree with the checklist, the checklist wins.
+
+| | Blocker | Status | Full item |
+|---|---|---|---|
+| 🔴 | **Login POST-only security fix.** With JS absent the form submits GET and puts the owner's email and password in the URL. Reproduced. **Phase 8 cannot be marked ✅ while this is open.** | `[ ]` open | CHECKLIST #1 |
+| 🔴 | **Data reset before go-live.** The owner must start on a database holding only his own real records. Once, deliberately, with the delete set confirmed first. | `[ ]` open | CHECKLIST #2 |
+
+(The third go-live blocker — the Vercel Pro / Supabase backup upgrade, CHECKLIST #3 — is not
+duplicated here: it is a billing action at handoff rather than something that can be silently
+shipped past.)
 
 ### Carried-forward notes
 
