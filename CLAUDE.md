@@ -204,6 +204,33 @@ The frontend must feel calm, fast, and legible for a shop owner using a cheap An
 - Every form submit button shows a spinner and disables while pending.
 - Toast on every create/update/delete (success and error).
 
+### 💰 THE RECEIPT PRINTS PAISE. THE SCREEN ROUNDS. DELIBERATE — do not "fix" either.
+
+**Screen: `formatPKR(v)` → whole rupees. Receipt: `formatPKR(v, { precise: true })` → two
+decimals.** Same stored numbers, two precisions, on purpose. `{ precise: true }` appears in exactly
+ONE place in the codebase — `components/receipt/ReceiptDocument.tsx`. Keep it that way in both
+directions: do not round the receipt to match the screen, and do not add paise to the screen to
+match the receipt.
+
+The reason is not consistency, it is arithmetic:
+
+```
+rounded : 3 × Rs. 276    = Rs. 827      <- does not multiply out
+precise : 3 × Rs. 275.50 = Rs. 826.50   <- it does
+```
+
+**A receipt is the one document a customer checks with a calculator, standing in front of the
+owner.** A bill whose own arithmetic fails loses him the argument even when his records are right.
+The screen carries no such duty — it is a summary he scans, and whole rupees are easier to read down
+a column.
+
+Found by printing a real sale: the first build of the receipt used the screen's rounded form and
+produced `3 × Rs. 276 ... Rs. 827`. A green build could never have shown it.
+
+*(Knock-on: the unit price inside a quantity row drops the `Rs.` prefix — `2 cottons × Rs. 380.00`
+is 34 characters and overflows a 58mm roll, while `2 cottons × 380.00` fits and the currency is
+unambiguous from the total on the same line.)*
+
 ### Receipt printing (thermal) — PAPER WIDTH IS 58mm. DECIDED 2026-08-10.
 
 **The receipt layout is built for a 58mm roll: `RECEIPT_LINE_CHARS = 32`, in
@@ -488,6 +515,56 @@ model User {
   createdAt DateTime @default(now())
 }
 ```
+
+---
+
+## 🧭 WHICH SALE TABLES ARE LIVE — verified 2026-08-10, re-check before believing otherwise
+
+**The app runs on `BeverageSale` / `BakerySale`. `Sale` / `SaleItem` exist but NOTHING reads or
+writes them.** The unified rework is HALF shipped: the data was migrated (migration A), the
+application was never switched over.
+
+This has now been misread in both directions across sessions, so here is the 10-second check.
+**Run it before you assert either state:**
+
+```bash
+grep -rn "prisma\.sale\.\|prisma\.saleItem\." app lib components --include=*.ts --include=*.tsx
+```
+
+**Zero matches = the unified tables are still dormant.** One or more = the switch-over has happened
+and this section is out of date; update it in the same commit (see the process rule at the top).
+
+| Thing | Live today | Notes |
+|---|---|---|
+| Create a sale | `tx.beverageSale.create` / `tx.bakerySale.create` | per module; a mixed-category sale is **rejected** by `loadSaleProducts` |
+| List / read / update | `prisma.{beverage,bakery}Sale.*` | `PATCH` exists and is server-verified but has **no UI** |
+| Sale form | `NewSaleForm` at `/beverages/new-sale` and `/bakery/new-sale` | posts to `SaleModule.apiBase` |
+| **`/sales`** | **does not exist** | no such route in `app/` |
+| Reports revenue | `SUM("totalAmount") FROM "BeverageSale" / "BakerySale"` | sale-level, NOT `Σ netLineTotal` |
+| Reports top products | `prisma.{beverage,bakery}SaleItem.groupBy` on `lineTotal` | per-module item tables |
+| Receipt | `lib/receipt.ts` → the same two tables | correct: it prints what the app can actually create |
+
+### ⚠️ `SALE_DETAIL_SELECT` targets the OLD tables, despite the generic name
+
+It lives in `lib/sales.ts` and is written generically **because `BeverageSale` and `BakerySale` have
+identical shapes** — that is Phase 4's code-sharing, not a sign that it points at `Sale`. Every one
+of its call sites is preceded by `prisma.beverageSale.*` or `prisma.bakerySale.*`; **none uses
+`prisma.sale`.** The name has caused a misread before. Do not infer the target from it — grep the
+call sites.
+
+### Why the old tables still exist
+
+**They are the pre-Migration-B rollback, and that is correct.** Migration B (dropping
+`BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem`) is **not written and not run** —
+no migration in `prisma/migrations/` contains `DROP TABLE`. It stays that way until the switch-over
+is built AND browser-verified, because today those four tables hold the live data: dropping them now
+would break every sale screen and every report immediately.
+
+`Sale` currently holds exactly one row — migration A's copy of Saif's bakery sale, carrying the
+original's id (`cmsjh3kly0002uve8ajkvs2ji`) and its pre-migration `createdAt`. A sale created through
+a live unified flow would have a fresh id and a `createdAt` after 2026-08-09 15:07. None exists.
+
+Tracked as CHECKLIST #4 (switch-over) and #5 (Migration B).
 
 ---
 

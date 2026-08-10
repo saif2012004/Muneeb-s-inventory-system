@@ -1,6 +1,7 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { Printer, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -136,6 +137,18 @@ export function SaleLineItems({
           <span className="font-medium text-zinc-600">Notes:</span> {sale.notes}
         </p>
       ) : null}
+
+      {/* Opens the print view, which lives OUTSIDE the (dashboard) group so no
+          nav is rendered around the receipt. A plain link, not a fetch: the
+          receipt is server-rendered from the stored sale. */}
+      <div className="px-1 pt-2">
+        <Button asChild variant="outline" className="h-11 rounded-lg">
+          <Link href={`/receipt/${module.key}/${saleId}`}>
+            <Printer className="mr-2 size-4" aria-hidden />
+            Print receipt
+          </Link>
+        </Button>
+      </div>
     </div>
   );
 }

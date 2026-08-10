@@ -97,3 +97,92 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   THERMAL RECEIPT (58mm roll)
+   ---------------------------------------------------------------------------
+   Paper width is a recorded decision — see "Receipt printing" in CLAUDE.md.
+   58mm also prints on an 80mm roll (leaving margin); the reverse overflows.
+
+   The receipt is fixed-width TEXT in a <pre>, so the font must be monospaced
+   and must not be re-wrapped by the browser: every line was already measured
+   to RECEIPT_LINE_CHARS in lib/receipt-format.ts. `white-space: pre` (not
+   pre-wrap) is what keeps a rounding difference in font metrics from silently
+   re-flowing a line and destroying the money column.
+
+   10px monospace ≈ 6px per character, so 32 chars ≈ 192px ≈ 51mm, which fits
+   inside 58mm with the 2mm padding either side. */
+.receipt-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 2rem 1rem;
+}
+
+.receipt-controls {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.receipt-paper {
+  width: 58mm;
+  padding: 2mm;
+  margin: 0;
+  background: #fff;
+  color: #000;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono",
+    Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: pre;
+  /* Screen-only affordance so the preview reads as a paper roll. Removed in
+     print, where the paper is real. */
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
+}
+
+@media print {
+  /* The roll: full bleed, continuous length, no driver margins. Without
+     `margin: 0` most drivers add ~10mm and the 58mm content is scaled down or
+     clipped. */
+  @page {
+    size: 58mm auto;
+    margin: 0;
+  }
+
+  /* Print ONLY the receipt. The receipt page renders outside the (dashboard)
+     group so there is no nav to hide, but this also covers the case of the
+     print view ever being embedded somewhere that has chrome. */
+  body * {
+    visibility: hidden;
+  }
+
+  .receipt-paper,
+  .receipt-paper * {
+    visibility: visible;
+  }
+
+  .receipt-controls {
+    display: none !important;
+  }
+
+  .receipt-page {
+    display: block;
+    padding: 0;
+  }
+
+  .receipt-paper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 58mm;
+    box-shadow: none;
+    /* Thermal paper is white and the head prints black — force it, so a dark
+       theme or a "background graphics off" driver setting cannot produce a
+       blank roll. */
+    background: #fff;
+    color: #000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
