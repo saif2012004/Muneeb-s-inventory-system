@@ -17,7 +17,6 @@ const PRODUCT_SELECT = {
   price: true,
   stock: true,
   size: true,
-  discountPercent: true,
   qualityTier: true,
   shape: true,
   unit: true,

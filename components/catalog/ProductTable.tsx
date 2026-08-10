@@ -22,11 +22,7 @@ import {
 } from "@/components/ui/table";
 import { InlinePriceEditor } from "@/components/catalog/InlinePriceEditor";
 import { InlineStockEditor } from "@/components/catalog/InlineStockEditor";
-import {
-  formatDiscount,
-  formatQualityShape,
-  formatSize,
-} from "@/lib/catalog-display";
+import { formatQualityShape, formatSize } from "@/lib/catalog-display";
 import type { Product } from "@/lib/hooks/use-catalog";
 import { cn } from "@/lib/utils";
 
@@ -60,9 +56,6 @@ export function ProductTable({
             </TableHead>
             <TableHead className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">
               Quality/Shape
-            </TableHead>
-            <TableHead className="text-right text-[13px] font-medium uppercase tracking-wide text-zinc-500">
-              Discount
             </TableHead>
             <TableHead className="text-right text-[13px] font-medium uppercase tracking-wide text-zinc-500">
               Price (PKR)
@@ -117,10 +110,6 @@ export function ProductTable({
 
                 <TableCell className="text-zinc-600">
                   {formatQualityShape(product)}
-                </TableCell>
-
-                <TableCell className="text-right tabular-nums text-zinc-600">
-                  {formatDiscount(product.discountPercent)}
                 </TableCell>
 
                 <TableCell className="text-right">

@@ -57,9 +57,9 @@ function detailParts(product: Product): string[] {
   // Bakery's Premium/Simple split, and Russ's circle vs rectangular_round.
   if (product.qualityTier) parts.push(titleCase(product.qualityTier));
   if (product.shape) parts.push(titleCase(product.shape));
-  // 0 and null both mean "no discount" — neither should read as "0% off".
-  // Every seeded BAKERY product stores 0 here, so this must stay falsy-checked.
-  if (product.discountPercent) parts.push(`${product.discountPercent}% off`);
+  // NO discount part. A product no longer carries one — discount is chosen per
+  // line on the sale form and snapshotted onto SaleItem. This used to append
+  // "30% off" to distinguish the variant products the rework deleted.
 
   return parts;
 }
@@ -80,9 +80,9 @@ export function toSaleProductOption(product: Product): SaleProductOption {
 /**
  * Group into brands for the picker.
  *
- * Within a brand: size first, then the remaining attributes, then discount
- * ascending — so the full-price row sits above its discount variants. Listing
- * "60% off" above the plain product would bury the common case.
+ * Within a brand: size, then quality tier, then shape. There is no discount
+ * tiebreaker any more — the variant products it separated were deleted in the
+ * discount rework, and a discount is now chosen per line on the sale form.
  */
 export function groupSaleProducts(products: Product[]): SaleBrandGroup[] {
   const byBrand = new Map<string, SaleProductOption[]>();
@@ -104,9 +104,7 @@ export function groupSaleProducts(products: Product[]): SaleBrandGroup[] {
           b.product.qualityTier ?? ""
         );
         if (tier !== 0) return tier;
-        const shape = (a.product.shape ?? "").localeCompare(b.product.shape ?? "");
-        if (shape !== 0) return shape;
-        return (a.product.discountPercent ?? 0) - (b.product.discountPercent ?? 0);
+        return (a.product.shape ?? "").localeCompare(b.product.shape ?? "");
       }),
     }))
     .sort((a, b) => a.brand.localeCompare(b.brand));

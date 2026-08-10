@@ -96,7 +96,9 @@ export const SALE_DETAIL_SELECT = {
           // expanded bakery line can't say which product it actually was.
           qualityTier: true,
           shape: true,
-          discountPercent: true,
+          // NO product discount is joined, and none exists to join. The line's
+          // own snapshotted `discountPercent` above is what a bill shows;
+          // reading a product's would make a closed bill's discount mutable.
           // Eggs sell by the cotton; the unit is what makes "3" mean something.
           unit: true,
           isActive: true,

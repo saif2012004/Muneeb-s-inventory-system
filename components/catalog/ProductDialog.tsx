@@ -66,7 +66,6 @@ const productSchema = z.object({
       message: "Price cannot be negative",
     }),
   size: z.string(),
-  discountPercent: z.string(),
   qualityTier: z.string(),
   shape: z.string(),
   unit: z.string(),
@@ -106,7 +105,6 @@ export function ProductDialog({
       // into "0250". Blank submits as 0 via the coercion in handleSubmit.
       price: "",
       size: NONE,
-      discountPercent: NONE,
       qualityTier: NONE,
       shape: NONE,
       unit: NONE,
@@ -119,10 +117,6 @@ export function ProductDialog({
       name: product?.name ?? "",
       price: product ? String(product.price) : "",
       size: product?.size ?? NONE,
-      discountPercent:
-        product?.discountPercent === null || product?.discountPercent === undefined
-          ? NONE
-          : String(product.discountPercent),
       qualityTier: product?.qualityTier ?? NONE,
       shape: product?.shape ?? NONE,
       unit: product?.unit ?? NONE,
@@ -130,13 +124,11 @@ export function ProductDialog({
   }, [open, product, form]);
 
   function handleSubmit(values: ProductValues) {
-    const discount = toNullable(values.discountPercent);
     onSubmit({
       name: values.name,
       subCategoryId,
       price: values.price.trim() === "" ? 0 : Number(values.price),
       size: toNullable(values.size),
-      discountPercent: discount === null ? null : Number(discount),
       qualityTier: toNullable(values.qualityTier),
       shape: toNullable(values.shape),
       unit: toNullable(values.unit),
@@ -211,14 +203,14 @@ export function ProductDialog({
                   label: formatSize(value),
                 }))}
               />
-              {/* NO DISCOUNT FIELD. Removed deliberately when discount became a
-                  sale-time percentage: leaving it here would let the owner
-                  recreate the "Pepsi 1.5L (30% off)" variant rows that were
-                  just deleted, and the same bottle would once again be two
-                  products. A discount now belongs to a bill, not to the
-                  catalog. The Product.discountPercent COLUMN still exists and
-                  is dropped in a later migration — see the discount-rework
-                  response in docs/responses/. */}
+              {/* NO DISCOUNT FIELD, AND NOTHING BEHIND ONE. Removed when
+                  discount became a sale-time percentage: putting it back would
+                  let the owner recreate the "Pepsi 1.5L (30% off)" variant rows
+                  that were deleted, and the same bottle would once again be two
+                  products. A discount belongs to a bill — it is snapshotted on
+                  SaleItem.discountPercent, so an old bill keeps showing the deal
+                  actually struck. Product.discountPercent is gone entirely: the
+                  column was dropped 2026-08-10 (CHECKLIST #9). */}
               <SelectField
                 form={form}
                 name="qualityTier"

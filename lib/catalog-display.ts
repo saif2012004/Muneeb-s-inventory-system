@@ -65,8 +65,6 @@ export function formatQualityShape(product: {
   return parts.length > 0 ? parts.join(" · ") : "—";
 }
 
-/** 0 and null both mean "no discount" — neither should read as "0%". */
-export function formatDiscount(discountPercent: number | null): string {
-  if (!discountPercent) return "—";
-  return `${discountPercent}%`;
-}
+// No `formatDiscount` here. The catalog has no discount to display — a product
+// does not carry one. A sale line's discount is rendered from its own
+// snapshotted `discountPercent` in components/sales/SaleLineItems.tsx.

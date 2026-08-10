@@ -48,7 +48,6 @@ type ProductSeed = {
   name: string;
   subCategoryId: string;
   size: string | null;
-  discountPercent: number | null;
   qualityTier: string | null;
   shape: string | null;
   unit: string | null;
@@ -134,7 +133,6 @@ const beverageProducts: ProductSeed[] = [
       name: `${brand} ${label}`,
       subCategoryId: `sub_${slug(brand)}`,
       size,
-      discountPercent: 0,
       qualityTier: null,
       shape: null,
       unit: "bottle",
@@ -149,7 +147,6 @@ const beverageProducts: ProductSeed[] = [
       name: `Juice ${label}`,
       subCategoryId: "sub_juice",
       size,
-      discountPercent: 0,
       qualityTier: null,
       shape: null,
       unit: "bottle",
@@ -162,7 +159,6 @@ const beverageProducts: ProductSeed[] = [
     name: brand,
     subCategoryId: `sub_${slug(brand)}`,
     size: null,
-    discountPercent: 0,
     qualityTier: null,
     shape: null,
     unit: "bottle",
@@ -205,7 +201,6 @@ const bakeryProducts: ProductSeed[] = [
       name: `${base} ${qualityTier === "premium" ? "Premium" : "Simple"}`,
       subCategoryId,
       size: null,
-      discountPercent: 0,
       qualityTier,
       shape: null,
       unit: "piece",
@@ -217,7 +212,6 @@ const bakeryProducts: ProductSeed[] = [
     name: "Buns",
     subCategoryId: "sub_buns",
     size: null,
-    discountPercent: 0,
     qualityTier: null,
     shape: null,
     unit: "piece",
@@ -229,7 +223,6 @@ const bakeryProducts: ProductSeed[] = [
       name: `Russ ${size === "large" ? "Large" : "Small"} ${label}`,
       subCategoryId: "sub_russ",
       size,
-      discountPercent: 0,
       qualityTier: null,
       shape,
       unit: "piece",
@@ -242,7 +235,6 @@ const bakeryProducts: ProductSeed[] = [
     name: "Eggs",
     subCategoryId: "sub_eggs",
     size: null,
-    discountPercent: 0,
     qualityTier: null,
     shape: null,
     unit: "cotton",

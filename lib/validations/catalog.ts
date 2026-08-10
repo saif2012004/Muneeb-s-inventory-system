@@ -44,7 +44,10 @@ export const PRODUCT_SIZES = [
   "small",
 ] as const;
 
-export const DISCOUNT_PERCENTS = [0, 20, 30, 60] as const;
+// NO product discount. A discount is a sale-time percentage snapshotted on
+// SaleItem.discountPercent, never an attribute of the product — see the
+// Discounts rule in CLAUDE.md. Re-adding one here would let the catalog
+// recreate the variant products the rework deleted.
 export const QUALITY_TIERS = ["premium", "simple"] as const;
 export const PRODUCT_SHAPES = ["circle", "rectangular_round"] as const;
 export const PRODUCT_UNITS = ["cotton", "piece", "bottle"] as const;
@@ -62,15 +65,6 @@ export const SIZE_LABELS: Record<(typeof PRODUCT_SIZES)[number], string> = {
 // `.nullable().optional()` throughout: omitted means "leave unchanged" on a
 // PATCH, while an explicit null means "clear this attribute".
 const size = z.enum(PRODUCT_SIZES).nullable().optional();
-const discountPercent = z
-  .union(DISCOUNT_PERCENTS.map((value) => z.literal(value)) as [
-    z.ZodLiteral<0>,
-    z.ZodLiteral<20>,
-    z.ZodLiteral<30>,
-    z.ZodLiteral<60>,
-  ])
-  .nullable()
-  .optional();
 const qualityTier = z.enum(QUALITY_TIERS).nullable().optional();
 const shape = z.enum(PRODUCT_SHAPES).nullable().optional();
 const unit = z.enum(PRODUCT_UNITS).nullable().optional();
@@ -107,7 +101,6 @@ export const productCreateSchema = z.object({
   subCategoryId: id,
   price,
   size,
-  discountPercent,
   qualityTier,
   shape,
   unit,
@@ -125,7 +118,6 @@ export const productUpdateSchema = z
     price: price.optional(),
     stock: stock.optional(),
     size,
-    discountPercent,
     qualityTier,
     shape,
     unit,

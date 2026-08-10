@@ -633,7 +633,6 @@ export function CatalogManager() {
                   name: values.name,
                   subCategoryId: values.subCategoryId,
                   size: values.size,
-                  discountPercent: values.discountPercent,
                   qualityTier: values.qualityTier,
                   shape: values.shape,
                   unit: values.unit,

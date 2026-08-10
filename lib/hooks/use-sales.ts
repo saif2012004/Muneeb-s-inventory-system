@@ -68,7 +68,8 @@ export type SaleItem = {
     qualityTier: string | null;
     /** Russ: "circle" | "rectangular_round". Null elsewhere. */
     shape: string | null;
-    discountPercent: number | null;
+    // No discount here, deliberately: the line's own `discountPercent` above is
+    // the snapshot a bill shows. A product has no discount to report.
     /** "cotton" for eggs, "piece", "bottle". Drives the quantity wording. */
     unit: string | null;
     isActive: boolean;

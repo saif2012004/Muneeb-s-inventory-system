@@ -37,7 +37,6 @@ model Product {
   subCategory     SubCategory @relation(fields: [subCategoryId], references: [id])
   price           Decimal     @db.Decimal(10, 2)
   size            String? // "half_litre" | "1L" | "1.5L" | "2.25L" | "large" | "small" | null
-  discountPercent Int? // 0 | 20 | 30 | 60
   qualityTier     String? // "premium" | "simple" | null
   shape           String? // "circle" | "rectangular_round" | null (russ)
   unit            String? // "cotton" (eggs) | "piece" | "bottle" | null

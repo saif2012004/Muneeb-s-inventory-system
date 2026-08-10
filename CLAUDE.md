@@ -346,7 +346,8 @@ model Product {
   subCategory     SubCategory  @relation(fields: [subCategoryId], references: [id])
   price           Decimal      @db.Decimal(10, 2)
   size            String?      // "half_litre" | "1L" | "1.5L" | "2.25L" | "large" | "small" | null
-  discountPercent Int?         // 0 | 20 | 30 | 60
+  // NO discountPercent. Dropped 2026-08-10 (CHECKLIST #9). A discount is a
+  // sale-time percentage snapshotted on the LINE, never a product attribute.
   qualityTier     String?      // "premium" | "simple" | null
   shape           String?      // "circle" | "rectangular_round" | null (russ)
   unit            String?      // "cotton" (eggs) | "piece" | "bottle" | null
@@ -519,7 +520,13 @@ model User {
 
 ---
 
-## 🧭 WHICH SALE TABLES ARE LIVE — verified 2026-08-10, re-check before believing otherwise
+## 🧭 WHICH SALE TABLES ARE LIVE — RE-VERIFIED 2026-08-11, re-check before believing otherwise
+
+> **This section has been correct all along; the SESSION BRIEFS drifted from it, not the reverse.**
+> Across seven consecutive briefs an upstream summary asserted the opposite — "unified Sale is the
+> only sale model", "Migration B done", "the guard was repointed" — none of which was true in this
+> repo. A full ground-truth audit on 2026-08-11 re-confirmed every claim below.
+> **If a session brief and this section disagree, run the grep. The grep wins.**
 
 **The app runs on `BeverageSale` / `BakerySale`. `Sale` / `SaleItem` exist but NOTHING reads or
 writes them.** The unified rework is HALF shipped: the data was migrated (migration A), the
@@ -671,8 +678,10 @@ same commit.
   (whole-bill). Stacking order is line-first, then bill, with a rounding point at each —
   `computeLineTotal` / `applySaleDiscount` in `lib/sales.ts`, one implementation.
   ~~Discount variants are separate Product records~~ — **the 36 variant products were deleted in
-  that rework.** `Product.discountPercent` is a dead column awaiting its own migration (see the
-  open-items list); never read it for a sale line.
+  that rework**, and **`Product.discountPercent` no longer exists**: the column was dropped
+  2026-08-10 (CHECKLIST #9, closed). A product cannot carry a discount, so a sale line cannot
+  accidentally read one — which is the property the rework was buying. If you find yourself
+  wanting a product-level discount, that is the variant model coming back; don't.
 - Russ = 2 sizes (large/small) x 2 shapes (circle/rectangular_round) = 4 products, differentiated by `size` and `shape`.
 - Eggs sold by the cotton: `unit: "cotton"`, quantity = number of cottons.
 
@@ -768,7 +777,7 @@ survived seven phases. Evidence and method:
 
 ## Database security (READ BEFORE TOUCHING RLS)
 
-**Row Level Security is ENABLED on all 15 tables in `public`, with ZERO policies. This is
+**Row Level Security is ENABLED on all 18 tables in `public`, with ZERO policies. This is
 deliberate and correct. Do not "fix" it.**
 
 Migration: `prisma/migrations/20260803000000_enable_rls/`.
@@ -787,7 +796,7 @@ apply here, because nothing in this app authenticates as those roles:
 - The app does **not** use the anon key or the Supabase Data API. `@supabase/supabase-js` is
   installed but unused for data access.
 - **All** database access is Prisma, over a direct Postgres connection, as the `postgres` role.
-  That role has `rolbypassrls = true` **and** owns all 15 tables — two independent reasons RLS
+  That role has `rolbypassrls = true` **and** owns all 18 tables — two independent reasons RLS
   never applies to it. Verified: reads, creates, updates, deletes and FK-joined writes all pass
   with RLS on.
 
@@ -803,13 +812,13 @@ apply here, because nothing in this app authenticates as those roles:
 
 ### Expected advisor output
 
-`get_advisors({ type: "security" })` reports 15 × `rls_enabled_no_policy` at **INFO** level.
+`get_advisors({ type: "security" })` reports 18 × `rls_enabled_no_policy` at **INFO** level.
 That is the healthy steady state, not a regression. The thing to watch for is
 `rls_disabled_in_public` at **ERROR** level — that means a new table slipped through.
 
 ### Still open
 
-`anon` / `authenticated` retain table-level GRANTs on all 15 tables (Supabase's default for
+`anon` / `authenticated` retain table-level GRANTs on all 18 tables (Supabase's default for
 `public`). RLS makes those grants useless for reading rows, so this is not a leak — but the
 Data API surface still exists. Restricting the exposed schemas / disabling the Data API is a
 pending decision for the owner; it would not affect Prisma, which never goes through PostgREST.
@@ -1256,11 +1265,15 @@ would start diluting the two that matter.)
     saving — otherwise a 400 gets written to disk as a `.csv` full of JSON.
 - **Phase 8 tasks (PWA, touch targets, date locale, on-device mobile) → PRE-HANDOFF CHECKLIST**
   items 11, 10, 12, 13. Not restated here; the checklist is the only place they are tracked.
-- **`Product.discountPercent` is a DEAD COLUMN awaiting its own migration → CHECKLIST item 9.**
-  The one rule that stays here because it is about how to write code today, not about the task:
-  **do NOT read `product.discountPercent` for a sale line.** The line's own `discountPercent` is
-  the snapshot; the product's is dead. Reading it would make an old bill's discount mutable, which
-  is the exact thing the discount rework fixed.
+- **`Product.discountPercent` is GONE — column dropped 2026-08-10, CHECKLIST #9 closed.** The rule
+  it existed to protect now holds structurally: a sale line's discount is the line's own
+  snapshotted `discountPercent`, and there is no product discount left to read by mistake. The
+  removal took **13 files**, not the 6 that item predicted — the four it missed were
+  `lib/hooks/use-catalog.ts`, `components/catalog/ProductDialog.tsx`,
+  `components/catalog/CatalogManager.tsx` and, the one that would have bitten,
+  **`prisma/seed.ts`**, which still wrote the column and would have broken the next seed run after
+  a green migration. Lesson worth keeping: **grep for writers as well as readers before dropping a
+  column** — the seed is not in any component tree and does not show up in a UI-shaped search.
 - **⚠️ THE BEVERAGES/BAKERY SALE `PATCH` IS FULLY IMPLEMENTED AND HAS NO UI. IT IS NOT DEAD CODE.**
   This is the single easiest thing in the repo to mistake for cruft and delete. Do not.
   - **What exists:** `PATCH /api/{beverages,bakery}/sales/[id]` is complete and server-verified.
@@ -1361,10 +1374,20 @@ numbers — **his task, not a figure for us to invent.**
 delete and every other destructive step here was confirmed.
 
 > ⚠️ **Confirm the count against the environment actually being handed over.** In the database this
-> repo points at (project `wcfdtxalwlztfsbepkrr`, the ref in `.env`), 2026-08-10 shows **1 sale, 1
-> customer (Saif), Rs. 5,000** — with the sale still in the OLD `BakerySale` table. Session briefs
-> have repeatedly described **5 sales across 3 customers**, which no query here has reproduced. Do
-> not run a delete set sized from the wrong environment.
+> repo points at (project `wcfdtxalwlztfsbepkrr`, the ref in `.env`), **re-verified 2026-08-11**:
+>
+> | | rows |
+> |---|---|
+> | `BakerySale` | **1** — Rs. 5,000, customer Saif, still in the OLD table |
+> | `MilkSale` | **1** — Rs. 6,000 |
+> | `BeverageSale` | **0** |
+> | `Sale` (unified) | 1 — migration A's copy of the bakery row, not a second sale |
+> | `Customer` | **1** — Saif |
+> | `CustomerPayment` | 0 |
+>
+> **Two real sales, one customer.** Session briefs have now described **5 sales across 3 customers**
+> seven times, and no query has ever reproduced it. Do not run a delete set sized from the wrong
+> environment, and do not treat "only 1 row in `Sale`" as data loss — it is correct.
 
 #### `[ ]` **2b. [BLOCKS GO-LIVE] Owner sets his real shop details in Settings**
 
@@ -1473,8 +1496,20 @@ in one of them. See the data-count warning under #2 before dropping anything.
 
 #### `[ ]` **6. `lib/receivables.ts` still sums `BeverageSale` + `BakerySale`**
 
-Dormant — receivables was removed from the UI in batch 2 — so harmless today, but **Migration B
-would leave it referencing dropped tables**. Repoint at `Sale` or delete it, as part of #5.
+**"Dormant" understates it — corrected 2026-08-11.** Receivables was removed from the **UI** in
+batch 2, not from the **code**. The module has **16 Prisma calls** (8 of them against the old sale
+tables) and is imported by **8 route files**: `/api/customers`, `/api/customers/[id]`,
+`/api/customers/[id]/balance`, `/api/customers/[id]/payments`,
+`/api/customers/[id]/payments/[paymentId]`, `/api/milk/sales`, `/api/milk/sales/[id]`,
+`/api/reports/export`. It runs on every customer and milk-sale request.
+
+What *is* dormant is its presentation: `CustomerProfile` and `CustomersHub` no longer render
+billed/paid/outstanding, and `PaymentDialog` is defined but **never rendered** — as is
+`useDeactivateCustomer`. So the balances are computed and returned, and nothing displays them.
+
+**Migration B would leave 8 live routes referencing dropped tables.** Repoint at `Sale` or delete
+it, as part of #5. Deleting is only safe once the `CustomerPayment` table and the payments routes
+go with it — decide that deliberately rather than discovering it at drop time.
 
 #### `[ ]` **7. Harden the client `unitPrice` override on UPDATE**
 
@@ -1494,22 +1529,25 @@ assuming it is dead code.
 
 ### 🟡 Phase 8 polish
 
-#### `[ ]` **9. `Product.discountPercent` column drop + catalog "Discount" column removal — ONE change**
+#### `[x]` **9. `Product.discountPercent` column drop + catalog "Discount" column removal — DONE 2026-08-10**
 
-The discount rework (2026-08-09) made discount a sale-time percentage and deleted the 36 variant
-products, so the column has no remaining purpose. Its own migration, nothing else in it.
+Migration `20260810180000_drop_product_discount_percent`, one statement:
+`ALTER TABLE "Product" DROP COLUMN "discountPercent";` — generated by `migrate diff` against a
+verified-empty baseline, so it carried no cascade, no index or constraint drop, and touched no
+other column. All three parts shipped together: the column, the `SALE_DETAIL_SELECT` product join,
+and the catalog's "Discount" table column.
 
-**Three parts, and they must go together** — dropping the column without removing the table column
-just breaks the page:
-1. **The column itself.** 6 files still read it: `components/catalog/ProductTable.tsx`,
-   `lib/sale-catalog.ts`, `lib/catalog-display.ts`, `lib/validations/catalog.ts`, and the two
-   `/api/products` routes.
-2. **`SALE_DETAIL_SELECT` in `lib/sales.ts`**, which still joins `product.discountPercent` even
-   though the UI reads the line's own snapshotted value.
-3. **The catalog's "Discount" COLUMN**, which now renders "—" on all 27 rows and is pure noise.
+**It was 13 files, not the 6 predicted here** — see the carried-forward note for which four were
+missed and why `prisma/seed.ts` was the dangerous one.
 
-**Not urgent** — the entry point is already closed (`ProductDialog`'s discount field went in the
-same commit), and all 27 surviving products carry `discountPercent` 0 or null.
+**Verified post-drop against the live database and in the browser:** column gone; all 27 products
+byte-identical (md5 of id/name/price/stock/isActive unchanged across the drop); Saif and both real
+sales untouched; RLS 18/18 with FORCE RLS 0 and advisors clean at INFO; catalog lists 27 with no
+Discount column and no discount field in either dialog; product **create and edit** both still
+work; and a discounted sale round-tripped exactly — 3 × 275.50 → 10% line → 743.85 → 5% bill →
+706.66, stock 100→97, receipt printing `3 × 275.50  Rs. 743.85` in paise while the screen showed
+`3 × Rs. 276  Rs. 744`. Evidence:
+`docs/responses/2026-08-10-discount-column-dropped-and-verified.md`.
 
 #### `[ ]` **10. Touch targets — app-wide, in one place**
 
@@ -1570,15 +1608,34 @@ progressive load on `/reports`).
 
 #### `[ ]` **15. Data API surface — an owner decision, not a leak**
 
-`anon` / `authenticated` retain table-level GRANTs on all 17 tables (Supabase's default for
+`anon` / `authenticated` retain table-level GRANTs on all 18 tables (Supabase's default for
 `public`). RLS makes those grants useless for reading rows, so this is **not** a leak — but the
 PostgREST surface still exists. Restricting the exposed schemas or disabling the Data API is
 pending the owner's call; it would not affect Prisma, which never goes through PostgREST.
+
+#### `[ ]` **16. Two applied migrations are UNTRACKED in git — found 2026-08-11**
+
+```
+?? prisma/migrations/20260809180000_unify_sale_tables_part_a/
+?? prisma/migrations/20260810180000_drop_product_discount_percent/
+```
+
+Both are **applied** and recorded in `_prisma_migrations` (2026-08-09 15:07 and 2026-08-10 12:58),
+but neither directory is committed. **A fresh clone would not contain them**, so `migrate deploy`
+on a new environment would build a database missing the unified `Sale` tables and still carrying
+`Product.discountPercent` — silently diverging from this one.
+
+The second is part of the uncommitted item #9 change set and goes in with it. The first has been
+untracked since 2026-08-09. **Commit both.** Also worth running `npx prisma migrate status` once
+after, to confirm git and `_prisma_migrations` agree.
 
 ---
 
 ### `[x]` Closed — recorded so they are not re-opened
 
+- **`[x]` `Product.discountPercent` column drop** (was #9). **Closed 2026-08-10.** One-statement
+  migration, 13 files, verified post-drop in the browser including a discounted sale. The column
+  cannot come back without reintroducing the variant model — see Discounts, russ, eggs.
 - **`[x]` Login POST-only security fix** (was BLOCKER #1). **Closed 2026-08-10.** Form is
   `method="post" action="/api/auth/no-js-login"`; that route is POST-only (405 otherwise).
   Verified with script execution genuinely disabled — credentials went in the request body, the

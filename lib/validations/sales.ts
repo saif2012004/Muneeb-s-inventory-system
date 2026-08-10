@@ -55,9 +55,11 @@ const notes = z
  * trip unchanged.
  *
  * Defaults to 0 rather than being nullable — null and 0% mean the same thing,
- * and this project has already lost time to exactly that ambiguity (a bakery
- * product storing `discountPercent = 0` instead of null broke a falsy check and
- * printed "0% off" on every row; see docs/phase-4-bakery-module.md).
+ * and this project has already lost time to exactly that ambiguity (back when
+ * products carried a discount, a bakery product storing `discountPercent = 0`
+ * instead of null broke a falsy check and printed "0% off" on every row; see
+ * docs/phase-4-bakery-module.md. That column was dropped in CHECKLIST #9 —
+ * the lesson about 0-vs-null is why this one defaults rather than nulls).
  */
 const discountPercent = z
   .number({ message: "Discount must be a number" })

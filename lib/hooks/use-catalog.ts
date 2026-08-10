@@ -40,7 +40,6 @@ export type Product = {
   /** Already a NUMBER — the route serializes the Decimal (Gotcha 2). */
   price: number;
   size: string | null;
-  discountPercent: number | null;
   /** Units on hand. Beverages + bakery; milk has no products. */
   stock: number;
   qualityTier: string | null;
@@ -167,7 +166,6 @@ export type ProductWriteInput = {
   subCategoryId: string;
   price: number;
   size: string | null;
-  discountPercent: number | null;
   /**
    * OPTIONAL on write. A new product takes the column default rather than the
    * dialog inventing a number — stock is counted on the shelf, through the
