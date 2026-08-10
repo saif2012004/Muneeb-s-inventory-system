@@ -1577,8 +1577,21 @@ work; and a discounted sale round-tripped exactly — 3 × 275.50 → 10% line �
 **44px** minimum (measured on the customer profile at 360px). These are framework/text defaults,
 not one-off mistakes, so they exist wherever those primitives are used.
 
-**Do NOT patch piecemeal as they turn up.** Override the `TabsTrigger` default **once** in
-`components/ui/tabs.tsx`. Everything else measured clean — inputs, buttons and cards are all ≥44px.
+**Do NOT patch piecemeal as they turn up.** Override the defaults **once** in the primitives.
+
+⚠️ **CORRECTED 2026-08-11 — the primitive defaults are 36px, not ≥44px.** An earlier version of
+this item said "everything else measured clean — inputs, buttons and cards are all ≥44px". That is
+**false**, read straight from the cva:
+
+| Primitive | Default | |
+|---|---|---|
+| `components/ui/button.tsx` | `default: "h-9 px-4 py-2"` | **36px** (also `sm` h-8 = 32px, `lg` h-10 = 40px, `icon` h-9) |
+| `components/ui/input.tsx` | `"flex h-9 w-full …"` | **36px** |
+| `components/ui/tabs.tsx` | `TabsList` `h-9` + `p-1`; `TabsTrigger` has **no height**, only `px-3 py-1 text-sm` | **≈28px** |
+
+They reach 44px only where a call site overrides with `h-11` — **151 such overrides exist**, while
+**~84 `<Button>` and ~40 `<Input>` usages carry no override** and render at 36px. So the scope is
+the three primitive defaults, not one `TabsTrigger` line.
 
 #### `[ ]` **11. PWA — manifest, service worker, install prompt**
 
