@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { isPlaceholderValue } from "@/lib/settings-display";
+import { RECEIPT_LINE_CHARS, isPlaceholderValue } from "@/lib/settings-display";
 
 /**
  * Validation for `PATCH /api/settings`.
@@ -29,6 +29,12 @@ import { isPlaceholderValue } from "@/lib/settings-display";
  * The phone cap is 60 rather than 30 deliberately: "0300-1234567 / 042-35678901"
  * is already 27 characters, so 30 would reject a perfectly ordinary two-number
  * listing — the exact false rejection this rule exists to avoid.
+ *
+ * MULTIPLE NUMBERS ARE FREE TEXT AND STAY THAT WAY. Owners routinely list two.
+ * Do not parse, split, or normalise them into separate fields — that is the same
+ * format enforcement, wearing a data-model hat. 60 characters is roughly two
+ * lines of a 58mm receipt, which is as much phone as a receipt header should
+ * carry anyway.
  */
 
 /**
@@ -62,11 +68,16 @@ const notPlaceholder = (label: string) => (value: string | null) =>
   !isPlaceholderValue(value) || `That is the placeholder text — enter your real ${label}.`;
 
 export const settingsUpdateSchema = z.object({
+  // 32 = exactly one line of ESC/POS Font A on a 58mm roll (384-dot head / 12
+  // dots per char). See "Receipt printing" in CLAUDE.md — the paper width is a
+  // recorded decision, so if it ever changes to 80mm this becomes 48.
   shopName: z
     .string()
     .trim()
     .min(1, { message: "Shop name is required" })
-    .max(80, { message: "Shop name must be 80 characters or fewer" })
+    .max(RECEIPT_LINE_CHARS, {
+      message: `Shop name must be ${RECEIPT_LINE_CHARS} characters or fewer — it has to fit one line on the receipt`,
+    })
     .refine(
       (value) => notPlaceholder("shop name")(value) === true,
       { message: "That is the placeholder text — enter your real shop name." }

@@ -204,6 +204,40 @@ The frontend must feel calm, fast, and legible for a shop owner using a cheap An
 - Every form submit button shows a spinner and disables while pending.
 - Toast on every create/update/delete (success and error).
 
+### Receipt printing (thermal) — PAPER WIDTH IS 58mm. DECIDED 2026-08-10.
+
+**The receipt layout is built for a 58mm roll: `RECEIPT_LINE_CHARS = 32`, in
+`lib/settings-display.ts`. Derive every width from that constant — never hardcode 32.**
+
+| Roll | Print head | Font A (12 dots/char) | Font B (9 dots/char) |
+|---|---|---|---|
+| **58mm (assumed)** | 384 dots | **32 chars/line** | 42 |
+| 80mm | 576 dots | 48 chars/line | 64 |
+
+*(Standard ESC/POS figures. **Not measured against the owner's printer** — see below.)*
+
+**Why 58mm when we do not know the printer: the risk is asymmetric.** A 58mm layout also prints
+on 80mm — it just leaves margin. An 80mm layout **overflows** 58mm and wraps every line into
+nonsense. Default to the narrow assumption; the failure mode of guessing narrow is a bit of white
+space, and the failure mode of guessing wide is an unreadable receipt.
+
+**We have no information about the actual printer.** Searched the whole repo on 2026-08-10 —
+nothing has ever recorded a model, an interface, or a paper width. **Confirm the roll before
+handoff**, and if it turns out to be 80mm, change `RECEIPT_LINE_CHARS` to 48 and the shop-name cap
+follows automatically.
+
+**Double-width header text halves the budget to 16 characters.** That is a RENDERING decision for
+the receipt, not a validation one: print a long shop name at normal width rather than letting the
+validator reject a real name that would fit perfectly.
+
+**Field caps derived from this** (see also CHECKLIST #2b):
+
+| Field | Cap | Why |
+|---|---|---|
+| `shopName` | **32** | Exactly one 58mm line |
+| `shopPhone` | 60 | ~2 lines; enough for two numbers as free text |
+| `shopAddress` | 200 | Wraps to ~6 lines; a paste guard, not a format rule |
+
 ---
 
 ## Folder Structure
@@ -1246,10 +1280,18 @@ his customers recognise it. **A format check is far more likely to reject someth
 catch a real error**, and a real error is one he sees on his own receipt and fixes in thirty
 seconds. A phone regex would be a stranger telling a shop owner his own phone number is wrong.
 
-Caps are **80 / 60 / 200** (name / phone / address), there only so a huge paste cannot break the
-receipt layout. The phone cap is 60 rather than 30 because
-`0300-1234567 / 042-35678901` is already 27 characters — 30 would reject an ordinary two-number
-listing, which is precisely the false rejection this rule exists to prevent.
+Caps are **32 / 60 / 200** (name / phone / address) and exist only so the receipt layout survives —
+see **Receipt printing** in the Design System for where the numbers come from. Two of them have a
+reason that must not be lost:
+
+- **`shopName` = 32** is not a taste judgement, it is one line of a 58mm receipt
+  (`RECEIPT_LINE_CHARS`). If the paper width is ever confirmed as 80mm, change that constant to 48
+  and this cap follows — do not edit the cap directly.
+- **`shopPhone` = 60, and MULTIPLE NUMBERS ARE ALLOWED as free text.** Owners routinely list two.
+  `0300-1234567 / 042-35678901` is already 27 characters, so the earlier 30 would have rejected an
+  ordinary two-number listing — the same false rejection, arriving through a length check instead of
+  a regex. **Do not parse, split, or normalise the numbers into separate fields either**; that is
+  format enforcement wearing a data-model hat.
 
 Strictness belongs in the money maths, not in free-text contact details.
 

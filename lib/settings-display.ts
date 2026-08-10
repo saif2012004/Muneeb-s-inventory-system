@@ -10,6 +10,27 @@
 export const SETTINGS_ID = "app";
 
 /**
+ * THE RECEIPT PAPER WIDTH, as a character budget. One line, ESC/POS Font A.
+ *
+ * **58mm roll: 384-dot print head / 12 dots per character = 32 characters.**
+ *
+ * 58mm is the DEFAULT-WHEN-UNSURE choice, and the reason is asymmetric risk: a
+ * layout built for 58mm also prints on 80mm (it just leaves margin), while an
+ * 80mm layout OVERFLOWS 58mm and wraps into nonsense. The owner's actual printer
+ * is unknown — nothing in this repo has ever recorded one — so the narrow
+ * assumption is the safe one.
+ *
+ * If the printer is later confirmed as 80mm, this becomes 48 (576-dot head) and
+ * the shop-name cap moves with it, because it is derived from this constant
+ * rather than copied. Full reasoning: "Receipt printing" in CLAUDE.md.
+ *
+ * NOTE for the receipt renderer: double-width header text halves this to 16.
+ * That is a RENDERING decision — print a long name at normal width rather than
+ * letting the validator reject a real shop name that would fit perfectly.
+ */
+export const RECEIPT_LINE_CHARS = 32;
+
+/**
  * THE SEEDED PLACEHOLDERS. Deliberately jarring, and they must stay that way.
  *
  * A receipt printed before setup has to be OBVIOUSLY unconfigured. A friendly

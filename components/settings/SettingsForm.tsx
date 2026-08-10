@@ -25,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { useSettings, useUpdateSettings } from "@/lib/hooks/use-settings";
 import {
+  RECEIPT_LINE_CHARS,
   SETTINGS_PLACEHOLDERS,
   isConfigured,
   isPlaceholderValue,
@@ -58,7 +59,11 @@ const formSchema = z.object({
     .string()
     .trim()
     .min(1, { message: "Shop name is required" })
-    .max(80, { message: "Shop name must be 80 characters or fewer" }),
+    // Must match the server cap in lib/validations/settings.ts, which is why
+    // both read the same constant: one line of a 58mm receipt.
+    .max(RECEIPT_LINE_CHARS, {
+      message: `Shop name must be ${RECEIPT_LINE_CHARS} characters or fewer — it has to fit one line on the receipt`,
+    }),
   shopPhone: z
     .string()
     .trim()
@@ -231,7 +236,8 @@ export function SettingsForm() {
                           />
                         </FormControl>
                         <FormDescription>
-                          Printed at the top of every receipt.
+                          Printed at the top of every receipt — up to{" "}
+                          {RECEIPT_LINE_CHARS} characters, so it fits one line.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -254,7 +260,8 @@ export function SettingsForm() {
                           />
                         </FormControl>
                         <FormDescription>
-                          Leave blank to keep it off the receipt.
+                          Leave blank to keep it off the receipt. Two numbers are
+                          fine — write them however you like.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
