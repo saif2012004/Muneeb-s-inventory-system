@@ -25,7 +25,11 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { DEFAULT_LOGIN_REDIRECT, LOGIN_ROUTE } from "@/lib/routes";
+import {
+  DEFAULT_LOGIN_REDIRECT,
+  LOGIN_ROUTE,
+  NO_JS_LOGIN_ROUTE,
+} from "@/lib/routes";
 import { signInSchema, type SignInInput } from "@/lib/validations/auth";
 
 /**
@@ -46,12 +50,21 @@ function resolveCallbackUrl(raw: string | undefined): string {
   }
 }
 
-export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
+export function LoginForm({
+  callbackUrl,
+  initialError,
+}: {
+  callbackUrl?: string;
+  /** Set when the no-JS POST bounced back with `?error=` — see the login page. */
+  initialError?: string;
+}) {
   const router = useRouter();
   const reduceMotion = useReducedMotion();
 
   const [showPassword, setShowPassword] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(
+    initialError ?? null
+  );
 
   const form = useForm<SignInInput>({
     resolver: zodResolver(signInSchema),
@@ -99,11 +112,31 @@ export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
 
         <CardContent className="p-5 pt-2">
           <Form {...form}>
+            {/*
+              `method` and `action` are LOAD-BEARING, not decoration. Without
+              them a native submit (JS absent, or a click before hydration)
+              defaults to GET and puts the owner's email and password in the
+              URL — history, access logs, Referer. The route they post to
+              exports POST only. Do not remove either attribute.
+
+              With JS working this never fires: react-hook-form's handleSubmit
+              calls preventDefault() synchronously, so the browser's native
+              submit is cancelled and the client signIn() below runs instead.
+            */}
             <form
+              method="post"
+              action={NO_JS_LOGIN_ROUTE}
               onSubmit={form.handleSubmit(onSubmit)}
               className="space-y-4"
               noValidate
             >
+              {/* Carries the redirect target through the no-JS POST. */}
+              <input
+                type="hidden"
+                name="callbackUrl"
+                value={callbackUrl ?? ""}
+              />
+
               <FormField
                 control={form.control}
                 name="email"

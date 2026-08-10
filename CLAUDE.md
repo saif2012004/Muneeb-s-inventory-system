@@ -33,8 +33,9 @@ the file is part of the diff. If you are unsure whether a rule is still true, **
 the code before repeating it** — including the rules in this file.
 
 **Open work is tracked in ONE place: the `✅ PRE-HANDOFF CHECKLIST` near the end of this file.**
-Four of its items block go-live. Do not record an open item anywhere else — a task written into a
-prose section is a task that gets lost, which is exactly how the checklist came to be needed.
+Three of its items block go-live (#1 closed 2026-08-10). Do not record an open item anywhere else —
+a task written into a prose section is a task that gets lost, which is exactly how the checklist
+came to be needed.
 
 **The one sanctioned exception:** two go-live blockers (the login POST-only fix and the data reset)
 are *deliberately* mirrored as one-line stubs in the Development Phases table, because that table is
@@ -722,13 +723,46 @@ same commit.
 - No database adapter. Credentials + JWT sessions don't use one, and the Credentials
   provider is incompatible with DB sessions. `@auth/prisma-adapter` is NOT a dependency.
 
-### 🔴 OPEN SECURITY ITEM — login form falls back to a GET with credentials in the URL
+### 🔒 The login form's no-JS fallback is POST-only. Both attributes are LOAD-BEARING.
 
-**The login form has no `method`, so with JS absent it submits GET and puts the email and password
-in the query string. Reproduced, unfixed, and it BLOCKS GO-LIVE.**
+**`components/auth/login-form.tsx` carries `method="post"` and
+`action={NO_JS_LOGIN_ROUTE}`. Removing either one re-opens a credential leak.** Fixed
+2026-08-10; was CHECKLIST #1, now closed.
 
-**→ Full write-up, fix and re-test instructions: PRE-HANDOFF CHECKLIST item 1.** Tracked there, not
-here — do not add status notes to this section.
+Without them a native submit — JS absent, a click before hydration, a failed chunk load —
+defaults to **GET** and serialises the owner's email and password into the URL, where they land
+in browser history, server and proxy access logs, and any onward `Referer`. That is the state
+this repo shipped in until now; it was reproduced with the address bar showing
+`/login?email=…&password=…`.
+
+| Path | What runs |
+|---|---|
+| **JS working** (normal) | react-hook-form's `handleSubmit` calls `preventDefault()` **synchronously**, so the browser's native submit is cancelled and `signIn()` from `next-auth/react` posts to `/api/auth/callback/credentials` as before. The fallback route is never reached. |
+| **JS absent / not yet hydrated** | The browser POSTs form-encoded to `/api/auth/no-js-login`, which exports **POST only** — Next answers GET/HEAD/PUT with **405**, so the credential path is incapable of accepting a query string. |
+
+Three things about that route are deliberate and easy to break:
+
+- **It lives under `/api/auth/`** because the middleware matcher excludes that prefix. Anywhere
+  else under `/api/`, a signed-out POST would get the 401 envelope instead of reaching the
+  handler. The hyphen keeps it from colliding with any Auth.js action on the `[...nextauth]`
+  catch-all.
+- **It answers 303, not 307, and calls `signIn` with `redirect: false`.** `redirect()` from
+  `next/navigation` issues a **307 inside a Route Handler** (it only switches to 303 in a Server
+  Action), and a 307 preserves the method — the browser would re-POST the credentials to the
+  destination. The session cookie still arrives: Next merges anything written to `cookies()`
+  into the returned Response.
+- **It checks the URL `signIn` resolved to before treating the login as successful.** Auth.js
+  does *not* always throw on failure — when `assertConfig` rejects the config it returns a 500
+  before the raw/throw path, so `signIn` resolves normally, sets no cookie, and hands back its
+  own endpoint URL. Found in verification with `NEXTAUTH_SECRET` missing: the route cheerfully
+  303'd a session-less browser to `/`, which then bounced to `/login` with no explanation.
+- **It brings its own CSRF check** (Origin, falling back to Referer), because `signIn` calls
+  Auth.js with `skipCSRFCheck`. Without it a cross-site form could log the owner into someone
+  else's account.
+
+**Re-test with JavaScript actually disabled.** The bug is invisible with JS on — that is how it
+survived seven phases. Evidence and method:
+`docs/responses/2026-08-10-login-post-only-security-fix.md`.
 
 ---
 
@@ -1012,6 +1046,24 @@ rm -rf .next && npm run dev   # confirm it says "Local: http://localhost:3000", 
 Always check the port the server actually bound to before blaming the app. Not a code
 defect — an operational trap that cost real time in Phase 5.
 
+### Recreating `.env` — trim the Vercel pull, or auth breaks in a way that looks like a bug
+
+`.env` is gitignored, so a fresh checkout has none and **every request logs
+`MissingSecret` while the app still renders `/login` perfectly happily** — sign-in just silently
+never establishes a session. `vercel env pull` is the way back (the project is linked, and
+`NEXTAUTH_SECRET` / `DATABASE_URL` / `DIRECT_URL` are all on Preview):
+
+```bash
+vercel env pull .env --environment=preview --yes
+```
+
+**Then delete everything it added except those three, and add
+`NEXTAUTH_URL=http://localhost:3000`.** The pull also writes **`VERCEL=1`**, and
+`useSecureCookies: process.env.VERCEL === "1"` in `lib/auth.config.ts` then issues a `Secure`
+session cookie that the browser **drops over plain-http localhost** — you sign in, get a 200, and
+are still signed out. Pull into `.env`, not `.env.local`: `.env.local` holds the Vercel OIDC token
+and Next reads both.
+
 ---
 
 ## Development Phases
@@ -1026,14 +1078,14 @@ defect — an operational trap that cost real time in Phase 5.
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ✅ Done |
 | 6  | Farmer net-balance ledger + all-farmers balance sheet | ✅ Done |
 | 7  | Reports dashboard + charts + CSV export | ✅ Done |
-| 8  | Polish: mobile nav, states, a11y, PWA, **login POST-only security fix**, final validation | ⬜ Todo |
+| 8  | Polish: mobile nav, states, a11y, PWA, ~~login POST-only security fix~~ (✅ done 2026-08-10), final validation | ⬜ Todo |
 
 Update this table as phases complete. Change ⬜ to ✅.
 
 **Before declaring the project ready for the client, work the PRE-HANDOFF CHECKLIST**, not this
 table. Phase 8 is polish; the checklist is everything that must be true at handoff.
 
-### 🔴 The two go-live blockers — *deliberately duplicated here*
+### 🔴 The two go-live blockers — *deliberately duplicated here* (one now closed)
 
 > **INTENTIONAL DUPLICATION. Do not "clean this up" to a pointer.** The rest of this file follows a
 > strict one-place rule (see the process rule at the top), and these two lines break it **on
@@ -1044,7 +1096,7 @@ table. Phase 8 is polish; the checklist is everything that must be true at hando
 
 | | Blocker | Status | Full item |
 |---|---|---|---|
-| 🔴 | **Login POST-only security fix.** With JS absent the form submits GET and puts the owner's email and password in the URL. Reproduced. **Phase 8 cannot be marked ✅ while this is open.** | `[ ]` open | CHECKLIST #1 |
+| ✅ | **Login POST-only security fix.** ~~With JS absent the form submits GET and puts the owner's email and password in the URL.~~ Fixed and verified with JavaScript disabled on 2026-08-10. **No longer blocks go-live or Phase 8.** | `[x]` closed | CHECKLIST #1 |
 | 🔴 | **Data reset before go-live**, and with it **the owner's real shop details saved in Settings** (the seeded `SET SHOP NAME IN SETTINGS` placeholders must be gone — `configuredAt IS NOT NULL`). The owner must start on a database holding only his own real records. Once, deliberately, with the delete set confirmed first. | `[ ]` open | CHECKLIST #2 + #2b |
 
 (The other go-live blocker — the Vercel Pro / Supabase backup upgrade, CHECKLIST #3 — is not
@@ -1263,35 +1315,30 @@ Legend: `[ ]` open · `[~]` in flight · `[x]` closed · **[BLOCKS GO-LIVE]** = 
 
 ### 🔴 Blockers
 
-#### `[ ]` **1. [BLOCKS GO-LIVE] Login POST-only security fix**
+#### `[x]` **1. ~~[BLOCKS GO-LIVE]~~ Login POST-only security fix — CLOSED 2026-08-10**
 
-**Status:** open, reproduced, unfixed. **Also blocks closing Phase 8** — do not mark the phase ✅
-while this is outstanding, and do not let it get absorbed into the a11y sweep.
+**Status: fixed, verified with JavaScript disabled, no longer blocks go-live or Phase 8.**
 
-With the client JS bundle absent or unhydrated, the login form submits **natively**. There is no
-`method` on the `<form>`, so the browser defaults to **GET** and the credentials land in the query
-string:
+Was: with the client bundle absent or unhydrated the login form submitted **natively**, and with no
+`method` on the `<form>` the browser defaulted to **GET**, putting the credentials in the query
+string — `/login?email=…&password=<the actual password>` — where they reach browser history, server
+and proxy access logs, and any onward `Referer`. Found during Phase 5 mobile verification
+(2026-08-08) while every client chunk was 404ing from a corrupted `.next`.
 
-```
-/login?email=owner%40example.com&password=<the actual password>
-```
+**Shipped:** `method="post"` + `action="/api/auth/no-js-login"` on the form, and a route that
+exports POST only (GET/HEAD/PUT → 405), with an Origin/Referer CSRF check and server-side
+`callbackUrl` sanitising. **→ The rules that must not be undone are in the Authentication
+section**, not here.
 
-**Why it is not cosmetic:** a password in a URL is written to browser history, server and proxy
-access logs, and any `Referer` sent onward — places credentials are never rotated out of.
-
-**Found** during Phase 5 mobile verification (2026-08-08) and **reproduced** — that URL is what the
-address bar actually showed. It appeared only while every client chunk was 404ing from a corrupted
-`.next`, and did not recur once chunks served 200. So it is a **degraded-state** exposure, not an
-everyday one — which is a reason to schedule it, not to dismiss it. "Only when JS fails" includes a
-failed deploy, a CDN hiccup, an ad-blocker, or a locked-down corporate browser: exactly the moments
-someone retypes their password.
-
-**The fix:** the form must never be *capable* of sending credentials by GET.
-- `method="post"` on the `<form>`, so the no-JS fallback cannot serialise fields into the URL.
-- The no-JS path must post to a real handler that **accepts POST only** and rejects anything else
-  outright — a server action or a POST-only route.
-- **Re-test with JavaScript disabled in the browser**, not just with JS working. The bug is
-  invisible in the working case, which is how it survived this long.
+**Verified with JS genuinely disabled** — script execution killed at document start, confirmed by
+12 script tags present and none executed. The submit produced
+`POST /api/auth/no-js-login` with `email`/`password` in the **request body**, a bare URL with no
+query string, `303` to the callback target, and a `Set-Cookie` session; the address bar afterwards
+read `http://localhost:3000/beverages` with no credentials anywhere. Wrong password → 
+`/login?error=CredentialsSignin` rendering "Incorrect email or password." server-side. JS-on flow
+re-verified unchanged (still `/api/auth/callback/credentials`, no console errors, bad password
+rejected in place, good password lands on `/`). Full evidence:
+`docs/responses/2026-08-10-login-post-only-security-fix.md`.
 
 #### `[ ]` **2. [BLOCKS GO-LIVE] One deliberate data reset before go-live**
 
@@ -1532,6 +1579,10 @@ pending the owner's call; it would not affect Prisma, which never goes through P
 
 ### `[x]` Closed — recorded so they are not re-opened
 
+- **`[x]` Login POST-only security fix** (was BLOCKER #1). **Closed 2026-08-10.** Form is
+  `method="post" action="/api/auth/no-js-login"`; that route is POST-only (405 otherwise).
+  Verified with script execution genuinely disabled — credentials went in the request body, the
+  URL stayed bare. The rules that must not be undone live in the **Authentication** section.
 - **`[x]` Context7 connection diagnosis** (was: down 8 consecutive sessions, 3–9 Aug). **Closed
   2026-08-10** — it reconnected on its own and was verified live with a `resolve-library-id` call.
   No diagnosis was needed. Pin Prisma lookups to `/prisma/prisma/__branch__6.19.x`; see MCP Tools.
