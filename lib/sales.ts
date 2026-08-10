@@ -194,12 +194,20 @@ export async function loadSaleProducts(
 }
 
 /**
- * Snapshot a price for a line.
+ * Snapshot a price for a NEW line. **Create only — never call this for an
+ * existing line.**
  *
- * An explicit `unitPrice` from the client always wins. That is the point of the
- * override: the seed ships all 62 products at price 0, so the owner must be
- * able to sell at a real price before they have gone through and set every
- * catalog price. Absent an override, the current catalog price is copied.
+ * On CREATE an explicit `unitPrice` from the client wins, and that is the whole
+ * point of the override: the seed ships every product at price 0, so the owner
+ * must be able to bill a real price before walking the whole catalog. Absent an
+ * override, the current catalog price is copied.
+ *
+ * On UPDATE there is no override. `reconcileSaleLines` resolves an existing
+ * line's price itself, from the database or from the stored snapshot, and
+ * ignores whatever the client sent — closing the hole that let a client set any
+ * price on a historical line. `components/sales/NewSaleForm.tsx` ALWAYS sends a
+ * `unitPrice`, so an edit screen built on it would otherwise re-price a closed
+ * bill just because someone corrected a quantity.
  */
 export function snapshotUnitPrice(
   product: SaleProduct,
@@ -413,11 +421,13 @@ export type LineReconciliation = {
  * ---------------------------------------------------------------------------
  * WHEN A PRICE IS RE-SNAPSHOTTED (see "Price snapshot" in CLAUDE.md)
  * ---------------------------------------------------------------------------
- *   new line              -> fresh snapshot of the current catalog price
- *   PRODUCT changed       -> fresh snapshot (it is a different item now, so the
- *                            old item's price is meaningless for it)
+ *   new line              -> fresh snapshot of the current catalog price, or an
+ *                            explicit `unitPrice` from the request if sent
+ *   PRODUCT changed       -> fresh snapshot FROM THE DATABASE (it is a different
+ *                            item now, so the old item's price is meaningless)
  *   QUANTITY changed only -> KEEPS its original snapshot
- *   explicit unitPrice    -> that value wins over everything above
+ *   explicit unitPrice on
+ *   an EXISTING line      -> IGNORED. The server is authoritative on update
  *
  * Quantity is deliberately NOT a re-price trigger. Correcting "12 crates" to
  * "15 crates" on a months-old sale is a typo fix, not a re-sale; re-pricing it
@@ -473,18 +483,22 @@ export function reconcileSaleLines(
     // comment above. Changing it here silently re-prices historical sales.
     const productChanged = prior.productId !== line.productId;
 
-    const unitPrice =
-      line.unitPrice !== undefined
-        ? new Prisma.Decimal(line.unitPrice)
-        : productChanged
-          ? product.price
-          : prior.unitPrice;
+    /**
+     * 🔒 SERVER-AUTHORITATIVE ON UPDATE. `line.unitPrice` is deliberately NOT
+     * consulted here — see the "update" half of `snapshotUnitPrice`'s docblock.
+     *
+     * A price on an existing line comes from exactly two places: the database's
+     * current catalog price (when the line became a different product) or the
+     * stored snapshot (every other case). A client cannot set it.
+     *
+     * Do not "restore" the client override for symmetry with the create branch.
+     * They are asymmetric on purpose: create needs it because the seed ships
+     * every product at price 0, and update must refuse it because that is the
+     * exact mutation the snapshot rule exists to prevent.
+     */
+    const unitPrice = productChanged ? product.price : prior.unitPrice;
 
-    if (
-      productChanged &&
-      line.unitPrice === undefined &&
-      !prior.unitPrice.equals(unitPrice)
-    ) {
+    if (productChanged && !prior.unitPrice.equals(unitPrice)) {
       repricedItemIds.push(prior.id);
     }
 

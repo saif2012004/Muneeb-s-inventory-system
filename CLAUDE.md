@@ -604,15 +604,33 @@ outstanding      = totalBilled - totalPaid
 - Editing a sale is allowed. Totals are always recomputed inside a transaction.
 
 **Exactly when a line re-snapshots the current price (decided Phase 3.1 — do not loosen).
-Verified against `lib/sales.ts` on 2026-08-10; this table is what the code does today:**
+Verified against `lib/sales.ts` on 2026-08-11; this table is what the code does today:**
 
 | Edit to a line | Price behaviour |
 |---|---|
-| New line added | **Re-snapshot** — copy current `product.price` |
-| Line's `productId` changed (in place) | **Re-snapshot** — it is a different item, the old price is meaningless for it |
+| New line added | **Re-snapshot** — copy current `product.price`, **or** an explicit `unitPrice` from the request if one is sent (create only) |
+| Line's `productId` changed (in place) | **Re-snapshot FROM THE DATABASE** — it is a different item, the old price is meaningless for it |
 | Line's `quantity` changed, same product | **KEEP the stored `unitPrice`** |
 | Line untouched | **KEEP the stored `unitPrice`** |
-| Explicit `unitPrice` sent for the line | That value wins over every row above — ⚠️ see "the one un-hardened edge" below |
+| Explicit `unitPrice` sent for an **existing** line | **IGNORED.** The server is authoritative on update — see below |
+
+#### 🔒 The create/update asymmetry is deliberate. Do not "fix" it for symmetry.
+
+**CREATE honours a client `unitPrice`. UPDATE ignores it.** Closed 2026-08-11 (was CHECKLIST #7).
+
+- **Create needs the override**, because the seed ships every product at `price 0` — the owner has
+  to be able to bill a real price before walking the whole catalog.
+- **Update must refuse it**, because honouring it lets a client set any price on a historical line,
+  which is the exact mutation this whole rule exists to prevent.
+
+`components/sales/NewSaleForm.tsx` **always** sends a `unitPrice` (see the comment at its `:218`).
+So an edit screen built on that form would have re-priced a closed bill just because the owner
+corrected a quantity — silently, with nothing in the response to show it. That is why this was
+fixed *before* the sale edit UI (CHECKLIST #8) exists, rather than after.
+
+Implemented in the update branch of `reconcileSaleLines()`: `line.unitPrice` is not read at all
+for an existing line; the price is `productChanged ? product.price : prior.unitPrice`.
+`snapshotUnitPrice()` is now **create-only** — do not call it for an existing line.
 
 **Quantity is NOT a re-price trigger, deliberately.** Correcting "12 crates" to "15" on a
 months-old sale is a typo fix, not a re-sale; re-pricing it at today's catalog price would
@@ -655,22 +673,22 @@ Two guards go with the id lookup and must stay:
 - an `id` that is not on this sale → **409**, "Reload and try again." (someone else's line, or a
   stale form)
 
-#### ⚠️ The one un-hardened edge: a client-supplied `unitPrice` is still honoured on UPDATE
+#### ✅ CLOSED 2026-08-11: the client `unitPrice` override no longer applies on UPDATE
 
-**Current behaviour, stated plainly so no session mistakes it for already-fixed:**
-`snapshotUnitPrice()` lets an explicit `unitPrice` from the request body win over the stored
-snapshot on a PATCH, and `components/sales/NewSaleForm.tsx` **always sends one**.
+Kept here as a record so nobody re-opens it. The hole was: `snapshotUnitPrice()` let an explicit
+`unitPrice` from the request body beat the stored snapshot on a PATCH, while
+`components/sales/NewSaleForm.tsx` always sends one — so any future edit screen would have
+silently re-priced closed bills.
 
-The override exists for a real reason — the seed ships every product at `price 0`, so the owner
-must be able to bill a real price before walking the whole catalog — but that reason only
-applies to **creating** a sale. On an **edit** it means a client can set any price on a
-historical line, which is the exact mutation the snapshot rule exists to prevent.
+**Fixed:** the update branch of `reconcileSaleLines()` no longer reads `line.unitPrice` at all.
+An existing line's price is `productChanged ? product.price : prior.unitPrice` — database or
+stored snapshot, never the client. The override survives on **create** only, and
+`snapshotUnitPrice()` is now documented create-only.
 
-**DECIDED, NOT YET IMPLEMENTED (needs a code change, tracked in the open-items list):** keep the
-override on **create**, drop it on **update** — the server re-reads `product.price` from the DB
-for a re-snapshotting line and ignores any client price on PATCH. One change, in the update
-branch of `reconcileSaleLines()`. When that ships, update the last row of the table above in the
-same commit.
+**Verified over authenticated HTTP** (there is still no edit UI, so the route was exercised
+directly): a PATCH sending a bogus `unitPrice` on a quantity-only change left the stored snapshot
+untouched. See the create/update asymmetry note above, and
+`docs/responses/2026-08-11-snapshot-hole-7-closed.md`.
 
 ### Discounts, russ, eggs
 - **Discount is a SALE-TIME PERCENTAGE, not a product variant** (reworked 2026-08-09). It is
@@ -1511,12 +1529,16 @@ billed/paid/outstanding, and `PaymentDialog` is defined but **never rendered** �
 it, as part of #5. Deleting is only safe once the `CustomerPayment` table and the payments routes
 go with it — decide that deliberately rather than discovering it at drop time.
 
-#### `[ ]` **7. Harden the client `unitPrice` override on UPDATE**
+#### `[x]` **7. Harden the client `unitPrice` override on UPDATE — CLOSED 2026-08-11**
 
-Decided, not implemented. Keep the override on **create** (the seed ships products at price 0),
-ignore it on **PATCH** so the server always re-snapshots from the DB. One change in the update
-branch of `reconcileSaleLines()`. Full reasoning: **Price snapshot → "the one un-hardened edge"**.
-Update that rule table in the same commit as the code.
+Shipped. The update branch of `reconcileSaleLines()` no longer reads `line.unitPrice`; an existing
+line's price is `productChanged ? product.price : prior.unitPrice`. The override survives on
+**create** only. Full reasoning and the asymmetry rule: **Price snapshot → the create/update
+asymmetry note**.
+
+**Fixed deliberately BEFORE #8 (the sale edit UI) exists**, while the PATCH route had zero callers
+and the change could not regress anything. Verified over authenticated HTTP: a bogus client
+`unitPrice` on a quantity-only PATCH was ignored and the stored snapshot preserved.
 
 #### `[ ]` **8. Sale edit UI for beverages/bakery**
 

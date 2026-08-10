@@ -114,6 +114,17 @@ export const saleItemCreateSchema = z.object({
  * The PATCH form of a line. `id` present = an existing line being kept or
  * edited; `id` absent = a new line to add. Any existing line NOT present in the
  * submitted array is removed from the sale.
+ *
+ * ⚠️ `unitPrice` is inherited from the create schema and is still ACCEPTED here,
+ * but for a line with an `id` it is **ignored** — `reconcileSaleLines()` takes
+ * an existing line's price from the database or from the stored snapshot, never
+ * from the client (CHECKLIST #7, closed 2026-08-11). It stays accepted rather
+ * than rejected because `NewSaleForm` always sends one and a new line in the
+ * same array legitimately uses it.
+ *
+ * Do not "tighten" this into a rejection without checking that form: a 400 on a
+ * field the UI always sends would break every edit, and the value is already
+ * inert where it matters.
  */
 export const saleItemUpdateSchema = saleItemCreateSchema.extend({
   id: id.optional(),
