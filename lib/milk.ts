@@ -77,18 +77,6 @@ export const PURCHASE_SELECT = {
   createdAt: true,
 } as const;
 
-export const MILK_SALE_SELECT = {
-  id: true,
-  customerId: true,
-  saleDate: true,
-  liters: true,
-  ratePerLiter: true,
-  totalAmount: true,
-  notes: true,
-  createdAt: true,
-  customer: { select: { id: true, name: true, type: true } },
-} as const;
-
 /** `_sum` is null when nothing matched — that means zero, not "unknown". */
 function sumOrZero(value: Prisma.Decimal | null | undefined): Prisma.Decimal {
   return value ?? ZERO;
@@ -148,21 +136,6 @@ export function computeDeliveryTotals(
     totalLiters,
     totalAmount: totalLiters.mul(rate),
   };
-}
-
-/**
- * A milk SALE's total. `liters × ratePerLiter`, on Decimal.
- *
- * Trivial arithmetic, deliberately not inlined at the call site: it is the one
- * number the owner reconciles by hand, three routes write it (create, edit and
- * any future import), and doing it in JS floats would land it a few paise off.
- * `totalAmount` is a stored column and is NEVER accepted from the client.
- */
-export function computeMilkSaleTotal(
-  liters: number,
-  ratePerLiter: number
-): Prisma.Decimal {
-  return new Prisma.Decimal(liters).mul(new Prisma.Decimal(ratePerLiter));
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
-import { MILK_SALE_SELECT, computeMilkSaleTotal } from "@/lib/milk";
+import { MILK_SALE_SELECT, computeMilkSaleTotal } from "@/lib/milk-sales";
 import { prisma } from "@/lib/prisma";
 import { getCustomerBalance } from "@/lib/receivables";
 import { checkTotalFits } from "@/lib/sales";
