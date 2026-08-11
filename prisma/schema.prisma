@@ -176,15 +176,22 @@ model SaleItem {
   sale            Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
   productId       String
   product         Product @relation(fields: [productId], references: [id])
-  /// "beverages" | "bakery" — a SNAPSHOT of what this line was sold as.
+  /// "beverages" | "bakery" | "milk" — a SNAPSHOT of what this line was sold as.
   ///
   /// NOT derived from the product’s category at report time. The catalog lets
   /// the owner move a product between sub-categories, and deriving would then
   /// silently re-attribute closed months between modules. A line’s module is
-  /// the same kind of fact as its unitPrice and its discount: what it was sold
-  /// as, fixed at the moment of sale.
+  /// the same kind of fact as its unitPrice: what it was sold as, fixed at the
+  /// moment of sale.
+  ///
+  /// "milk" was added for the unified checkout (Migration C, 2026-08-11). It is
+  /// a bare String with no CHECK constraint and no enum, so the new value needs
+  /// no schema change — and nothing reads this column yet.
   moduleKey       String
-  quantity        Int
+  /// DECIMAL, not Int: milk sells in LITRES and 2.5 L is a real quantity.
+  /// Widened in Migration C. Beverages and bakery still use whole units; the
+  /// decimal simply does not get in their way.
+  quantity        Decimal @db.Decimal(10, 2)
   unitPrice       Decimal @db.Decimal(10, 2)
   discountPercent Decimal @default(0) @db.Decimal(5, 2)
   lineTotal       Decimal @db.Decimal(10, 2)

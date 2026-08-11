@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "SaleItem" ALTER COLUMN "quantity" SET DATA TYPE DECIMAL(10,2);
+

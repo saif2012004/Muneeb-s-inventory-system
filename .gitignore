@@ -44,3 +44,14 @@ next-env.d.ts
 # deliverable — the phase reports in docs/ and the run-by-run record in
 # docs/responses/ are what belong in the repo.
 docs/prompt.txt
+
+# database backups — NEVER commit a dump. Root-anchored so prisma/migrations/*.sql
+# (which ARE the schema history and must stay tracked) are unaffected.
+/*.sql
+/*.dump
+/*.backup
+/backups/
+
+# Supabase CLI scratch. Holds the project ref and the pooler URL — local state,
+# not source.
+supabase/.temp/
