@@ -198,6 +198,23 @@ The frontend must feel calm, fast, and legible for a shop owner using a cheap An
 - List rows: `layout` animation when items are added/removed.
 - **Always respect `prefers-reduced-motion`** and disable non-essential animation when set.
 
+#### ⚠️ There are TWO StatCards. A money-display fix must be applied to BOTH.
+
+| | Where | Money display |
+|---|---|---|
+| **Shared** | `components/shared/StatCard.tsx` — used by the **dashboard** only | **Re-implements** the count-up: `useMotionValue(0)` + `useTransform` + `animate(count, value, …)` |
+| **Private** | `StatCard` defined inside `components/reports/ReportsDashboard.tsx` (~:450) — used by its own 5 tiles | **Delegates** to `<AnimatedMoney countUpOnMount />` |
+
+Same name, different components, different contracts — the shared one takes `icon`/`accent`/
+`format`/`trend`; the private one takes `loading`/`failed`/`onRetry`/`tone`/`border`. Neither is
+wrong, and they are deliberately **not** merged: converging them would have to pick one money-display
+mechanism and change the other screen.
+
+**Why this warning exists:** the reduced-motion "Rs. 0 instead of Rs. 3,500" bug was fixed in
+`AnimatedMoney` and **survived in the shared StatCard for weeks**, because a fix applied to one copy
+looks complete. It was caught on 2026-08-11 and fixed in `beb8de7`. **If you touch how either
+displays money, check the other.**
+
 #### 🎬 `lib/motion.ts` is THE motion vocabulary. Do not hand-roll a transition.
 
 **Every duration, spring and entrance variant lives in one file.** Before it existed, each animated
