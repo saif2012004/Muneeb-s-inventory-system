@@ -23,6 +23,7 @@ import { MoneyText } from "@/components/shared/MoneyText";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters, formatPKR } from "@/lib/format";
 import {
@@ -159,9 +160,7 @@ export function MilkSalesList() {
       {/* Totals cover the WHOLE filtered set, not just this page — the server
           aggregates them, so paging never changes the headline figure. */}
       <motion.div
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 420, damping: 34 }}
+        {...enterUp(reduceMotion)}
         className="mb-4 grid gap-3 sm:grid-cols-2"
       >
         <div className="rounded-xl border border-emerald-100 bg-white p-5 shadow-sm">

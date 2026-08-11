@@ -198,6 +198,47 @@ The frontend must feel calm, fast, and legible for a shop owner using a cheap An
 - List rows: `layout` animation when items are added/removed.
 - **Always respect `prefers-reduced-motion`** and disable non-essential animation when set.
 
+#### 🎬 `lib/motion.ts` is THE motion vocabulary. Do not hand-roll a transition.
+
+**Every duration, spring and entrance variant lives in one file.** Before it existed, each animated
+component defined its own transition inline — which produced **six spring configs and three
+durations across 13 components**, several near-identical and clearly meant to be the same thing
+(`420/34` alone appeared six times). Adding a fourteenth screen meant inventing a seventh spring.
+
+If you need a transition, import one. If none fits, **add a named one there** rather than inlining a
+value at the call site.
+
+| Export | Value | Use for |
+|---|---|---|
+| `SPRING.section` | 420 / 34 | **The canonical one.** A page section or card arriving. Reach for this first |
+| `SPRING.snap` | 500 / 40 | Snapping into place — bottom-nav indicator, catalog rows |
+| `SPRING.lineItem` | 480 / 38 | A sale line added/removed in the new-sale form |
+| `SPRING.saleRow` | 480 / 40 | A sale row reflowing in the list (`layout="position"`) |
+| `SPRING.collapse` | 400 / 40 | height 0 ↔ auto disclosure |
+| `SPRING.money` | 380 / 40, `restDelta: 0.5` | A money figure travelling to a NEW value. **Do not soften** — wobble on money reads as an error |
+| `TWEEN.fast` | 0.15s | Inline feedback, e.g. a form error |
+| `TWEEN.page` | 0.2s easeOut | The Design System's ~200ms page transition |
+| `TWEEN.countUp` | 0.7s easeOut | Stat count-up (StatCard + AnimatedMoney mount) |
+| `TWEEN.none` | 0 | A hard cut — reduced motion |
+
+**Variant helpers take `reduceMotion` and handle it internally**, so a component cannot forget it:
+`enterUp` · `enterLeft` · `rowInOut` · `lineItemInOut` · `collapseInOut` · `feedbackIn` ·
+`indicatorTransition` · `moneyTransition`. Usage:
+
+```tsx
+const reduceMotion = useReducedMotion();
+<motion.div {...enterUp(reduceMotion)}>              // initial/animate/transition
+<motion.div {...enterUp(reduceMotion, SPRING.snap)}> // same shape, different feel
+```
+
+They set `initial: false` under reduced motion rather than a zero-length transition — that is what
+makes an element appear already in place instead of travelling instantly.
+
+**⚠️ `lineItem` (480/38), `saleRow` (480/40) and `collapse` (400/40) are near-duplicates left
+UNMERGED on purpose.** The extraction was a pure refactor with no intended visual change, and
+collapsing them would have been one. Merging them is a real (small) visual decision — do it as its
+own change, with the sale list and new-sale form open in a browser.
+
 ### Component quality bar
 - Use shadcn/ui for every primitive. Do not hand-build inputs, tables, dialogs, or selects.
 - Every list/table has three states designed: loading (Skeleton), empty (friendly message + primary action, e.g. "No sales yet. Add your first sale."), and error (retry).

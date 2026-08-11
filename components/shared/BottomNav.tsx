@@ -19,6 +19,7 @@ import {
   SECONDARY_NAV,
   isNavItemActive,
 } from "@/lib/nav";
+import { indicatorTransition } from "@/lib/motion";
 import { LOGIN_ROUTE } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { signOut } from "next-auth/react";
@@ -35,9 +36,7 @@ export function BottomNav() {
   );
 
   // A spring reads as "snapping into place"; reduced motion gets a hard cut.
-  const indicatorTransition = reduceMotion
-    ? { duration: 0 }
-    : { type: "spring" as const, stiffness: 500, damping: 40 };
+  const indicator = indicatorTransition(reduceMotion);
 
   return (
     <nav
@@ -66,7 +65,7 @@ export function BottomNav() {
               {active ? (
                 <motion.span
                   layoutId={INDICATOR_ID}
-                  transition={indicatorTransition}
+                  transition={indicator}
                   className={cn(
                     "absolute inset-x-3 top-0 h-0.5 rounded-full",
                     accent.solid
@@ -90,7 +89,7 @@ export function BottomNav() {
             {moreIsActive ? (
               <motion.span
                 layoutId={INDICATOR_ID}
-                transition={indicatorTransition}
+                transition={indicator}
                 className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-zinc-900"
               />
             ) : null}

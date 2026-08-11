@@ -12,6 +12,7 @@ import { TrendingDown, TrendingUp } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { formatLiters, formatPKR } from "@/lib/format";
+import { TWEEN } from "@/lib/motion";
 import { ACCENTS, type AccentKey } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -63,10 +64,7 @@ export function StatCard({
       count.set(value);
       return;
     }
-    const controls = animate(count, value, {
-      duration: 0.7,
-      ease: "easeOut",
-    });
+    const controls = animate(count, value, TWEEN.countUp);
     return () => controls.stop();
   }, [count, value, reduceMotion]);
 

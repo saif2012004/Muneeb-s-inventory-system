@@ -30,6 +30,7 @@ import {
   LOGIN_ROUTE,
   NO_JS_LOGIN_ROUTE,
 } from "@/lib/routes";
+import { enterUp, feedbackIn, TWEEN } from "@/lib/motion";
 import { signInSchema, type SignInInput } from "@/lib/validations/auth";
 
 /**
@@ -95,9 +96,7 @@ export function LoginForm({
 
   return (
     <motion.div
-      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      {...enterUp(reduceMotion, TWEEN.page)}
       className="w-full max-w-[400px]"
     >
       <Card className="rounded-xl shadow-sm">
@@ -206,9 +205,7 @@ export function LoginForm({
 
               {formError ? (
                 <motion.p
-                  initial={reduceMotion ? false : { opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.15 }}
+                  {...feedbackIn(reduceMotion)}
                   role="alert"
                   className="flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700"
                 >

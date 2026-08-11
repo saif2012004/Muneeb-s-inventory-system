@@ -7,6 +7,7 @@ import { signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { enterLeft } from "@/lib/motion";
 import { ACCENTS, NAV_ITEMS, isNavItemActive } from "@/lib/nav";
 import { LOGIN_ROUTE } from "@/lib/routes";
 import { cn } from "@/lib/utils";
@@ -17,9 +18,7 @@ export function Sidebar({ ownerName }: { ownerName: string }) {
 
   return (
     <motion.aside
-      initial={reduceMotion ? false : { x: -12, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      transition={{ duration: 0.2, ease: "easeOut" }}
+      {...enterLeft(reduceMotion)}
       className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-zinc-200 bg-white md:flex"
     >
       <div className="px-5 py-6">

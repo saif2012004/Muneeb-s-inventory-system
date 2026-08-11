@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters, formatPKR } from "@/lib/format";
 import {
@@ -231,9 +232,7 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
 
       {/* Balance ------------------------------------------------------- */}
       <motion.div
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 420, damping: 34 }}
+        {...enterUp(reduceMotion)}
         className="mb-4 rounded-xl border border-emerald-100 bg-white p-5 shadow-sm"
       >
         <p className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">

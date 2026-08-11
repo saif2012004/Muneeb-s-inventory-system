@@ -35,6 +35,7 @@ import {
   type SaleListRow,
 } from "@/lib/hooks/use-sales";
 import { useCustomers } from "@/lib/hooks/use-customers";
+import { collapseInOut, SPRING } from "@/lib/motion";
 import { MODULE_BUTTON_CLASS, MODULE_RING_CLASS, type SaleModule } from "@/lib/sale-modules";
 import { cn } from "@/lib/utils";
 import { CUSTOMER_TYPE_LABELS } from "@/lib/validations/customers";
@@ -368,7 +369,7 @@ export function SalesList({ module }: { module: SaleModule }) {
               <motion.article
                 key={sale.id}
                 layout={reduceMotion ? false : "position"}
-                transition={{ type: "spring", stiffness: 480, damping: 40 }}
+                transition={SPRING.saleRow}
                 className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm"
               >
                 <div className="flex items-start gap-2 p-4">
@@ -426,10 +427,7 @@ export function SalesList({ module }: { module: SaleModule }) {
                     <motion.div
                       id={`sale-items-${sale.id}`}
                       key="items"
-                      initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={reduceMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
-                      transition={{ type: "spring", stiffness: 400, damping: 40 }}
+                      {...collapseInOut(reduceMotion)}
                       className="overflow-hidden"
                     >
                       <SaleLineItems module={module} saleId={sale.id} />

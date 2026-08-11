@@ -28,6 +28,7 @@ import { formatPKR, karachiToday, toDateKey } from "@/lib/format";
 import { useProducts } from "@/lib/hooks/use-catalog";
 import { useCustomers } from "@/lib/hooks/use-customers";
 import { useCreateSale } from "@/lib/hooks/use-sales";
+import { enterUp, lineItemInOut } from "@/lib/motion";
 import { ACCENTS } from "@/lib/nav";
 import { groupSaleProducts, indexSaleProducts } from "@/lib/sale-catalog";
 import {
@@ -295,9 +296,7 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
       <>
         <PageHeader title="Sale recorded" accent={module.accent} />
         <motion.div
-          initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ type: "spring", stiffness: 420, damping: 34 }}
+          {...enterUp(reduceMotion)}
           className="rounded-xl border border-zinc-200 bg-white p-6 text-center shadow-sm"
         >
           <span
@@ -400,14 +399,7 @@ export function NewSaleForm({ module }: { module: SaleModule }) {
                     <motion.div
                       key={field.id}
                       layout={reduceMotion ? false : "position"}
-                      initial={reduceMotion ? false : { opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={
-                        reduceMotion
-                          ? { opacity: 0 }
-                          : { opacity: 0, y: 8, scale: 0.98 }
-                      }
-                      transition={{ type: "spring", stiffness: 480, damping: 38 }}
+                      {...lineItemInOut(reduceMotion)}
                     >
                       <LineItemRow
                         form={form}

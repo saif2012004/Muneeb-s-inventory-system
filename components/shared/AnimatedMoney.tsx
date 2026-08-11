@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { animate, motion, useMotionValue, useReducedMotion, useTransform } from "framer-motion";
 
 import { formatPKR } from "@/lib/format";
+import { moneyTransition, TWEEN } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 /**
@@ -25,13 +26,15 @@ import { cn } from "@/lib/utils";
  * ---------------------------------------------------------------------------
  * WHY TWO TRANSITIONS
  * ---------------------------------------------------------------------------
- * The mount count-up uses a 0.7s easeOut, matching StatCard — that is already
- * the count-up feel in this app, and reusing it keeps summary tiles consistent
- * wherever they appear. The spring is kept for subsequent CHANGES, because a
- * total that changes again mid-flight has to redirect smoothly rather than
- * restart, and only a spring carries its velocity across. Tuned stiff and well
- * damped so it settles in ~200ms and never oscillates — on a money figure,
- * wobble reads as an error, not as delight.
+ * The mount count-up uses `TWEEN.countUp` (0.7s easeOut), the same constant
+ * StatCard uses — that is already the count-up feel in this app, and sharing it
+ * keeps summary tiles consistent wherever they appear. `SPRING.money` is kept
+ * for subsequent CHANGES, because a total that changes again mid-flight has to
+ * redirect smoothly rather than restart, and only a spring carries its velocity
+ * across. Tuned stiff and well damped so it settles in ~200ms and never
+ * oscillates — on a money figure, wobble reads as an error, not as delight.
+ *
+ * Both live in `lib/motion.ts`; `moneyTransition()` picks between them.
  *
  * Running a 0.7s count-up on every change would make a live total feel sluggish;
  * running a 200ms spring from zero would flash rather than count. Hence both.
@@ -77,26 +80,19 @@ export function AnimatedMoney({
     // uses the same path the count-up uses, which does propagate.
     if (reduceMotion) {
       hasAnimated.current = true;
-      const controls = animate(amount, value, { duration: 0 });
+      const controls = animate(amount, value, TWEEN.none);
       return () => controls.stop();
     }
 
     const isFirstRun = !hasAnimated.current;
     hasAnimated.current = true;
 
+    // TWEEN.countUp on the first run, SPRING.money thereafter — see the block
+    // comment above for why the two differ.
     const controls = animate(
       amount,
       value,
-      isFirstRun && countUpOnMount
-        ? { duration: 0.7, ease: "easeOut" }
-        : {
-            type: "spring",
-            stiffness: 380,
-            damping: 40,
-            // Stop sub-rupee drift from keeping the spring alive after it has
-            // visually arrived.
-            restDelta: 0.5,
-          }
+      moneyTransition(reduceMotion, isFirstRun && countUpOnMount)
     );
     return () => controls.stop();
   }, [amount, value, reduceMotion, countUpOnMount]);

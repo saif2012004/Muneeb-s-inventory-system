@@ -24,6 +24,7 @@ import { InlinePriceEditor } from "@/components/catalog/InlinePriceEditor";
 import { InlineStockEditor } from "@/components/catalog/InlineStockEditor";
 import { formatQualityShape, formatSize } from "@/lib/catalog-display";
 import type { Product } from "@/lib/hooks/use-catalog";
+import { rowInOut } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 export function ProductTable({
@@ -75,10 +76,7 @@ export function ProductTable({
               <motion.tr
                 key={product.id}
                 layout={reduceMotion ? false : "position"}
-                initial={reduceMotion ? false : { opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 4 }}
-                transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                {...rowInOut(reduceMotion)}
                 className={cn(
                   "border-b transition-colors last:border-0 hover:bg-zinc-50/70",
                   // Deactivated rows stay legible but visibly retired.

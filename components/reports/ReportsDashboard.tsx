@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatLiters, formatPKR, toDateKey } from "@/lib/format";
 import {
@@ -179,9 +180,7 @@ export function ReportsDashboard() {
 
       {/* Stat cards --------------------------------------------------- */}
       <motion.div
-        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 420, damping: 34 }}
+        {...enterUp(reduceMotion)}
         className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
       >
         <StatCard
