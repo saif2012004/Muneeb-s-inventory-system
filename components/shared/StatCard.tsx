@@ -60,11 +60,28 @@ export function StatCard({
   const display = useTransform(count, (latest) => formatValue(latest, format));
 
   useEffect(() => {
-    if (reduceMotion) {
-      count.set(value);
-      return;
-    }
-    const controls = animate(count, value, TWEEN.countUp);
+    /**
+     * Deliberately `animate(..., TWEEN.none)` and NOT `count.set(value)` —
+     * the same mechanism, and the same reason, as AnimatedMoney.
+     *
+     * The motion value starts at 0, and a bare `.set()` on mount fires before
+     * framer-motion has subscribed the rendered child, so the notification is
+     * dropped and the tile stays stuck at "Rs. 0" while the sr-only text reads
+     * the real number. `DashboardHome` renders a Skeleton until its summary
+     * loads and only THEN mounts this card, so the very first `.set()` is the
+     * one carrying the real figure — precisely the one that got lost.
+     *
+     * Reproduced 2026-08-11 with reduced motion on: "Total today" and
+     * "Beverages" both displayed Rs. 0 against a true Rs. 3,500. Routing
+     * through animate() uses the same path the count-up uses, which does
+     * propagate. `TWEEN.none` is a zero-length transition, so the figure still
+     * appears instantly — no animation against a stated preference.
+     */
+    const controls = animate(
+      count,
+      value,
+      reduceMotion ? TWEEN.none : TWEEN.countUp
+    );
     return () => controls.stop();
   }, [count, value, reduceMotion]);
 
