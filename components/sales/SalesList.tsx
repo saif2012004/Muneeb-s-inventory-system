@@ -362,6 +362,10 @@ export function SalesList({ module }: { module: SaleModule }) {
             salesQuery.isFetching && "opacity-60 transition-opacity"
           )}
         >
+          {/* Row-level AnimatePresence: a DELETED sale animates out instead of
+              blinking away. Separate from the per-row AnimatePresence further
+              down, which owns the expand/collapse of that row's line items. */}
+          <AnimatePresence initial={false}>
           {sales.map((sale) => {
             const isExpanded = expandedId === sale.id;
 
@@ -369,6 +373,11 @@ export function SalesList({ module }: { module: SaleModule }) {
               <motion.article
                 key={sale.id}
                 layout={reduceMotion ? false : "position"}
+                exit={
+                  reduceMotion
+                    ? { opacity: 0 }
+                    : { opacity: 0, height: 0, marginTop: 0 }
+                }
                 transition={SPRING.saleRow}
                 className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm"
               >
@@ -437,6 +446,7 @@ export function SalesList({ module }: { module: SaleModule }) {
               </motion.article>
             );
           })}
+          </AnimatePresence>
         </div>
       )}
 
