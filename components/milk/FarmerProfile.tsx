@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import {
   ArrowLeft,
   LogIn,
@@ -27,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { enterUp, TWEEN } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters, formatPKR } from "@/lib/format";
 import {
@@ -65,6 +67,7 @@ import { cn } from "@/lib/utils";
  * through lib/milk-display.ts.
  */
 export function FarmerProfile({ farmerId }: { farmerId: string }) {
+  const reduceMotion = useReducedMotion();
   const profileQuery = useFarmerProfile(farmerId);
 
   const updateFarmer = useUpdateFarmer();
@@ -300,7 +303,12 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="deliveries" className="space-y-3">
+        <TabsContent value="deliveries">
+            {/* Radix mounts a panel only when it becomes active, so this
+                motion.div is fresh on every tab switch and its entrance
+                plays each time — no AnimatePresence needed for a panel that
+                Radix itself unmounts. */}
+            <motion.div {...enterUp(reduceMotion, TWEEN.page)} className="space-y-3">
           {deliveries.length === 0 ? (
             <EmptyState
               icon={Milk}
@@ -370,9 +378,15 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
               </div>
             ))
           )}
+          </motion.div>
         </TabsContent>
 
-        <TabsContent value="purchases" className="space-y-3">
+        <TabsContent value="purchases">
+            {/* Radix mounts a panel only when it becomes active, so this
+                motion.div is fresh on every tab switch and its entrance
+                plays each time — no AnimatePresence needed for a panel that
+                Radix itself unmounts. */}
+            <motion.div {...enterUp(reduceMotion, TWEEN.page)} className="space-y-3">
           {purchases.length === 0 ? (
             <EmptyState
               icon={ShoppingBasket}
@@ -435,9 +449,15 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
               </div>
             ))
           )}
+          </motion.div>
         </TabsContent>
 
-        <TabsContent value="ledger" className="space-y-2">
+        <TabsContent value="ledger">
+            {/* Radix mounts a panel only when it becomes active, so this
+                motion.div is fresh on every tab switch and its entrance
+                plays each time — no AnimatePresence needed for a panel that
+                Radix itself unmounts. */}
+            <motion.div {...enterUp(reduceMotion, TWEEN.page)} className="space-y-2">
           {ledger.length === 0 ? (
             <EmptyState
               icon={Milk}
@@ -486,6 +506,7 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
               </div>
             ))
           )}
+          </motion.div>
         </TabsContent>
       </Tabs>
 
