@@ -193,6 +193,18 @@ The frontend must feel calm, fast, and legible for a shop owner using a cheap An
 ### Motion (Framer Motion)
 - Purposeful, quick, spring-based. Nothing should feel slow.
 - Page/tab transitions: subtle fade + 8px slide, ~200ms.
+  - **Routes:** owned by `app/(dashboard)/template.tsx` — one place, every page.
+    `template.tsx` not `layout.tsx`, because only a template gets a fresh instance
+    per navigation. **The first server-rendered paint deliberately does not
+    animate** (a module-level `hasHydrated` flag): `useReducedMotion()` cannot
+    work on the server, so SSR would otherwise paint the travelling `initial`
+    into the HTML and a reduced-motion user would get the slide anyway. Screens
+    must NOT add their own top-level section entrance — that reads as two
+    animations for one navigation.
+  - **Tabs:** wrapped per `<TabsContent>` in the consuming screen
+    (`components/milk/FarmerProfile.tsx`), not in `components/ui/tabs.tsx`. Radix
+    unmounts a panel's children when inactive, so a plain `motion.div` re-enters
+    on every switch and no `AnimatePresence` is needed.
 - Stat numbers: count-up on mount (respect the value type, format after animating).
 - Dialogs/sheets: spring scale/slide via AnimatePresence.
 - List rows: `layout` animation when items are added/removed.
