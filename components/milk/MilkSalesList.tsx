@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import {
   ArrowLeft,
   LogIn,
@@ -23,7 +22,6 @@ import { MoneyText } from "@/components/shared/MoneyText";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters, formatPKR } from "@/lib/format";
 import {
@@ -49,7 +47,6 @@ import { cn } from "@/lib/utils";
  * the mutations still invalidate the customers cache alongside the milk one.
  */
 export function MilkSalesList() {
-  const reduceMotion = useReducedMotion();
   const [page, setPage] = useState(1);
 
   const salesQuery = useMilkSales({ page });
@@ -159,8 +156,7 @@ export function MilkSalesList() {
 
       {/* Totals cover the WHOLE filtered set, not just this page — the server
           aggregates them, so paging never changes the headline figure. */}
-      <motion.div
-        {...enterUp(reduceMotion)}
+      <div
         className="mb-4 grid gap-3 sm:grid-cols-2"
       >
         <div className="rounded-xl border border-emerald-100 bg-white p-5 shadow-sm">
@@ -195,7 +191,7 @@ export function MilkSalesList() {
             {(pagination?.total ?? 0) === 1 ? "sale" : "sales"}
           </p>
         </div>
-      </motion.div>
+      </div>
 
       {salesQuery.isPending ? (
         <div className="space-y-3">

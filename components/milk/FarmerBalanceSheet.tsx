@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, LogIn, RefreshCw, Scale, Users } from "lucide-react";
 import Link from "next/link";
 
@@ -22,7 +21,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters, formatPKR } from "@/lib/format";
 import { useFarmers, type FarmerWithBalance } from "@/lib/hooks/use-milk";
@@ -63,7 +61,6 @@ import { cn } from "@/lib/utils";
  * owed nor owing and would only pad the list.
  */
 export function FarmerBalanceSheet() {
-  const reduceMotion = useReducedMotion();
   const [outstandingOnly, setOutstandingOnly] = useState(false);
 
   // includeInactive so a retired-but-unpaid farmer cannot vanish from the
@@ -220,8 +217,7 @@ export function FarmerBalanceSheet() {
           to pay" while the first still has to be handed 5,000 in cash. Same
           principle as the receivables hub, and it is enforced server-side in
           summariseFarmerBalances — this just renders both. */}
-      <motion.div
-        {...enterUp(reduceMotion)}
+      <div
         className="mb-4 grid gap-3 sm:grid-cols-2"
       >
         <div className="rounded-xl border border-emerald-100 bg-white p-5 shadow-sm">
@@ -257,7 +253,7 @@ export function FarmerBalanceSheet() {
             taken in goods beyond their milk
           </p>
         </div>
-      </motion.div>
+      </div>
 
       {/* Context for the numbers above. Describes exactly the farmers on this
           sheet, so the count always matches the rows below it. */}

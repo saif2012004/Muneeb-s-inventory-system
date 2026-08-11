@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import { LogIn, RefreshCw } from "lucide-react";
 
 import { RevenueTrendChart } from "@/components/reports/RevenueTrendChart";
@@ -13,7 +12,6 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatLiters, formatPKR, toDateKey } from "@/lib/format";
 import {
@@ -67,7 +65,6 @@ const TREND_GROUPING: Record<ReportPeriod, TrendGrouping> = {
 };
 
 export function ReportsDashboard() {
-  const reduceMotion = useReducedMotion();
   const [period, setPeriod] = useState<ReportPeriod>("month");
 
   const groupBy = TREND_GROUPING[period];
@@ -179,8 +176,7 @@ export function ReportsDashboard() {
       </Tabs>
 
       {/* Stat cards --------------------------------------------------- */}
-      <motion.div
-        {...enterUp(reduceMotion)}
+      <div
         className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
       >
         <StatCard
@@ -259,7 +255,7 @@ export function ReportsDashboard() {
           hint="what you must pay out, all time"
           countUp
         />
-      </motion.div>
+      </div>
 
       {/* Revenue trend ------------------------------------------------ */}
       <section className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5">

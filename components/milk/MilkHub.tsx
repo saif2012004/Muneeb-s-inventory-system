@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import {
   ArrowRight,
   LogIn,
@@ -25,7 +24,6 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters } from "@/lib/format";
 import {
@@ -54,7 +52,6 @@ import { cn } from "@/lib/utils";
  * blue or the bakery amber (Design System).
  */
 export function MilkHub() {
-  const reduceMotion = useReducedMotion();
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
 
@@ -199,8 +196,7 @@ export function MilkHub() {
       {header}
 
       {/* Summary bar -------------------------------------------------- */}
-      <motion.div
-        {...enterUp(reduceMotion)}
+      <div
         className="mb-4 grid gap-3 sm:grid-cols-3"
       >
         <div className="rounded-xl border border-emerald-100 bg-white p-5 shadow-sm">
@@ -271,7 +267,7 @@ export function MilkHub() {
           )}
           <p className="mt-1 text-sm text-zinc-500">active</p>
         </div>
-      </motion.div>
+      </div>
 
       {/* Two destinations off the hub. The balance sheet is the money-OUT
           totals across every farmer; milk sales are the other direction

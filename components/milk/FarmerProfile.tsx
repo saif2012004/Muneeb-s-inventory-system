@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import {
   ArrowLeft,
   LogIn,
@@ -28,7 +27,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { enterUp } from "@/lib/motion";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters, formatPKR } from "@/lib/format";
 import {
@@ -67,7 +65,6 @@ import { cn } from "@/lib/utils";
  * through lib/milk-display.ts.
  */
 export function FarmerProfile({ farmerId }: { farmerId: string }) {
-  const reduceMotion = useReducedMotion();
   const profileQuery = useFarmerProfile(farmerId);
 
   const updateFarmer = useUpdateFarmer();
@@ -231,8 +228,7 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
       ) : null}
 
       {/* Balance ------------------------------------------------------- */}
-      <motion.div
-        {...enterUp(reduceMotion)}
+      <div
         className="mb-4 rounded-xl border border-emerald-100 bg-white p-5 shadow-sm"
       >
         <p className="text-[13px] font-medium uppercase tracking-wide text-zinc-500">
@@ -267,7 +263,7 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
             </p>
           </div>
         </div>
-      </motion.div>
+      </div>
 
       {/* Actions ------------------------------------------------------- */}
       <div className="mb-4 grid grid-cols-2 gap-3">
