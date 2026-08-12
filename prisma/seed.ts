@@ -51,6 +51,13 @@ type ProductSeed = {
   qualityTier: string | null;
   shape: string | null;
   unit: string | null;
+  /**
+   * Starting stock, when the schema default of 100 is WRONG for this product.
+   *
+   * Omit it for anything countable: 100 is a deliberate placeholder the owner
+   * replaces by walking the shelf. Milk sets it to 0 — see prod_milk.
+   */
+  stock?: number;
 };
 
 /** "2.25L" -> "2_25l". Keeps generated ids readable and URL-safe. */
@@ -66,13 +73,26 @@ function slug(value: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The catalog covers Beverages and Bakery ONLY. Milk is deliberately absent:
- * it is modelled in its own tables (MilkDelivery, FarmerPurchase, MilkSale) by
- * liters x rate, never as a catalog Product. Do not add a "Milk Shop" category.
+ * The catalog covers Beverages, Bakery and — since 2026-08-13 — Milk.
+ *
+ * ⚠️ This block previously said "Milk is deliberately absent … never as a
+ * catalog Product. Do not add a Milk Shop category." That was true until the
+ * unified sale landed and is now the opposite of the design: milk IS a catalog
+ * Product, so that one bill can hold beverage, bakery and milk lines together
+ * and `SaleItem.moduleKey` can record which is which.
+ *
+ * `cat_milk` and the name "Milk Shop" must both stay exactly as written — they
+ * are how `resolveLineModule` (lib/unified-sales.ts) maps a milk line to
+ * `moduleKey: "milk"`, matching MODULE_CATEGORIES.milk in lib/modules.ts.
+ *
+ * The farmer side is UNCHANGED and still lives in its own tables:
+ * MilkDelivery and FarmerPurchase are litres x rate and know nothing about
+ * products. Only the SELLING of milk became a catalog product.
  */
 const CATEGORIES: CategorySeed[] = [
   { id: "cat_beverages", name: "Beverages" },
   { id: "cat_bakery", name: "Bakery" },
+  { id: "cat_milk", name: "Milk Shop" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -242,6 +262,44 @@ const bakeryProducts: ProductSeed[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Milk — ONE product, sold by the litre
+// ---------------------------------------------------------------------------
+
+const milkSubCategories: SubCategorySeed[] = [
+  { id: "sub_milk", name: "Milk", categoryId: "cat_milk" },
+];
+
+/**
+ * Milk is a single product, priced per litre, with the rate overridable at
+ * billing like any other product.
+ *
+ * 🔴 `stock: 0`, NOT the schema default of 100 — and this is the one product
+ * where that default is actively wrong. Every other product's 100 is a
+ * placeholder the owner replaces by counting the shelf. Milk's stock is
+ * DERIVED: deliveries from farmers add to it (the delivery-to-stock bridge in
+ * lib/milk-stock.ts) and sales subtract. Seeding 100 would invent a hundred
+ * litres that never arrived, and the first real delivery would make the number
+ * wrong rather than right.
+ *
+ * `unit: "litre"` is load-bearing for the UI: SELF_EVIDENT_UNITS in
+ * lib/sale-catalog.ts holds only "bottle" and "piece", so "litre" counts as
+ * informative and the sale form labels the field "Quantity (litres)" — the same
+ * treatment eggs get for cottons.
+ */
+const milkProducts: ProductSeed[] = [
+  {
+    id: "prod_milk",
+    name: "Milk",
+    subCategoryId: "sub_milk",
+    size: null,
+    qualityTier: null,
+    shape: null,
+    unit: "litre",
+    stock: 0,
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
 
@@ -249,8 +307,13 @@ const bakeryProducts: ProductSeed[] = [
 export const SUB_CATEGORIES = [
   ...beverageSubCategories,
   ...bakerySubCategories,
+  ...milkSubCategories,
 ];
-export const PRODUCTS = [...beverageProducts, ...bakeryProducts];
+export const PRODUCTS = [
+  ...beverageProducts,
+  ...bakeryProducts,
+  ...milkProducts,
+];
 export { CATEGORIES };
 
 async function main() {
@@ -272,10 +335,22 @@ async function main() {
   }
 
   for (const product of PRODUCTS) {
+    // `stock` is optional on ProductSeed: omitted -> the schema default of 100
+    // (the placeholder the owner replaces by counting the shelf); present ->
+    // that exact value, which is how milk starts at 0. Spreading `product`
+    // directly would pass `stock: undefined` for the others, and Prisma treats
+    // an explicit undefined as "not provided", so the default still applies —
+    // but being explicit here keeps the intent readable.
+    const { stock, ...fields } = product;
     await prisma.product.upsert({
       where: { id: product.id },
       update: {},
-      create: { ...product, price: 0, isActive: true },
+      create: {
+        ...fields,
+        price: 0,
+        isActive: true,
+        ...(stock === undefined ? {} : { stock }),
+      },
     });
   }
 

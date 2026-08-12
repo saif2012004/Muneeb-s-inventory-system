@@ -777,8 +777,63 @@ untouched. See the create/update asymmetry note above, and
 - ~~Physical stock / inventory counts~~ — **STOCK SHIPPED 2026-08-09.** `Product.stock`, decremented
   on sale, blocked with a structured `blockedBy` shortfall list when short, restored on delete, and
   reconciled BY DELTA on edit (`computeStockDeltas` / `applyStockDeltas` in `lib/sales.ts`).
-  Beverages + bakery only; milk has no products and no stock.
+  ~~Beverages + bakery only; milk has no products and no stock.~~ **Milk joined 2026-08-13** — see
+  below.
 - Multi-user roles, supplier invoicing, tax/GST.
+
+### 🥛 Milk stock — TRACKED, but NOT AUTHORITATIVE until S4. Do not trust the number yet.
+
+**Milk is a catalog Product (`prod_milk`, `unit: "litre"`, under `cat_milk` "Milk Shop") and its
+stock moves in two directions:**
+
+| Event | Effect on `prod_milk.stock` |
+|---|---|
+| A farmer delivery is recorded / edited / deleted | **+ / delta / −** the delivery's `totalLiters` — the bridge, `lib/milk-stock.ts` |
+| A milk line on a unified `POST /api/sales` | **−** the litres sold |
+| **A sale on `/milk/sales` (`POST /api/milk/sales`)** | **NOTHING — and this is the gap** |
+
+**⚠️ The screen the owner actually uses today does not decrement milk stock.** `MilkSale` has no
+product FK and no items table (see the docblock in `app/api/milk/sales/route.ts`), and it was
+deliberately NOT changed — Option A was chosen: milk selling moves onto the unified `/api/sales` at
+S4, and `MilkSale` retires with `BeverageSale`/`BakerySale`.
+
+**So until S4, milk stock reads HIGH** — deliveries add to it and the owner's current sales screen
+never takes away. **This is a known, deliberate, time-boxed provisional state, written down so the
+figure is not silently trusted.** Do not "fix" it by adding a stock decrement to
+`POST /api/milk/sales`: that duplicates stock logic into a table that is scheduled to be dropped.
+
+**Closing condition:** when S4 routes milk selling through `/api/sales`, delete this warning and the
+number becomes authoritative.
+
+#### The bridge's rules (all four delivery write paths)
+
+**Reconcile BY DELTA, never by re-adding.** `lib/milk-stock.ts` holds `findMilkProductId()` and
+`applyMilkStockDelta()`, which **delegates to `applyStockDeltas`** so "never negative" stays one
+implementation, enforced in the database's `WHERE` clause.
+
+- **🔴 Quick entry's EVENING pass is an UPDATE of the morning's row**, so it must add
+  `new − prior` litres. Adding the full new figure would double-count the morning **every single
+  day**. This is the main path, not an edge case.
+- All four paths are wrapped in a transaction — delivery written FIRST, stock second: the farmer's
+  record is primary, stock is the side-effect.
+- **A reversal that would drive stock below zero is REFUSED with a 409 naming the fix**
+  ("correct the milk stock in the catalog first"), never clamped and never allowed negative. The
+  escape hatch is the catalog's inline editor, which SETS stock outright.
+- **If the milk product is missing, the delivery still records** and the stock step is skipped with
+  a `console.error`. A farmer's record must never be blocked by a catalog problem.
+
+#### 🔒 `lib/milk.ts` must stay free of `product` and `stock`
+
+The bridge lives in `lib/milk-stock.ts` **specifically** so that this stays true:
+
+```bash
+grep -c "product\|stock" lib/milk.ts     # must be 0
+```
+
+That grep is what makes "the bridge cannot change a farmer's money" a checkable property rather than
+a promise — farmer balances, the ledger and the balance sheet cannot read the column the bridge
+writes. Same reasoning as the S2 split of `lib/milk-sales.ts`. **Do not move bridge code into
+`lib/milk.ts`.**
 
 ---
 

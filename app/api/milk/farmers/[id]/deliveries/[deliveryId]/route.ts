@@ -7,7 +7,14 @@ import {
   computeDeliveryTotals,
   getFarmerBalance,
 } from "@/lib/milk";
+import {
+  applyMilkStockDelta,
+  findMilkProductId,
+  milkStockReversalMessage,
+  readMilkStock,
+} from "@/lib/milk-stock";
 import { prisma } from "@/lib/prisma";
+import { StockConflictError } from "@/lib/sales";
 import { serialize } from "@/lib/serialize";
 import {
   EMPTY_DELIVERY_ERROR,
@@ -35,6 +42,12 @@ async function findScopedDelivery(farmerId: string, deliveryId: string) {
       morningLiters: true,
       eveningLiters: true,
       ratePerLiter: true,
+      // The PRIOR litres, for the stock delta. Added with the delivery-to-stock
+      // bridge: without it neither PATCH nor DELETE can tell how much stock this
+      // delivery had contributed, and stock would drift on every edit.
+      // Deliberately the stored value rather than one re-derived from
+      // morning+evening — it is what was actually added.
+      totalLiters: true,
     },
   });
 }
@@ -61,6 +74,10 @@ export async function PATCH(
 ): Promise<NextResponse> {
   const denied = await requireOwner();
   if (denied) return denied;
+
+  // Hoisted so the catch can name the amount in the refusal message; a `const`
+  // inside the try would not be in scope there.
+  let reversalLiters = 0;
 
   try {
     const parsed = deliveryUpdateSchema.safeParse(await request.json());
@@ -123,21 +140,56 @@ export async function PATCH(
       merged.ratePerLiter
     );
 
-    const delivery = await prisma.milkDelivery.update({
-      where: { id: existing.id },
-      data: {
-        deliveryDate: merged.deliveryDate,
-        ...totals,
-        // Nullable text: an explicit null clears it, an omitted key leaves it.
-        ...(patch.notes !== undefined ? { notes: patch.notes ?? null } : {}),
-      },
-      select: DELIVERY_SELECT,
+    /**
+     * STOCK, RECONCILED BY DELTA — not by re-adding the new litres.
+     *
+     * The delivery already contributed `existing.totalLiters` to milk stock, so
+     * an edit moves stock by the DIFFERENCE. 40 L corrected to 25 L gives 15 L
+     * back; 40 L to 60 L takes 20 more. Re-adding the full new figure would
+     * double-count, which is the exact bug the quick-entry evening pass would
+     * hit every single day.
+     */
+    const milkProductId = await findMilkProductId();
+    if (!milkProductId) {
+      console.error(
+        "[milk.deliveries.PATCH] no milk product; delivery edited without stock"
+      );
+    }
+    const stockDelta = milkProductId
+      ? totals.totalLiters.minus(existing.totalLiters)
+      : null;
+    // How much stock this edit tries to take back, for the refusal message.
+    reversalLiters = stockDelta?.isNegative() ? -Number(stockDelta) : 0;
+
+    const delivery = await prisma.$transaction(async (tx) => {
+      // Delivery FIRST: the farmer's record is primary, stock is the side-effect.
+      const row = await tx.milkDelivery.update({
+        where: { id: existing.id },
+        data: {
+          deliveryDate: merged.deliveryDate,
+          ...totals,
+          // Nullable text: an explicit null clears it, an omitted key leaves it.
+          ...(patch.notes !== undefined ? { notes: patch.notes ?? null } : {}),
+        },
+        select: DELIVERY_SELECT,
+      });
+      if (milkProductId && stockDelta) {
+        await applyMilkStockDelta(tx, milkProductId, stockDelta);
+      }
+      return row;
     });
 
     const balance = await getFarmerBalance(params.id);
 
     return ok(serialize({ delivery, balance }));
   } catch (error) {
+    // Reducing the litres would have driven milk stock below zero — some of it
+    // has already been sold. Refused, never clamped and never negative, with a
+    // message that names the fix instead of stranding the owner.
+    if (error instanceof StockConflictError) {
+      const available = await readMilkStock(error.productId);
+      return fail(milkStockReversalMessage(reversalLiters, available ?? 0), 409);
+    }
     return serverError("milk.farmers.[id].deliveries.[deliveryId].PATCH", error);
   }
 }
@@ -158,16 +210,42 @@ export async function DELETE(
   const denied = await requireOwner();
   if (denied) return denied;
 
+  let reversalLiters = 0;
+
   try {
     const existing = await findScopedDelivery(params.id, params.deliveryId);
     if (!existing) return fail("That delivery no longer exists.", 404);
 
-    await prisma.milkDelivery.delete({ where: { id: existing.id } });
+    reversalLiters = Number(existing.totalLiters);
+
+    /**
+     * Deleting a delivery takes its litres back OUT of milk stock. If more has
+     * been sold than remains, the conditional update inside applyStockDeltas
+     * refuses rather than going negative, and the catch turns that into a 409
+     * naming the fix.
+     */
+    const milkProductId = await findMilkProductId();
+    if (!milkProductId) {
+      console.error(
+        "[milk.deliveries.DELETE] no milk product; delivery deleted without stock"
+      );
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.milkDelivery.delete({ where: { id: existing.id } });
+      if (milkProductId) {
+        await applyMilkStockDelta(tx, milkProductId, existing.totalLiters.neg());
+      }
+    });
 
     const balance = await getFarmerBalance(params.id);
 
     return ok(serialize({ deleted: "hard" as const, id: existing.id, balance }));
   } catch (error) {
+    if (error instanceof StockConflictError) {
+      const available = await readMilkStock(error.productId);
+      return fail(milkStockReversalMessage(reversalLiters, available ?? 0), 409);
+    }
     return serverError("milk.farmers.[id].deliveries.[deliveryId].DELETE", error);
   }
 }

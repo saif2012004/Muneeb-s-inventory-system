@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { fail, firstIssue, ok, requireOwner, serverError } from "@/lib/api";
@@ -12,6 +13,7 @@ import {
   getFarmerBalances,
   summariseFarmerBalances,
 } from "@/lib/milk";
+import { applyMilkStockDelta, findMilkProductId } from "@/lib/milk-stock";
 import { prisma } from "@/lib/prisma";
 import { serialize } from "@/lib/serialize";
 import { quickEntrySchema } from "@/lib/validations/milk";
@@ -218,10 +220,13 @@ export async function POST(request: Request): Promise<NextResponse> {
         farmerId: { in: farmerIds },
         deliveryDate: { gte: dayStart, lt: dayEnd },
       },
-      select: { id: true, farmerId: true },
+      // `totalLiters` carries the PRIOR value for the stock delta. Without it
+      // the evening pass — which UPDATES the morning's row — could only add the
+      // full new litres again and would double-count the morning, every day.
+      select: { id: true, farmerId: true, totalLiters: true },
     });
     const existingByFarmer = new Map(
-      existing.map((row) => [row.farmerId, row.id])
+      existing.map((row) => [row.farmerId, row])
     );
 
     // Split the work BEFORE opening the transaction, so the transaction does
@@ -229,6 +234,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     const writes: {
       farmerId: string;
       deliveryId: string | null;
+      /** Litres already counted into milk stock by the stored row, if any. */
+      priorLiters: Prisma.Decimal;
       totals: ReturnType<typeof computeDeliveryTotals>;
     }[] = [];
     const clearedButKept: { farmerId: string; name: string; deliveryId: string }[] =
@@ -236,15 +243,15 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     for (const entry of entries) {
       const hasMilk = (entry.morningLiters ?? 0) + (entry.eveningLiters ?? 0) > 0;
-      const deliveryId = existingByFarmer.get(entry.farmerId) ?? null;
+      const prior = existingByFarmer.get(entry.farmerId) ?? null;
 
       if (!hasMilk) {
-        if (deliveryId) {
+        if (prior) {
           clearedButKept.push({
             farmerId: entry.farmerId,
             // Non-null: every id was proved present above.
             name: farmerById.get(entry.farmerId)!.name,
-            deliveryId,
+            deliveryId: prior.id,
           });
         }
         continue;
@@ -252,7 +259,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
       writes.push({
         farmerId: entry.farmerId,
-        deliveryId,
+        deliveryId: prior?.id ?? null,
+        // A create has contributed nothing yet, so its prior is zero and the
+        // delta below reduces to the full litres.
+        priorLiters: prior?.totalLiters ?? new Prisma.Decimal(0),
         totals: computeDeliveryTotals(
           entry.morningLiters,
           entry.eveningLiters,
@@ -263,6 +273,24 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     let created = 0;
     let updated = 0;
+
+    /**
+     * THE DELIVERY-TO-STOCK BRIDGE, on the path that matters most.
+     *
+     * 🔴 The evening pass UPDATES the row the morning created, so this branch
+     * must move stock by the DELTA (new − prior), never by the full new litres.
+     * Morning 30 L adds 30; evening making it 50 adds 20 more, not another 50.
+     * Getting this wrong would inflate milk stock every single day.
+     *
+     * Resolved once, outside the transaction — one row, and at ~1.1s a round
+     * trip it has no business inside a transaction that already loops writes.
+     */
+    const milkProductId = await findMilkProductId();
+    if (!milkProductId && writes.length > 0) {
+      console.error(
+        "[milk.quick-entry.POST] no milk product; deliveries recorded without stock"
+      );
+    }
 
     if (writes.length > 0) {
       await prisma.$transaction(
@@ -283,6 +311,15 @@ export async function POST(request: Request): Promise<NextResponse> {
                 },
               });
               created += 1;
+            }
+
+            // Delivery first, stock second — the farmer's record is primary.
+            if (milkProductId) {
+              await applyMilkStockDelta(
+                tx,
+                milkProductId,
+                write.totals.totalLiters.minus(write.priorLiters)
+              );
             }
           }
         },

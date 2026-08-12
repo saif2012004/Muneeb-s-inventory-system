@@ -7,6 +7,7 @@ import {
   computeDeliveryTotals,
   getFarmerBalance,
 } from "@/lib/milk";
+import { applyMilkStockDelta, findMilkProductId } from "@/lib/milk-stock";
 import { prisma } from "@/lib/prisma";
 import { buildSaleDateWindow, isSaleProblem } from "@/lib/sales";
 import { serialize } from "@/lib/serialize";
@@ -156,14 +157,42 @@ export async function POST(
       ratePerLiter
     );
 
-    const delivery = await prisma.milkDelivery.create({
-      data: {
-        farmerId: params.id,
-        deliveryDate,
-        notes: notes ?? null,
-        ...totals,
-      },
-      select: DELIVERY_SELECT,
+    /**
+     * THE DELIVERY-TO-STOCK BRIDGE. Recording a delivery adds its litres to the
+     * milk product's stock, atomically with the delivery itself — a delivery
+     * that recorded without its stock landing (or the reverse) is exactly the
+     * drift this exists to prevent.
+     *
+     * The product is resolved OUTSIDE the transaction: it is one row, and at
+     * ~1.1s a round trip there is no reason to hold a transaction open for it.
+     *
+     * A null id means the catalog has no milk product. The delivery still
+     * records and the stock step is skipped — a farmer's record must never be
+     * blocked by a catalog problem. See lib/milk-stock.ts.
+     */
+    const milkProductId = await findMilkProductId();
+    if (!milkProductId) {
+      console.error(
+        "[milk.deliveries.POST] no milk product; delivery recorded without stock"
+      );
+    }
+
+    const delivery = await prisma.$transaction(async (tx) => {
+      // Delivery FIRST: it is the farmer's primary record, stock is the
+      // side-effect. Both commit together either way.
+      const row = await tx.milkDelivery.create({
+        data: {
+          farmerId: params.id,
+          deliveryDate,
+          notes: notes ?? null,
+          ...totals,
+        },
+        select: DELIVERY_SELECT,
+      });
+      if (milkProductId) {
+        await applyMilkStockDelta(tx, milkProductId, totals.totalLiters);
+      }
+      return row;
     });
 
     // The balance moved, so return the new one from the shared calculation
