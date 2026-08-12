@@ -41,8 +41,20 @@ model Product {
   shape           String? // "circle" | "rectangular_round" | null (russ)
   unit            String? // "cotton" (eggs) | "piece" | "bottle" | null
   /// Units on hand. TEMPORARY seed value of 100 — the owner sets real numbers
-  /// via the catalog stock editor. Beverages + bakery only; milk has no products.
-  stock           Int         @default(100)
+  /// via the catalog stock editor.
+  ///
+  /// DECIMAL, not Int (Migration D, 2026-08-12). Milk is sold in fractional
+  /// litres — 12.5 L is an ordinary sale — and an integer column cannot be
+  /// decremented by it. Countable goods (bottles, cottons, buns) simply carry a
+  /// .00 scale. The same widening `SaleItem.quantity` took in Migration C.
+  ///
+  /// NOTE the code contract: `SaleProduct.stock` in `lib/sales.ts` is
+  /// deliberately still a plain `number`, normalised at the `loadSaleProducts`
+  /// boundary. Stock is a COUNT, not money — it is only ever compared and
+  /// summed, and the authoritative arithmetic happens in Postgres via
+  /// `applyStockDeltas`' conditional increment. Do not widen it to Decimal
+  /// through the app layer without reading that function first.
+  stock           Decimal     @default(100) @db.Decimal(10, 2)
   isActive        Boolean     @default(true)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
@@ -147,9 +159,16 @@ model BakerySaleItem {
 // ---------------------------------------------------------------------------
 // Sales — ONE table for beverages AND bakery
 // ---------------------------------------------------------------------------
-// A bill can hold beverage and bakery lines together; the client orders across
-// categories routinely. Milk is NOT here — it has no products, no stock, and
-// its own MilkSale table, and nothing in this merge touches it.
+// A bill can hold beverage, bakery AND milk lines together; the client orders
+// across categories routinely.
+//
+// Milk belongs here too (decided 2026-08-12). It was previously carved out on
+// the grounds that it "has no products and no stock" — that no longer holds:
+// milk becomes a real Product, and `SaleItem.quantity` (Migration C) and
+// `Product.stock` (Migration D) are both Decimal precisely so a fractional-litre
+// line is an ordinary line on this table. `MilkSale` still exists and is still
+// the live table until the unified switch-over ships; nothing is dropped before
+// then.
 //
 // Replaces BeverageSale/BakerySale, which encoded the module in the TABLE. That
 // made per-module revenue a sale-level SUM, which cannot survive a mixed bill.

@@ -32,11 +32,49 @@ export type SaleProduct = {
   id: string;
   name: string;
   price: Prisma.Decimal;
-  /** Units on hand, for the stock check. See computeStockDeltas below. */
+  /**
+   * Units on hand, for the stock check. See computeStockDeltas below.
+   *
+   * A PLAIN NUMBER, deliberately, even though the column became
+   * `Decimal(10,2)` in Migration D — normalised at the `loadSaleProducts`
+   * boundary by {@link toSaleProduct}. Money stays `Decimal` because it is
+   * summed and multiplied and a rounding error is a wrong bill; stock is only
+   * ever COMPARED here, and the arithmetic that actually moves it happens in
+   * Postgres inside `applyStockDeltas`' conditional increment, at the column's
+   * own precision. So the number never accumulates.
+   *
+   * This is also the type CLAUDE.md's Gotcha 2 asks for: Decimals become
+   * numbers at the boundary, not three layers down.
+   */
   stock: number;
   isActive: boolean;
   subCategory: { categoryId: string };
 };
+
+/**
+ * A raw row as Prisma returns it for {@link SALE_PRODUCT_SELECT}.
+ *
+ * Differs from {@link SaleProduct} in `stock` alone: since Migration D the
+ * column is `Decimal(10,2)`, so Prisma hands back a `Prisma.Decimal` object.
+ * The union tolerates `number` so a test or a caller building a row by hand
+ * does not have to construct a Decimal.
+ */
+export type SaleProductRow = Omit<SaleProduct, "stock"> & {
+  stock: Prisma.Decimal | number;
+};
+
+/**
+ * Normalise one raw row into a {@link SaleProduct}.
+ *
+ * The ONE place `stock` crosses from Decimal to number. It matters that this is
+ * a single choke point: `SaleProduct.stock` is a hand-written type, so nothing
+ * downstream — `findStockShortfalls`, `StockShortfall.available`, the 409 the
+ * owner sees — would fail to compile if a Decimal leaked past here. It would
+ * simply serialise as the STRING "100" and be wrong in the browser.
+ */
+function toSaleProduct(row: SaleProductRow): SaleProduct {
+  return { ...row, stock: Number(row.stock) };
+}
 
 /**
  * The Prisma `select` that produces a {@link SaleProduct}.
@@ -154,11 +192,13 @@ export async function loadSaleProducts(
   options: {
     categoryId: string;
     moduleLabel: string;
-    findMany: (ids: string[]) => Promise<SaleProduct[]>;
+    findMany: (ids: string[]) => Promise<SaleProductRow[]>;
   }
 ): Promise<Map<string, SaleProduct> | SaleProblem> {
   const unique = Array.from(new Set(productIds));
-  const products = await options.findMany(unique);
+  // Normalise here, once, so every check below and every caller downstream sees
+  // a plain `number` stock. See toSaleProduct.
+  const products = (await options.findMany(unique)).map(toSaleProduct);
   const byId = new Map(products.map((product) => [product.id, product]));
 
   const missing = unique.filter((id) => !byId.has(id));

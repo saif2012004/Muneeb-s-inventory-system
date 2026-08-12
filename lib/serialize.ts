@@ -16,7 +16,7 @@
 import { Prisma } from "@prisma/client";
 
 /** Anything that can stand in for a Decimal column, including nullable ones. */
-type DecimalLike = Prisma.Decimal | number | string;
+export type DecimalLike = Prisma.Decimal | number | string;
 
 /**
  * Recursively rewrites Decimal fields to `number` at the type level so callers

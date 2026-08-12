@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { serialize, type DecimalLike } from "@/lib/serialize";
 
 export type ApiSuccess<T> = { data: T; error: null };
 export type ApiFailure = { data: null; error: string };
@@ -56,12 +57,26 @@ export function failStockBlocked(
   shortBy: {
     productId: string;
     name: string;
-    available: number;
-    requested: number;
-    shortfall: number;
+    available: DecimalLike;
+    requested: DecimalLike;
+    shortfall: DecimalLike;
   }[]
 ): NextResponse {
-  return NextResponse.json({ data: null, error, shortBy }, { status: 409 });
+  // SERIALIZE. `shortBy` carries stock figures, and since Migration D
+  // `Product.stock` is a Decimal — which JSON.stringify emits as the STRING
+  // "100", not the number 100. See Gotcha 2 in CLAUDE.md.
+  //
+  // `loadSaleProducts` already normalises stock to a number before any of these
+  // figures are computed, so today every value arriving here is a plain number
+  // and serialize() is a no-op on it. This is the backstop for the next caller:
+  // the unified /api/sales will build shortfalls from its own query, and a
+  // Decimal leaking into this payload would not fail to compile — it would ship
+  // `available: "100"` and break `InlineStockEditor`'s `next === stock` guard in
+  // the browser, silently, exactly where the owner is trying to restock mid-sale.
+  return NextResponse.json(
+    { data: null, error, shortBy: serialize(shortBy) },
+    { status: 409 }
+  );
 }
 
 /**
