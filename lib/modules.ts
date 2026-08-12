@@ -22,6 +22,24 @@ import { prisma } from "@/lib/prisma";
 export const MODULE_CATEGORIES = {
   beverages: { seedId: "cat_beverages", name: "Beverages" },
   bakery: { seedId: "cat_bakery", name: "Bakery" },
+  /**
+   * MILK IS DORMANT, AND THAT IS NOT A BUG.
+   *
+   * Added 2026-08-12 for the unified sale (`lib/unified-sales.ts`), which
+   * resolves a line's `moduleKey` from its product's category. No Milk Shop
+   * Category and no milk Product exist yet, so `cat_milk` never matches and no
+   * line can currently resolve to `"milk"`.
+   *
+   * That is the whole design: the entry lives here NOW so that the later gated
+   * stage which creates the milk product needs NO change to the sale endpoint.
+   * Do not delete it for looking unused.
+   *
+   * Note there is deliberately no `MILK_MODULE` in `lib/sale-modules.ts` — that
+   * file configures the per-module SALE FORMS, which milk does not have and is
+   * not getting. This map answers a different question: which Category backs
+   * which module.
+   */
+  milk: { seedId: "cat_milk", name: "Milk Shop" },
 } as const;
 
 export type ModuleKey = keyof typeof MODULE_CATEGORIES;

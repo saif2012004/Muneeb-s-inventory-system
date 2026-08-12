@@ -175,6 +175,44 @@ export function isSaleProblem(value: unknown): value is SaleProblem {
 }
 
 /**
+ * Every submitted id resolved to a row? -> 404 naming the shortfall, else null.
+ *
+ * Shared by {@link loadSaleProducts} (per-module) and `loadUnifiedSaleProducts`
+ * (`lib/unified-sales.ts`). Extracted 2026-08-12 when the unified endpoint
+ * needed the same two checks WITHOUT the single-category rule, so the sentence
+ * the owner reads exists once rather than in two copies that drift.
+ *
+ * Wording is verbatim from the original per-module implementation — this was an
+ * extraction, not a rewrite.
+ */
+export function checkAllProductsResolved(
+  submittedIds: string[],
+  byId: Map<string, SaleProduct>
+): SaleProblem | null {
+  const missing = submittedIds.filter((id) => !byId.has(id));
+  if (missing.length === 0) return null;
+  return {
+    message:
+      missing.length === 1
+        ? "One of the products on this sale no longer exists. Remove that line and try again."
+        : `${missing.length} of the products on this sale no longer exist. Remove those lines and try again.`,
+    status: 404,
+  };
+}
+
+/** Any deactivated product among them? -> 400 naming the first, else null. */
+export function checkNoInactiveProducts(
+  products: SaleProduct[]
+): SaleProblem | null {
+  const inactive = products.filter((product) => !product.isActive);
+  if (inactive.length === 0) return null;
+  return {
+    message: `"${inactive[0].name}" is deactivated and can't be added to a new sale. Reactivate it in the catalog first.`,
+    status: 400,
+  };
+}
+
+/**
  * Load every product referenced by a sale and verify all of them are sellable
  * in this module.
  *
@@ -186,6 +224,12 @@ export function isSaleProblem(value: unknown): value is SaleProblem {
  *
  * Checking here is also what keeps a raw foreign-key error (P2003) from ever
  * reaching the owner: by the time we write, every id is known to exist.
+ *
+ * ⚠️ THE SINGLE-CATEGORY RULE IS THIS FUNCTION'S POINT. A mixed bill is REJECTED
+ * here on purpose — a beverage sale may hold only Beverages products. The
+ * unified endpoint deliberately does NOT reuse this; it has its own loader that
+ * shares the two checks below but resolves a module PER LINE instead. Do not
+ * "generalise" this one to serve both.
  */
 export async function loadSaleProducts(
   productIds: string[],
@@ -201,16 +245,8 @@ export async function loadSaleProducts(
   const products = (await options.findMany(unique)).map(toSaleProduct);
   const byId = new Map(products.map((product) => [product.id, product]));
 
-  const missing = unique.filter((id) => !byId.has(id));
-  if (missing.length > 0) {
-    return {
-      message:
-        missing.length === 1
-          ? "One of the products on this sale no longer exists. Remove that line and try again."
-          : `${missing.length} of the products on this sale no longer exist. Remove those lines and try again.`,
-      status: 404,
-    };
-  }
+  const unresolved = checkAllProductsResolved(unique, byId);
+  if (unresolved) return unresolved;
 
   const foreign = products.filter(
     (product) => product.subCategory.categoryId !== options.categoryId
@@ -222,13 +258,8 @@ export async function loadSaleProducts(
     };
   }
 
-  const inactive = products.filter((product) => !product.isActive);
-  if (inactive.length > 0) {
-    return {
-      message: `"${inactive[0].name}" is deactivated and can't be added to a new sale. Reactivate it in the catalog first.`,
-      status: 400,
-    };
-  }
+  const inactive = checkNoInactiveProducts(products);
+  if (inactive) return inactive;
 
   return byId;
 }

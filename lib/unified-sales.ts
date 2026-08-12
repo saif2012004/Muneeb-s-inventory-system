@@ -1,0 +1,182 @@
+import { Prisma } from "@prisma/client";
+
+import { MODULE_CATEGORIES, type ModuleKey } from "@/lib/modules";
+import {
+  SALE_DETAIL_SELECT,
+  checkAllProductsResolved,
+  checkNoInactiveProducts,
+  isSaleProblem,
+  type SaleProblem,
+  type SaleProduct,
+} from "@/lib/sales";
+
+/**
+ * The UNIFIED sale — one bill that may hold beverage, bakery and (later) milk
+ * lines together.
+ *
+ * ---------------------------------------------------------------------------
+ * HOW THIS DIFFERS FROM THE PER-MODULE PATH, AND WHY BOTH EXIST
+ * ---------------------------------------------------------------------------
+ * `loadSaleProducts` in `lib/sales.ts` enforces ONE category per sale — that is
+ * its entire purpose, and it must keep doing it for `/api/beverages/sales` and
+ * `/api/bakery/sales`. This module is the opposite: any category is allowed, and
+ * each line records WHICH one it was sold as, in `SaleItem.moduleKey`.
+ *
+ * The two loaders share the checks that are genuinely identical (a missing id, a
+ * deactivated product) via `checkAllProductsResolved` / `checkNoInactiveProducts`,
+ * so the sentence the owner reads exists once. They do NOT share the category
+ * rule, because they disagree about it on purpose.
+ *
+ * Nothing here removes or rewires the per-module routes. Both paths are live.
+ */
+
+/**
+ * Like `SALE_PRODUCT_SELECT`, plus the product's Category id AND name.
+ *
+ * The extra nesting is a JOIN, not a second query — which is the whole reason
+ * `moduleKey` resolution costs ZERO extra round trips. At ~1.1s per round trip
+ * (see CLAUDE.md) a separate category lookup per sale would have been a real
+ * second of the owner's time for information already on the row.
+ */
+export const UNIFIED_SALE_PRODUCT_SELECT = {
+  id: true,
+  name: true,
+  price: true,
+  stock: true,
+  isActive: true,
+  subCategory: {
+    select: {
+      categoryId: true,
+      category: { select: { id: true, name: true } },
+    },
+  },
+} as const;
+
+/** A raw row from {@link UNIFIED_SALE_PRODUCT_SELECT}. `stock` is Decimal since Migration D. */
+export type UnifiedSaleProductRow = {
+  id: string;
+  name: string;
+  price: Prisma.Decimal;
+  stock: Prisma.Decimal | number;
+  isActive: boolean;
+  subCategory: { categoryId: string; category: { id: string; name: string } };
+};
+
+/** A resolved product, carrying the module its line will be recorded under. */
+export type UnifiedSaleProduct = SaleProduct & { moduleKey: ModuleKey };
+
+/**
+ * Which module a line belongs to, from its product's Category.
+ *
+ * SEEDED ID FIRST, then a case-insensitive NAME match — the same two-step rule
+ * `resolveModuleCategoryId` already uses, and for the same reason: the owner can
+ * rename a category in the catalog UI, or delete the seeded one and make their
+ * own, and the sale must keep working either way.
+ *
+ * Returns null for a category that backs no module, which the route turns into a
+ * 409 rather than guessing. Guessing here would mis-attribute revenue for the
+ * life of the record — `moduleKey` is a SNAPSHOT and is never recomputed.
+ *
+ * `"milk"` resolves through this function with no change the moment a Milk Shop
+ * category exists; today `cat_milk` matches nothing. See MODULE_CATEGORIES.
+ */
+export function resolveLineModule(category: {
+  id: string;
+  name: string;
+}): ModuleKey | null {
+  const entries = Object.entries(MODULE_CATEGORIES) as [
+    ModuleKey,
+    (typeof MODULE_CATEGORIES)[ModuleKey],
+  ][];
+
+  for (const [key, def] of entries) {
+    if (category.id === def.seedId) return key;
+  }
+  for (const [key, def] of entries) {
+    if (category.name.toLowerCase() === def.name.toLowerCase()) return key;
+  }
+  return null;
+}
+
+/**
+ * Load every product on a unified sale and resolve each one's module.
+ *
+ * Fails the same three ways as the per-module loader, with the category check
+ * replaced by a per-line resolution:
+ *   - an id does not exist                     -> 404 (shared check)
+ *   - a product is deactivated                 -> 400 (shared check)
+ *   - a product's category backs no module     -> 409
+ *
+ * The 409 is deliberate rather than a 400: the request is well-formed and the
+ * product is real — the CATALOG is in a state the sale cannot express, which the
+ * owner fixes by moving the product into a proper category. Same reasoning as
+ * `resolveModuleCategoryId` returning null being a 409.
+ */
+export async function loadUnifiedSaleProducts(
+  productIds: string[],
+  findMany: (ids: string[]) => Promise<UnifiedSaleProductRow[]>
+): Promise<Map<string, UnifiedSaleProduct> | SaleProblem> {
+  const unique = Array.from(new Set(productIds));
+  const rows = await findMany(unique);
+
+  // Normalise stock Decimal -> number at this boundary, exactly as
+  // `toSaleProduct` does for the per-module path (Gotcha 2 / Migration D).
+  const products: SaleProduct[] = rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    price: row.price,
+    stock: Number(row.stock),
+    isActive: row.isActive,
+    subCategory: { categoryId: row.subCategory.categoryId },
+  }));
+  const byId = new Map(products.map((product) => [product.id, product]));
+
+  const unresolved = checkAllProductsResolved(unique, byId);
+  if (unresolved) return unresolved;
+
+  const inactive = checkNoInactiveProducts(products);
+  if (inactive) return inactive;
+
+  const resolved = new Map<string, UnifiedSaleProduct>();
+  for (const row of rows) {
+    const moduleKey = resolveLineModule(row.subCategory.category);
+    if (!moduleKey) {
+      return {
+        message: `"${row.name}" is in a category that isn't set up for sales. Move it under Beverages, Bakery or Milk Shop in the catalog first.`,
+        status: 409,
+      };
+    }
+    resolved.set(row.id, { ...byId.get(row.id)!, moduleKey });
+  }
+
+  return resolved;
+}
+
+export { isSaleProblem };
+
+/**
+ * The unified sale shape returned by create.
+ *
+ * A SUPERSET of `SALE_DETAIL_SELECT` — spread rather than retyped so the shared
+ * fields cannot drift. The two additions are the columns that only exist on the
+ * unified tables:
+ *
+ *   moduleKey     what this line was SOLD AS, snapshotted (never re-derived)
+ *   netLineTotal  the line's contribution to the bill total
+ *
+ * ⚠️ `SALE_DETAIL_SELECT`'s generic name makes it look like it already covers
+ * this table. It does not — it was written for BeverageSale/BakerySale, which
+ * have neither column. See the warning in CLAUDE.md.
+ */
+export const UNIFIED_SALE_DETAIL_SELECT = {
+  ...SALE_DETAIL_SELECT,
+  items: {
+    select: {
+      ...SALE_DETAIL_SELECT.items.select,
+      moduleKey: true,
+      netLineTotal: true,
+    },
+    // cuid is time-prefixed, so id order is insertion order.
+    orderBy: { id: "asc" },
+  },
+} as const;
