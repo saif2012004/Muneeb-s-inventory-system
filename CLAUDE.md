@@ -863,6 +863,162 @@ survived seven phases. Evidence and method:
 
 ---
 
+## ⚠️ DATABASE SAFETY — hard-won guardrails
+
+**On 2026-08-12 the live production database was destroyed by a single command run from this
+repo. Every row was lost. It was recovered only because a manual backup existed.** This section
+records what happened, the rule that follows from it, how the restore was done, and the backup
+discipline that made recovery possible. Read it before running any Prisma CLI command that takes
+a connection string.
+
+### 1. 🔴 NEVER pass a real connection string to `--shadow-database-url`
+
+**The command that wiped production:**
+
+```bash
+# ☠️ THIS DESTROYED THE LIVE DATABASE. Never run anything of this shape.
+npx prisma migrate diff \
+  --from-migrations prisma/migrations \
+  --to-schema-datamodel prisma/schema.prisma \
+  --shadow-database-url "<DIRECT_URL — the production database>" \
+  --script
+```
+
+**Why it destroys data — understand the mechanism, do not just memorise the command.** Prisma's
+shadow database is a *disposable scratch database*. Prisma assumes it owns it completely, so it
+**DROPS EVERY OBJECT IN IT** and then replays the migration history into the empty shell to
+compute a diff. Whatever you hand that flag is what gets emptied. `DIRECT_URL` and `DATABASE_URL`
+both point at production, so passing either one drops production.
+
+Nothing about the flag name warns you, and there is no confirmation prompt.
+
+> **THE RULE, ABSOLUTE:** `--shadow-database-url` takes a throwaway database and nothing else.
+> Never `DATABASE_URL`, never `DIRECT_URL`, never anything read out of `.env`, never a Supabase
+> connection string. If you cannot point to a database you would happily drop right now, you do
+> not have a shadow database and must not use the flag.
+
+**To generate migration SQL without a shadow database — use one of these instead:**
+
+| Need | Command | Safety |
+|---|---|---|
+| Diff the live DB against the schema | `prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script` | **READ-ONLY** — introspects, writes nothing |
+| Diff migration files against the schema | `--from-migrations` → `--to-schema-datamodel` **with no `--shadow-database-url`** | no live DB touched |
+
+The read-only `--from-schema-datasource` form produced perfectly usable SQL thirty seconds after
+the destructive attempt. **There was never a reason to involve a shadow database at all.**
+
+Related: `prisma migrate reset` and `prisma db push` are also destructive. `migrate status` and
+`migrate diff --from-schema-datasource` are read-only. Know which is which before you type it.
+
+### 2. 🔴 A `P3006` against a real URL is a DAMAGE REPORT, not a failed command
+
+The wipe announced itself and was misread:
+
+```
+Error: P3006
+Migration `20260803000000_enable_rls` failed to apply cleanly to the shadow database.
+Error code: P1014
+The underlying table for model `public._prisma_migrations` does not exist.
+```
+
+That looks like "the command didn't work, try another approach". **It is not.** By the time this
+prints, Prisma has *already* dropped everything in the target and is telling you **how far the
+replay got before failing**. The 2026-08-12 incident lost an extra step of damage-awareness
+precisely because this was treated as a dead end to route around rather than an alarm.
+
+> **If `P3006` / "failed to apply cleanly to the shadow database" ever appears against a real URL:
+> STOP IMMEDIATELY.** Do not retry. Do not try a different SQL-generation route. Do not run
+> anything else. **Verify database state first** — row counts, `information_schema.tables`,
+> `_prisma_migrations` — and report before doing anything at all.
+
+**A more general habit that would have caught this in seconds:** when a diff or introspection
+reports that tables you *know* exist are missing, treat it as evidence the database changed, not
+as a tooling quirk. That is exactly how the wipe was eventually detected.
+
+### 3. ✅ The restore procedure that worked (2026-08-12)
+
+Recovery took one pass. Recorded so the next one is fast.
+
+**Source:** a full `pg_dump` — **schema + data**. Not schema-only (see §4).
+
+**Host — this detail cost real time.** Connect via the **session pooler**:
+
+```
+aws-1-ap-northeast-2.pooler.supabase.com:5432        ✅ works
+db.<project-ref>.supabase.co:5432                    ❌ does not resolve from this network
+```
+
+The dashboard offers the `db.<ref>` direct host, and it simply does not resolve here. Use the
+session pooler host (port **5432**, session mode — **not** 6543, which is transaction mode and
+cannot run a restore).
+
+**Steps:**
+
+```sql
+-- 1. clean target
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+```
+
+```bash
+# 2. load
+psql "<session-pooler-url>" -f backup2.sql
+```
+
+**⚠️ The error flood during load is EXPECTED AND HARMLESS. Do not abort.** A Supabase dump
+contains objects owned by Supabase-internal roles, and the `postgres` role cannot recreate them:
+
+```
+ERROR:  must be owner of ...
+ERROR:  permission denied for schema auth
+ERROR:  permission denied for schema storage
+ERROR:  permission denied for schema realtime
+```
+
+**None of these affect your data.** The signal to watch is the **`COPY n` row counts for the
+`public` schema** — `COPY 27` for `Product` and so on. Those are the restore actually landing.
+
+**Verify after — all read-only** (worked example:
+`docs/responses/2026-08-12-post-restore-verification.md`):
+
+1. **Row counts** against known expectations.
+2. **The product fingerprint** — far stronger than a count, because it proves the *contents*
+   came back, not just the right number of rows:
+   ```sql
+   SELECT md5(string_agg(id||'|'||name||'|'||price::text||'|'||stock::text||'|'||"isActive"::text, ',' ORDER BY id))
+   FROM "Product";   -- known-good: 95794a0bb44f1b15d541a60ef0bd5c51
+   ```
+3. **`_prisma_migrations`** — expect all 8 rows, with their **original** `finished_at` timestamps
+   (restored, not re-applied). **Do not run `migrate deploy` to "fix" the history.**
+4. **RLS enabled on every public table** (see Database security below) — a dump does restore it,
+   but confirm rather than assume; a table left with RLS off is a live security gap.
+5. **Sign in through the app.** Connectivity plus a `User` row proves login *should* work; only a
+   sign-in proves it does.
+
+### 4. 🔴 BACKUP DISCIPLINE — verify by CONTENTS, never by existence
+
+**Before any migration or destructive database operation, a VERIFIED backup must exist.**
+
+"Verified" does not mean the file is there. It means you opened it and confirmed it holds real
+data:
+
+- **Grep the dump for a known real row** — e.g. the customer name `Saif`. If a row you know
+  exists is not in the file, the file is not a backup of your data.
+- **Confirm it ends with `-- PostgreSQL database dump complete`.** A dump truncated by a dropped
+  connection or a full disk looks perfectly normal until you try to restore it.
+- **A schema-only dump is NOT a backup.** If there are no `COPY` or `INSERT` data blocks, it
+  restores an empty database. Check for them explicitly.
+
+**There is no second safety net.** Supabase **free tier keeps ZERO automatic backups and offers no
+point-in-time recovery.** The manual verified dump is the only copy in existence. (This is one of
+the reasons for the Pro upgrade at handoff — CHECKLIST #3.)
+
+**The habit that paid for itself:** the backup taken after Migration C was verified by contents
+before it was needed. Without it, all 27 products, both real sales, the farmer ledger, the shop
+settings and the owner's login row would have been permanently gone.
+
+---
+
 ## Database security (READ BEFORE TOUCHING RLS)
 
 **Row Level Security is ENABLED on all 18 tables in `public`, with ZERO policies. This is
@@ -1575,6 +1731,36 @@ and `netLineTotal` — and **nothing reads or writes them**. The app still runs 
 / stock unchanged, `netLineTotal` apportioned pro-rata with the residue on the largest line, the
 `/sales` form and edit UI, old routes redirecting, reports rewritten to `Σ netLineTotal` by
 `moduleKey`.
+
+##### ⚠️ Migration D (widen `Product.stock` to Decimal) is NOT code-neutral — scope it accordingly
+
+Milk sells in fractional litres, so `Product.stock` must widen from `Int` to `Decimal(10,2)`, the
+same way `SaleItem.quantity` did in Migration C. **It is not a schema-only change**, and anyone
+scoping it as "one `ALTER TABLE`, no code" will get a red build. Analysed 2026-08-12 (evidence:
+`docs/responses/2026-08-12-INCIDENT-live-database-wiped-by-shadow-db-flag.md`); the DB work itself
+was never applied.
+
+The widening is **lossless** — all 27 rows are whole numbers, and `Product.price` in the same table
+is already `numeric(10,2)`. The problem is entirely on the code side:
+
+- **`tsc` fails in exactly 4 places**, all the `loadSaleProducts({ findMany })` callback in the
+  beverages/bakery create + update routes. **`SaleProduct.stock` in `lib/sales.ts` is a HAND-WRITTEN
+  `number`**, not a Prisma-derived type, so the mismatch surfaces at that one boundary and nowhere
+  else.
+- **That firewall is also the trap.** Everything downstream still believes `stock` is a `number`,
+  and two consequences follow — both confirmed by executing the code, not by reasoning:
+  - *The arithmetic survives by accident.* `Decimal - number` coerces through `valueOf()`, so
+    `findStockShortfalls` still computes correctly.
+  - *The JSON does not.* **`failStockBlocked` returns `shortBy` WITHOUT calling `serialize()`**, so
+    `available` would ship as the string `"100"` — Gotcha 2 exactly. `StockBlockAlert` feeds it to
+    `InlineStockEditor`, whose `next === stock` guard would then compare a number to a string and
+    never match.
+- **Also blocking:** the `quantity` validator in `lib/validations/sales.ts` is `.int()`, which
+  rejects `12.5` before any of this runs.
+
+**Minimal fix:** have `loadSaleProducts` accept the raw Prisma row and normalise `stock` to a number
+as it builds its Map — one place, all four route files untouched. `/api/products` is already safe
+because it runs through `serialize()`.
 
 #### `[ ]` **5. Migration B** — drop `BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem`
 
