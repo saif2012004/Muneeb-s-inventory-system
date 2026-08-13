@@ -24,6 +24,7 @@ It has already drifted three times, each caught by accident rather than by proce
 | Context7 | "DOWN since 3 Aug, 6+ sessions" | Reconnected — and can be pinned to the v6 branch |
 | Discount variants | "separate Product records with the discounted price" | Deleted 2026-08-09; discount is a sale-time % |
 | Stock | listed under **Out of scope**, "no stock table" | Shipped 2026-08-09, with delta reconciliation |
+| Unified tables | "NOTHING reads or writes Sale/SaleItem" | POST /api/sales went live 2026-08-13 (S3); grep now returns matches |
 
 All three were fixed on 2026-08-10, and the snapshot rule was hardened with the stable-line-id
 guardrail in the same pass.
@@ -302,7 +303,20 @@ produced `3 × Rs. 276 ... Rs. 827`. A green build could never have shown it.
 is 34 characters and overflows a 58mm roll, while `2 cottons × 380.00` fits and the currency is
 unambiguous from the total on the same line.)*
 
-### Receipt printing (thermal) — PAPER WIDTH IS 58mm. DECIDED 2026-08-10.
+### Receipt printing (thermal) — ⚠️ 58mm SUPERSEDED PENDING CONFIRMATION (2026-08-13)
+
+> **🔴 UPDATE 2026-08-13 — DESIGN THE RECEIPT FOR 80mm.**
+> The owner is **buying a new printer**, and **80mm thermal is RECOMMENDED**. The 58mm decision below
+> was made when we had no information about the printer at all; that is no longer the situation.
+>
+> **This is superseded PENDING CONFIRMATION, not yet changed in code.** `RECEIPT_LINE_CHARS` is still
+> **32**. **When the printer is confirmed, set `RECEIPT_LINE_CHARS = 48`** — and the `shopName` cap
+> follows automatically, because it is derived from that constant rather than hardcoded (which is
+> exactly why it was built that way).
+>
+> **The 58mm reasoning below is kept, not deleted.** It still documents why the constant exists, why
+> everything derives from it, and the asymmetric-risk argument — which remains correct and is the
+> reason changing this is a one-line change rather than a layout rewrite.
 
 **The receipt layout is built for a 58mm roll: `RECEIPT_LINE_CHARS = 32`, in
 `lib/settings-display.ts`. Derive every width from that constant — never hardcode 32.**
@@ -319,10 +333,13 @@ on 80mm — it just leaves margin. An 80mm layout **overflows** 58mm and wraps e
 nonsense. Default to the narrow assumption; the failure mode of guessing narrow is a bit of white
 space, and the failure mode of guessing wide is an unreadable receipt.
 
-**We have no information about the actual printer.** Searched the whole repo on 2026-08-10 —
-nothing has ever recorded a model, an interface, or a paper width. **Confirm the roll before
-handoff**, and if it turns out to be 80mm, change `RECEIPT_LINE_CHARS` to 48 and the shop-name cap
-follows automatically.
+~~**We have no information about the actual printer.**~~ **Superseded 2026-08-13 — see the update at
+the top of this section.** As of 2026-08-10 nothing in the repo had ever recorded a model, an
+interface, or a paper width, which is what forced the narrow default. **The owner is now buying a new
+printer and 80mm is recommended**, so the expected end state is
+`RECEIPT_LINE_CHARS = 48` with the shop-name cap following automatically. **Still confirm the actual
+roll before changing the constant** — the risk asymmetry above is unchanged, and a wrong guess in the
+wide direction wraps every line into nonsense.
 
 **Double-width header text halves the budget to 16 characters.** That is a RENDERING decision for
 the receipt, not a validation one: print a long shop name at normal width rather than letting the
@@ -357,6 +374,8 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
 ```
 /app
   /api                     → Route Handlers (serverless). runtime="nodejs" where Prisma/bcrypt used.
+    /sales/route.ts        → UNIFIED sale POST (S3, live 2026-08-13). Beverages+bakery+milk on
+                             ONE bill; no discounts; GET lands with S4.
   /(auth)/login            → Owner login page → /login
   /(dashboard)             → layout group ONLY, adds nothing to the URL
     /layout.tsx            → Protected layout with nav
@@ -379,9 +398,20 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
   /serialize.ts           → Decimal → number serializers (money/liters)
   /format.ts              → formatPKR(), formatDate(), Karachi date helpers
   /utils.ts               → misc helpers
+  /sales.ts               → THE money + stock + price-snapshot implementation (per-module)
+  /unified-sales.ts       → unified sale: loadUnifiedSaleProducts, resolveLineModule,
+                            UNIFIED_SALE_PRODUCT_SELECT, UNIFIED_SALE_DETAIL_SELECT
+  /modules.ts             → MODULE_CATEGORIES (beverages | bakery | milk) → Category
+  /milk.ts                → FARMER side only: deliveries, purchases, balances, ledger
+  /milk-sales.ts          → milk SHOP sales (split out in S2, 2026-08-12)
+  /milk-stock.ts          → the DELIVERY-TO-STOCK BRIDGE
+  /receivables.ts         → THE customer balance calculation
 /prisma
   schema.prisma           → single source of truth
-  seed.ts                 → initial products
+  seed.ts                 → initial products, AND the milk catalog product (cat_milk /
+                            sub_milk / prod_milk). Grep it before dropping any Product
+                            column — it is in no component tree, so a UI-shaped search
+                            misses it (this bit us once; see CHECKLIST #9).
   /migrations/            → never edit manually
 /scripts
   create-owner.ts         → one-time owner account seeder
@@ -420,7 +450,12 @@ model Product {
   // sale-time percentage snapshotted on the LINE, never a product attribute.
   qualityTier     String?      // "premium" | "simple" | null
   shape           String?      // "circle" | "rectangular_round" | null (russ)
-  unit            String?      // "cotton" (eggs) | "piece" | "bottle" | null
+  unit            String?      // "cotton" (eggs) | "piece" | "bottle" | "litre" (milk) | null
+  // DECIMAL, not Int — widened by Migration D (2026-08-12). Milk sells in
+  // fractional litres and an integer column cannot be decremented by 12.5.
+  // Countable goods just carry a .00 scale. Seed default is 100 (a placeholder
+  // the owner replaces by counting the shelf); prod_milk overrides it to 0.
+  stock           Decimal      @default(100) @db.Decimal(10, 2)
   isActive        Boolean      @default(true)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
@@ -428,6 +463,38 @@ model Product {
   // REQUIRED back-relations (do not remove, migration fails without them)
   beverageSaleItems BeverageSaleItem[]
   bakerySaleItems   BakerySaleItem[]
+  saleItems         SaleItem[]        // unified Sale (Migration A)
+}
+```
+
+### 🥛 The milk catalog product (created 2026-08-13 via `prisma/seed.ts`)
+
+Milk is **one product, sold by the litre**, so a single bill can hold beverage, bakery and milk lines
+together:
+
+| Row | Value |
+|---|---|
+| `Category` | `cat_milk` — name **"Milk Shop"** |
+| `SubCategory` | `sub_milk` — "Milk" |
+| `Product` | `prod_milk` — "Milk", `unit: "litre"`, `price 0` |
+
+**The name "Milk Shop" and the id `cat_milk` are load-bearing** — they are how `resolveLineModule`
+(`lib/unified-sales.ts`) maps a line to `moduleKey: "milk"`, matching `MODULE_CATEGORIES.milk` in
+`lib/modules.ts`.
+
+**🔴 `stock` STARTS AT 0, not the seed's default of 100**, because milk stock is **derived**:
+farmer deliveries ADD to it (the bridge, `lib/milk-stock.ts`) and unified sales SUBTRACT. Seeding 100
+would invent a hundred litres that never arrived. `ProductSeed` carries an optional `stock` for
+exactly this one case.
+
+```prisma
+// The unified sale line. quantity is DECIMAL (Migration C, 2026-08-11) so a
+// fractional-litre milk line is an ordinary line.
+model SaleItem {
+  quantity        Decimal @db.Decimal(10, 2)
+  moduleKey       String   // "beverages" | "bakery" | "milk" — SNAPSHOT, never re-derived
+  netLineTotal    Decimal @db.Decimal(10, 2)
+  // ... see prisma/schema.prisma for the full model
 }
 ```
 
@@ -597,6 +664,12 @@ model User {
 > only sale model", "Migration B done", "the guard was repointed" — none of which was true in this
 > repo. A full ground-truth audit on 2026-08-11 re-confirmed every claim below.
 > **If a session brief and this section disagree, run the grep. The grep wins.**
+
+> **⚠️ UPDATE 2026-08-13 — PARTIAL SWITCH-OVER.** `POST /api/sales` (unified) is **LIVE** and writes
+> `Sale`/`SaleItem` (S3, commit `90e8609`). The old per-module create routes are **ALSO still live**,
+> and reports/receipt/receivables still read the old tables. Both coexist **BY DESIGN** until S4–S6
+> finish. **The grep below now returns matches — that is EXPECTED, not the dormant state.** Once any
+> unified sale is created, Migration A's row is no longer the only `Sale` row.
 
 **The app runs on `BeverageSale` / `BakerySale`. `Sale` / `SaleItem` exist but NOTHING reads or
 writes them.** The unified rework is HALF shipped: the data was migrated (migration A), the
@@ -1043,8 +1116,16 @@ ERROR:  permission denied for schema realtime
    SELECT md5(string_agg(id||'|'||name||'|'||price::text||'|'||stock::text||'|'||"isActive"::text, ',' ORDER BY id))
    FROM "Product";   -- known-good: 95794a0bb44f1b15d541a60ef0bd5c51
    ```
-3. **`_prisma_migrations`** — expect all 8 rows, with their **original** `finished_at` timestamps
-   (restored, not re-applied). **Do not run `migrate deploy` to "fix" the history.**
+   **Post-Migration-D the value-stable fingerprints are
+   `91c0ca3185c4daadd4a9c7be1bfa0e77` (stock) and `b57a51bb57be89cbc9db646d4a2a9972` (product);
+   the `95794…` value above predates Migration D.** Cast to `numeric(10,2)` on both sides
+   (`(stock::numeric(10,2))::text`) so the comparison survives the `100` → `100.00`
+   representation change and compares VALUES rather than formatting. **Both figures cover the 27
+   products that existed before `prod_milk` was created on 2026-08-13** — exclude `prod_milk`
+   (`WHERE id <> 'prod_milk'`) to reconcile against them, or take a fresh 28-row baseline.
+3. **`_prisma_migrations`** — expect all 8 rows **(9 as of Migration D, applied 2026-08-12; the
+   documented restore predated D, so it shows 8)**, with their **original** `finished_at`
+   timestamps (restored, not re-applied). **Do not run `migrate deploy` to "fix" the history.**
 4. **RLS enabled on every public table** (see Database security below) — a dump does restore it,
    but confirm rather than assume; a table left with RLS off is a live security gap.
 5. **Sign in through the app.** Connectivity plus a `User` row proves login *should* work; only a
@@ -1390,6 +1471,32 @@ and Next reads both.
 
 Update this table as phases complete. Change ⬜ to ✅.
 
+### The UNIFIED SALE rework — its own track, running alongside Phase 8
+
+The phase table above describes the app as originally scoped. The unified-sale rework is a separate
+sequence, and this is where it actually stands. **Full stage-by-stage detail lives in
+`REMAINING-WORK.md`; the authoritative status is CHECKLIST #4.**
+
+| Stage | Scope | Status |
+|---|---|---|
+| Migration A | additive `Sale` / `SaleItem` (+ `moduleKey`, `netLineTotal`) | ✅ applied 2026-08-09 |
+| **Migration C** | `SaleItem.quantity` → `Decimal(10,2)` — fractional litres | ✅ applied 2026-08-11 |
+| **Migration D** | `Product.stock` → `Decimal(10,2)` (+ 2 scoped code fixes) | ✅ applied 2026-08-12 · `8847fff` |
+| **S2** | split milk-sale code out of `lib/milk.ts` (isolate farmer code) | ✅ `9b87dc4` |
+| **S3** | unified `POST /api/sales` — beverages + bakery, milk designed-for | ✅ `90e8609` · **21/21** |
+| **Milk product + bridge** | `prod_milk` + delivery-to-stock, all 4 delivery paths, reconcile-by-delta | ✅ `cbcd2eb` · **22/22** |
+| **S4** | unified sale SCREEN + `GET /api/sales` + **milk cutover** + unified DELETE/edit that restores stock | ⬜ Todo |
+| **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ⬜ Todo |
+| **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ⬜ Todo |
+| **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
+| **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ⬜ Todo |
+| **S9** | remove the old per-module paths, then **Migration B** (drop the 4 old tables) — CHECKLIST #5 | ⬜ Todo |
+
+**Two things S4 carries that are easy to lose:** the **milk cutover** is what makes milk stock
+authoritative (today `/milk/sales` does not decrement, so the figure reads high — see the
+"🥛 Milk stock" section), and **raw `Sale` deletion does not restore stock**, so the unified
+DELETE/edit has to do what the per-module routes already do.
+
 **Before declaring the project ready for the client, work the PRE-HANDOFF CHECKLIST**, not this
 table. Phase 8 is polish; the checklist is everything that must be true at handoff.
 
@@ -1610,6 +1717,10 @@ would start diluting the two that matter.)
 
 ## ✅ PRE-HANDOFF CHECKLIST — THE single source of truth for what is left
 
+> 🗺️ **A stage-by-stage roadmap of the remaining unified-sale work (S4–S9), the catalog features, and
+> go-live sequencing lives in `REMAINING-WORK.md` in the repo root.** That file is the *plan*; this
+> checklist remains the *status*. If they disagree, this one wins.
+
 **Every open item lives HERE and nowhere else.** These were previously scattered across the
 Authentication section, the Deployment posture section and the carried-forward notes; those places
 now hold only the technical rule and a pointer back to this checklist. **If you close an item,
@@ -1779,21 +1890,47 @@ schemas, one of them empty.
 
 #### `[~]` **4. Unified `Sale` build** — API, `/sales` form + edit UI, redirects, line-level reports
 
-**NOT STARTED.** Migration A (additive) is applied and `Sale` / `SaleItem` exist with `moduleKey`
-and `netLineTotal` — and **nothing reads or writes them**. The app still runs entirely on
-`BeverageSale` / `BakerySale`. Reports still group by `beverageSaleItem` / `bakerySaleItem`
-(`lib/reports.ts:217,224`). Scope when it runs: unified API reusing `reconcileSaleLines` / discount
-/ stock unchanged, `netLineTotal` apportioned pro-rata with the residue on the largest line, the
-`/sales` form and edit UI, old routes redirecting, reports rewritten to `Σ netLineTotal` by
-`moduleKey`.
+**PARTLY SHIPPED — updated 2026-08-13.** ~~NOT STARTED.~~ The API half is done and live.
 
-##### ⚠️ Migration D (widen `Product.stock` to Decimal) is NOT code-neutral — scope it accordingly
+**Shipped:**
 
-Milk sells in fractional litres, so `Product.stock` must widen from `Int` to `Decimal(10,2)`, the
-same way `SaleItem.quantity` did in Migration C. **It is not a schema-only change**, and anyone
-scoping it as "one `ALTER TABLE`, no code" will get a red build. Analysed 2026-08-12 (evidence:
-`docs/responses/2026-08-12-INCIDENT-live-database-wiped-by-shadow-db-flag.md`); the DB work itself
-was never applied.
+| | What | Evidence |
+|---|---|---|
+| ✅ | **Migration C** — `SaleItem.quantity` → `Decimal(10,2)` | applied 2026-08-11 |
+| ✅ | **Migration D** — `Product.stock` → `Decimal(10,2)` | applied 2026-08-12, commit `8847fff` |
+| ✅ | **S2** — milk-sale code split out of `lib/milk.ts` | commit `9b87dc4` |
+| ✅ | **S3** — unified `POST /api/sales` (beverages + bakery; milk designed-for) | commit `90e8609`, **21/21 tested** |
+| ✅ | **Milk product + delivery-to-stock bridge** | commit `cbcd2eb`, **22/22 tested** |
+
+**What REMAINS for this item:**
+
+1. **The unified sale SCREEN** — plus **`GET /api/sales`**, deliberately left out of S3.
+2. **The milk cutover** — route milk selling through `/api/sales` instead of `POST /api/milk/sales`.
+   This is what **makes milk stock authoritative** and closes the provisional warning in the
+   "🥛 Milk stock" section (today `/milk/sales` does not decrement, so the figure reads high).
+3. **A unified sale DELETE / edit that restores stock.** 🔴 **Raw `Sale` deletion does NOT restore
+   stock today** — the per-module routes do, the unified path has no DELETE at all yet. Found while
+   testing the bridge.
+4. Old routes redirecting, and reports rewritten to `Σ netLineTotal` by `moduleKey` (that half is
+   tracked as #6 / S6 — reports still group by `beverageSaleItem` / `bakerySaleItem`,
+   `lib/reports.ts:217,224`).
+
+**Note on the original scope line:** it said `netLineTotal` would be "apportioned pro-rata with the
+residue on the largest line". **That is no longer needed.** S3 ships with NO discounts, so
+`netLineTotal === lineTotal` and `totalAmount === Σ netLineTotal` exactly — the invariant holds by
+construction. Apportionment only comes back if a bill discount is ever reintroduced, and that is its
+own change.
+
+##### ✅ APPLIED 2026-08-12 — Migration D (widen `Product.stock` to Decimal) was NOT code-neutral
+
+**Kept as the record of why, because the lesson generalises: a "one `ALTER TABLE`" widening can
+still break the build, and the reason is a hand-written type.** Migration D and its two code fixes
+shipped together in commit `8847fff`; the analysis below is what predicted them.
+
+Milk sells in fractional litres, so `Product.stock` had to widen from `Int` to `Decimal(10,2)`, the
+same way `SaleItem.quantity` did in Migration C. **It was not a schema-only change**, and anyone
+scoping it as "one `ALTER TABLE`, no code" would have got a red build. Analysed 2026-08-12 (evidence:
+`docs/responses/2026-08-12-INCIDENT-live-database-wiped-by-shadow-db-flag.md`).
 
 The widening is **lossless** — all 27 rows are whole numbers, and `Product.price` in the same table
 is already `numeric(10,2)`. The problem is entirely on the code side:
@@ -1816,6 +1953,12 @@ is already `numeric(10,2)`. The problem is entirely on the code side:
 **Minimal fix:** have `loadSaleProducts` accept the raw Prisma row and normalise `stock` to a number
 as it builds its Map — one place, all four route files untouched. `/api/products` is already safe
 because it runs through `serialize()`.
+
+**✅ Both fixes shipped with the migration** (`8847fff`): `SaleProductRow` + `toSaleProduct` normalise
+stock at the `loadSaleProducts` boundary, and `failStockBlocked` now runs its payload through
+`serialize()` as a backstop for the next caller. **The `.int()` validator was deliberately NOT
+relaxed** — the unified endpoint got its own decimal-capable `unifiedSaleCreateSchema` instead, so
+`2.5` is still an error on the per-module routes.
 
 #### `[ ]` **5. Migration B** — drop `BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem`
 
@@ -1924,6 +2067,69 @@ The whole app on a real cheap Android phone in daylight, **not a desktop viewpor
 accuracy, real network latency, or actual paint performance. **Quick entry especially** — it is the
 densest screen and the one the owner uses twice a day. Cover loading / empty / error states, the
 bottom nav, numeric keypads (`inputMode="decimal"`), and reduced-motion.
+
+---
+
+### 🛒 Catalog & billing features the owner has asked for (added 2026-08-13)
+
+**All four are OWNER-FACING catalog/billing capabilities, not cleanup.** Each ships with
+**placeholder values until handover** — the owner sets the real numbers himself, the same way stock
+and shop details are his to enter (CHECKLIST #2 / #2b).
+
+#### `[ ]` **17. Cooling / chilling charge — per product, set by the owner**
+
+A per-product catalog field for the cooling charge, **set by the owner himself and independently for
+EACH beverage size** — a 1.5L and a 2.25L do not carry the same charge, so one global rate would be
+wrong for every size but one.
+
+At billing: a **toggle** (this sale is chilled / not) plus a **rate override**, defaulting to the
+catalog value. Same shape as the price override in #18 — the catalog holds the usual number, the bill
+can depart from it, and what was actually charged is snapshotted on the line.
+
+**Placeholder values until handover.**
+
+#### `[ ]` **18. Billing-time price override on EVERY product (whole inventory)**
+
+An optional field on the bill to type an updated price when the catalog price has not been refreshed
+yet. Prices move faster than the owner can walk the catalog, and today he has to leave the sale to
+fix one.
+
+**The API already supports this** — `snapshotUnitPrice` honours an explicit `unitPrice` on CREATE,
+and the unified `POST /api/sales` accepts it. **This item is the UI field only.**
+
+⚠️ **CREATE ONLY.** The override must never reach an edit: `reconcileSaleLines` deliberately ignores
+a client `unitPrice` for an existing line (CHECKLIST #7, closed 2026-08-11), because honouring it
+would let a closed bill be silently re-priced. See the create/update asymmetry under **Price
+snapshot**.
+
+#### `[ ]` **19. Multi-unit products — ONE stock pool, several selling units**
+
+The same physical goods sell in more than one unit, and **stock must be a single shared pool** or the
+two units drift apart and oversell each other.
+
+| Product | Units | Prices (placeholder) |
+|---|---|---|
+| **Eggs** | dozen · tray (**30**) · peti (**360** = 12 trays) | 200 / 500 / 7000 |
+| **Beverages** | single bottle · pet | per size |
+
+**🔴 LOCAL QUARTER = 12 BOTTLES PER PET, NOT 24.** Write it down because every reference table says
+24 and the owner's is 12. **Bottles-per-pet is PER SIZE**, so it is a per-product number, not a
+constant.
+
+Selling one peti must decrement the shared egg pool by 360 — which is why `Product.stock` being
+`Decimal` (Migration D) and quantity being `Decimal` (Migration C) already fit: a conversion factor
+lands on the line, not on a second stock column.
+
+**Placeholder prices until handover.**
+
+#### `[ ]` **20. Per-product sales visibility in reporting**
+
+Reports currently answer "how much did Beverages sell". The owner also needs **each product's units
+sold**, not just per-category — and **milk shown as its own line**.
+
+Lands with the S6 reporting repoint (#6): once revenue is `Σ netLineTotal` grouped by
+`SaleItem.moduleKey`, grouping by `productId` is the same query shape, and `moduleKey` is what lets
+milk appear as its own line rather than being folded into a category.
 
 ---
 
