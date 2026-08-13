@@ -281,14 +281,17 @@ async function buildExport(
         orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
       });
 
-      // Migration A's copy carries the id of the BakerySale row it was copied
-      // from, and that row is exported by `bakery_sales`. Excluding it here is
-      // the same rule lib/receivables.ts and lib/reports.ts apply — otherwise
-      // the two files together report the same Rs. 5,000 twice.
+      // A migrated copy carries the id of the old row it came from, and that row
+      // is already exported by its own per-module type. Excluding it here is the
+      // same rule lib/receivables.ts and lib/reports.ts apply through
+      // NOT_A_MIGRATION_COPY — otherwise two files together report one sale
+      // twice. `MilkSale` is included ahead of S5 copying it, for the reason
+      // given on that constant.
       const legacy = await prisma.$queryRaw<{ id: string }[]>`
         SELECT s.id FROM "Sale" s
         WHERE EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
            OR EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
+           OR EXISTS (SELECT 1 FROM "MilkSale" m WHERE m.id = s.id)
       `;
       const legacyIds = new Set(legacy.map((row) => row.id));
 

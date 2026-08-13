@@ -184,18 +184,27 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
 } as const;
 
 /**
- * 🔴 THE MIGRATION-A DEDUPE, IN ONE PLACE. Every aggregate over `Sale` needs it.
+ * 🔴 THE MIGRATED-COPY DEDUPE, IN ONE PLACE. Every aggregate over `Sale` needs it.
  *
- * Migration A COPIED the pre-existing per-module sales into `Sale`, keeping each
- * one's ORIGINAL id. So `Sale` holds one row — `cmsjh3kly0002uve8ajkvs2ji` —
- * whose twin is still live in `BakerySale`. Any total that sums `Sale` ON TOP OF
- * the old tables counts that Rs. 5,000 twice: the customer's balance, the
- * period's revenue, the module's revenue, a product's units sold.
+ * A sale that exists in BOTH an old per-module table and `Sale` is ONE sale that
+ * has been copied, not two sales. Migration A did this for the pre-existing
+ * per-module sales, KEEPING each one's original id — so `Sale` holds a row
+ * (`cmsjh3kly0002uve8ajkvs2ji`) whose twin is still live in `BakerySale`. Any
+ * total that sums `Sale` ON TOP OF the old tables counts that Rs. 5,000 twice:
+ * the customer's balance, the period's revenue, a product's units sold.
  *
  * Matching by id is exact rather than heuristic — a genuinely new unified sale
- * gets a fresh cuid and cannot collide — and it is SELF-HEALING: it excludes 1
- * row today and 0 once S5 folds the old rows in, so there is nothing to remember
- * to undo.
+ * gets a fresh cuid and cannot collide — and it is SELF-HEALING: it excludes
+ * exactly the rows that are duplicated right now, and 0 once S9 drops the old
+ * tables. There is nothing to remember to undo.
+ *
+ * ⚠️ `MilkSale` IS IN THE LIST DELIBERATELY, AHEAD OF ITS COPY EXISTING.
+ * S5 will copy the real milk sale into `Sale` the same way — same id — and the
+ * moment it lands, every balance and every revenue figure would count its
+ * Rs. 6,000 twice unless this already excluded it. The guard is a NO-OP until
+ * then (no `Sale` row shares an id with a `MilkSale` row today), which is
+ * exactly why it ships FIRST: the data step must never be the thing that makes
+ * the numbers wrong for however long the code takes to follow.
  *
  * ⚠️ THE SQL ASSUMES THE `Sale` TABLE IS ALIASED `s`. Every caller aliases it
  * that way; if you write a query that does not, alias it rather than editing
@@ -206,6 +215,7 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
 export const NOT_A_MIGRATION_COPY = Prisma.sql`
   NOT EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
   AND NOT EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
+  AND NOT EXISTS (SELECT 1 FROM "MilkSale" m WHERE m.id = s.id)
 `;
 
 // ---------------------------------------------------------------------------
