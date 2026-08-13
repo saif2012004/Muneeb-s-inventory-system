@@ -17,7 +17,11 @@ import {
   useUpdateCustomer,
   type Purchase,
 } from "@/lib/hooks/use-customers";
-import { MODULE_DOT_CLASS, MODULE_LABEL } from "@/lib/receivables-display";
+import {
+  MODULE_DOT_CLASS,
+  MODULE_HREF,
+  MODULE_LABEL,
+} from "@/lib/receivables-display";
 import { cn } from "@/lib/utils";
 import { CUSTOMER_TYPE_LABELS } from "@/lib/validations/customers";
 
@@ -212,8 +216,9 @@ function PurchasesList({ purchases }: { purchases: Purchase[] }) {
     <div className="space-y-2">
       {purchases.map((purchase) => {
         // Milk has no sale detail page, so those rows stay flat rather than
-        // linking somewhere that 404s.
-        const href = purchase.module === "milk" ? null : `/${purchase.module}`;
+        // linking somewhere that 404s. From a MAP, not `/${module}`: a unified
+        // bill's module is "unified" and `/unified` is not a route.
+        const href = MODULE_HREF[purchase.module] ?? null;
 
         const body = (
           <div className="flex items-start justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">

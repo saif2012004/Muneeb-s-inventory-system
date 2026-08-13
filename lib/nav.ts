@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Milk,
   Package,
+  ReceiptText,
   Settings,
   ShoppingBag,
   Users,
@@ -61,6 +62,16 @@ export type NavItem = {
 /** Full navigation, in sidebar order. */
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard, accent: "zinc" },
+  /**
+   * The UNIFIED till (S4.2). ZINC, not a module accent: it sells from all three
+   * shops on one bill, and the Design System forbids mixing accents on a screen.
+   *
+   * Placed directly under Dashboard because it is the screen the owner uses
+   * most, but the four PRIMARY (thumb-reachable) tabs are deliberately left
+   * untouched — reshuffling a nav the owner already knows is a change to make
+   * on purpose, not a side effect of adding a screen.
+   */
+  { href: "/sales", label: "Sales", icon: ReceiptText, accent: "zinc" },
   { href: "/beverages", label: "Beverages", icon: GlassWater, accent: "blue" },
   { href: "/bakery", label: "Bakery", icon: ShoppingBag, accent: "amber" },
   { href: "/milk", label: "Milk Shop", icon: Milk, accent: "emerald" },
@@ -77,7 +88,7 @@ export const PRIMARY_NAV: NavItem[] = NAV_ITEMS.filter((item) =>
 
 /** The rest, reached through the mobile "More" sheet. */
 export const SECONDARY_NAV: NavItem[] = NAV_ITEMS.filter((item) =>
-  ["/customers", "/catalog", "/reports", "/settings"].includes(item.href)
+  ["/sales", "/customers", "/catalog", "/reports", "/settings"].includes(item.href)
 );
 
 /**

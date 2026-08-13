@@ -64,9 +64,23 @@ function bareAmount(value: number): string {
   return amount(value).replace(/^Rs\.\s*/, "");
 }
 
-/** `3 cottons` where the unit adds meaning, otherwise just `3`. */
+/**
+ * `3 cottons` where the unit adds meaning, otherwise just `3`.
+ *
+ * ⚠️ LITRES ARE ABBREVIATED TO `L`, and that is not cosmetic — it is what makes
+ * a milk line fit the roll. Found by printing a real one:
+ *
+ *   12.5 litres × 12… Rs. 1,500.00     <- 32 chars, the RATE gets truncated
+ *   12.5 L × 120.00   Rs. 1,500.00     <- fits, rate readable
+ *
+ * A truncated unit price on a customer's bill is exactly the failure the paise
+ * rule exists to prevent: the arithmetic stops being checkable. `L` is the
+ * standard symbol and no shop owner will misread it, whereas "12…" tells the
+ * customer nothing. The SCREEN still says "litres" — it has the room.
+ */
 function formatQuantity(quantity: number, unit: string | null): string {
   if (!unit || unit === "piece" || unit === "bottle") return String(quantity);
+  if (unit === "litre") return `${quantity} L`;
   return `${quantity} ${unit}${quantity === 1 ? "" : "s"}`;
 }
 
@@ -134,7 +148,23 @@ export function buildReceiptLines(receipt: ReceiptData): string[] {
   lines.push(divider());
 
   // -- Totals ---------------------------------------------------------------
-  lines.push(padRow("Subtotal", amount(receipt.subtotal)));
+  /**
+   * The Subtotal row prints ONLY when it differs from the total — i.e. only when
+   * a whole-bill discount actually took something off.
+   *
+   * A subtotal exists to explain a discount. With no discount it is the same
+   * figure as TOTAL, and printing both spends a line of a 32-character roll
+   * saying the number twice, which invites the customer to wonder what the
+   * difference is. The owner's answer on the mixed receipt was explicit: one
+   * flat list, one total (2026-08-14).
+   *
+   * Every unified sale is in this case by construction — that endpoint has no
+   * discounts at all — and so is any per-module bill sold at full price. A
+   * discounted bill is unchanged: Subtotal, Discount and TOTAL all still print.
+   */
+  if (receipt.subtotal !== receipt.totalAmount) {
+    lines.push(padRow("Subtotal", amount(receipt.subtotal)));
+  }
 
   if (receipt.discountPercent > 0) {
     // The saving, shown as the gap between the lines and the stored total —

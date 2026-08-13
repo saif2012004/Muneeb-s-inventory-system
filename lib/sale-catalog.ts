@@ -32,6 +32,20 @@ export type SaleProductOption = {
   brand: string;
   /** Full searchable label, e.g. `Russ › Large › Circle`. */
   label: string;
+  /**
+   * What the picker actually SEARCHES: the label PLUS the product's own name.
+   *
+   * The label is composed from the sub-category and the distinguishing
+   * attributes, so a product whose name is not echoed by either was
+   * unreachable by typing it — the picker answered "No product found" for a
+   * product sitting right there in the list. Harmless for a seeded catalog
+   * where the sub-category IS the name ("Buns", "Pepsi"), and immediately wrong
+   * on the unified till, where the owner types what is written on the bottle.
+   *
+   * Found in browser testing, 2026-08-14. Display is unchanged — this string is
+   * only ever cmdk's match target, never rendered.
+   */
+  searchValue: string;
   /** Everything after the brand. Empty for a product with no attributes. */
   detail: string;
   /** Seeded products all start at 0 until the owner prices them. */
@@ -68,10 +82,17 @@ export function toSaleProductOption(product: Product): SaleProductOption {
   const brand = product.subCategory.name;
   const parts = detailParts(product);
 
+  const label = [brand, ...parts].join(SEPARATOR);
+
   return {
     product,
     brand,
-    label: [brand, ...parts].join(SEPARATOR),
+    label,
+    // The product's own name appended only when the label does not already
+    // carry it, so the common case stays exactly the string it was.
+    searchValue: label.toLowerCase().includes(product.name.toLowerCase())
+      ? label
+      : `${label} ${product.name}`,
     detail: parts.join(SEPARATOR),
     needsPrice: product.price === 0,
   };
@@ -95,6 +116,48 @@ export function groupSaleProducts(products: Product[]): SaleBrandGroup[] {
   }
 
   return Array.from(byBrand.entries())
+    .map(([brand, options]) => ({
+      brand,
+      options: options.sort((a, b) => {
+        const size = (a.product.size ?? "").localeCompare(b.product.size ?? "");
+        if (size !== 0) return size;
+        const tier = (a.product.qualityTier ?? "").localeCompare(
+          b.product.qualityTier ?? ""
+        );
+        if (tier !== 0) return tier;
+        return (a.product.shape ?? "").localeCompare(b.product.shape ?? "");
+      }),
+    }))
+    .sort((a, b) => a.brand.localeCompare(b.brand));
+}
+
+/**
+ * Grouping for the UNIFIED till, where products from all three shops sit in one
+ * picker (S4.2).
+ *
+ * The heading becomes **`Beverages · Pepsi`** rather than bare `Pepsi`. On a
+ * single-module screen the brand alone is unambiguous, because everything on
+ * screen is already that module — here it is not: "Milk" as a heading gives no
+ * hint whether it is the milk shop's litres or a bakery item, and two shops may
+ * one day carry a similarly named brand. The category name is exactly the
+ * missing word.
+ *
+ * `ProductPicker` needs NO change: it renders `group.brand` as the heading
+ * string, so a prefixed string is simply a longer heading. cmdk still searches
+ * the composed label, so typing "milk" or "pepsi" reaches the row either way.
+ */
+export function groupUnifiedSaleProducts(products: Product[]): SaleBrandGroup[] {
+  const byGroup = new Map<string, SaleProductOption[]>();
+
+  for (const product of products) {
+    const option = toSaleProductOption(product);
+    const heading = `${product.subCategory.category.name} · ${option.brand}`;
+    const bucket = byGroup.get(heading);
+    if (bucket) bucket.push(option);
+    else byGroup.set(heading, [option]);
+  }
+
+  return Array.from(byGroup.entries())
     .map(([brand, options]) => ({
       brand,
       options: options.sort((a, b) => {

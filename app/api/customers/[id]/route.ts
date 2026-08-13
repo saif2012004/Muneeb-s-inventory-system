@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 // balance/ledger helpers alongside it (`summariseActivity`, `buildLedger`,
 // `getCustomerBalance`) still exist and still work — they are simply no longer
 // called, because a sale is revenue rather than a debt. See the GET below.
-import { getCustomerActivity } from "@/lib/receivables";
+import { getCustomerActivity, unifiedSaleModules } from "@/lib/receivables";
 import { serialize } from "@/lib/serialize";
 import { customerUpdateSchema } from "@/lib/validations/customers";
 
@@ -14,6 +14,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Context = { params: { id: string } };
+
+/** Shop names for a unified bill's `detail` line. */
+const MODULE_WORDS: Record<string, string> = {
+  beverages: "Beverages",
+  bakery: "Bakery",
+  milk: "Milk",
+};
 
 const CUSTOMER_SELECT = {
   id: true,
@@ -87,6 +94,20 @@ export async function GET(
         notes: sale.notes,
         itemCount: null,
         detail: `${sale.liters.toString()} L × ${sale.ratePerLiter.toString()}`,
+      })),
+      // The UNIFIED bill (S4.2). Tagged "unified" rather than one of the three:
+      // it may hold lines from all of them, and picking one would mislabel it.
+      // `detail` names the shops it actually drew from.
+      ...activity.unified.map((sale) => ({
+        id: sale.id,
+        module: "unified" as const,
+        saleDate: sale.saleDate,
+        totalAmount: sale.totalAmount,
+        notes: sale.notes,
+        itemCount: sale._count.items,
+        detail: unifiedSaleModules(sale.items)
+          .map((key) => MODULE_WORDS[key] ?? key)
+          .join(" · ") as string | null,
       })),
     ].sort((a, b) => b.saleDate.getTime() - a.saleDate.getTime());
 

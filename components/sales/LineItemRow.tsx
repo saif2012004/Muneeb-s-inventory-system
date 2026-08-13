@@ -48,6 +48,7 @@ export function LineItemRow({
   onRemove,
   canRemove,
   searchPlaceholder,
+  showDiscount = true,
 }: {
   form: SaleForm;
   index: number;
@@ -56,6 +57,14 @@ export function LineItemRow({
   onRemove: () => void;
   canRemove: boolean;
   searchPlaceholder?: string;
+  /**
+   * The UNIFIED till has NO discounts — `POST /api/sales` rejects a
+   * `discountPercent` outright — so it hides this field rather than offering
+   * one that cannot be honoured. Defaults to `true`, which is exactly the
+   * beverages/bakery behaviour that shipped in Phases 3 and 4: those screens
+   * pass nothing and are unchanged.
+   */
+  showDiscount?: boolean;
 }) {
   // Subscribes this row only — typing in one line doesn't re-render the others.
   const row = useWatch({ control: form.control, name: `items.${index}` });
@@ -193,6 +202,7 @@ export function LineItemRow({
         {/* Line discount. Its own row rather than a third column: at 360px three
             numeric fields would each be under the 44px touch target, and this is
             the field most owners leave blank. */}
+        {showDiscount ? (
         <div className="space-y-1.5">
           <Label htmlFor={`item-${index}-discount`}>Discount % (optional)</Label>
           <Input
@@ -213,6 +223,7 @@ export function LineItemRow({
             </p>
           ) : null}
         </div>
+        ) : null}
 
         <div className="flex items-baseline justify-between border-t border-zinc-100 pt-3">
           <span className="num text-sm text-zinc-500">

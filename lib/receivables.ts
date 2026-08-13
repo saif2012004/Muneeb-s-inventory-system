@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
  * THE RECEIVABLES CALCULATION. One implementation, like reconcileSaleLines.
  *
  *   totalBilled = SUM(BeverageSale) + SUM(BakerySale) + SUM(MilkSale)
+ *               + SUM(Sale)   <- the UNIFIED bill, added in S4.2
  *   totalPaid   = SUM(CustomerPayment)
  *   outstanding = totalBilled - totalPaid
  *
@@ -45,6 +46,76 @@ import { prisma } from "@/lib/prisma";
  */
 
 const ZERO = new Prisma.Decimal(0);
+
+/**
+ * 🔴 THE UNIFIED SALE IS COUNTED — MINUS MIGRATION A's DUPLICATE. Do not drop
+ * this filter, and do not "simplify" it into a plain SUM over `Sale`.
+ *
+ * Migration A COPIED the existing per-module sales into `Sale`, keeping each
+ * one's ORIGINAL id. So today `Sale` holds one row — `cmsjh3kly0002uve8ajkvs2ji`
+ * — whose twin is still live in `BakerySale`. Summing both tables without this
+ * guard bills the owner's one real customer TWICE for the same Rs. 5,000:
+ *
+ *     correct : 5,000 (bakery) + 6,000 (milk)             = 11,000
+ *     naive   : 5,000 + 6,000 + 5,000 (the A copy)        = 16,000   ✗
+ *
+ * Matching by id is exact rather than heuristic: a genuinely new unified sale
+ * gets a fresh cuid and can never collide with a per-module row. It is also
+ * SELF-HEALING — it excludes 1 row today and 0 once S5 removes the duplicate, so
+ * there is nothing to remember to undo.
+ *
+ * Written as a NOT EXISTS pair in raw SQL because Prisma cannot express
+ * "id not in another table" in a `where` — and doing it in JS would mean
+ * fetching the legacy ids first, which is two extra round trips at ~1.1s each on
+ * a path the customers hub hits for every request.
+ */
+const NOT_A_MIGRATION_COPY = Prisma.sql`
+  NOT EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
+  AND NOT EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
+`;
+
+/** One row of the unified-sale aggregate. `total` is text — see below. */
+type UnifiedBilledRow = { customerId: string; total: string; last: Date | null };
+
+/**
+ * `sum(...)::text`, deliberately. A bare numeric comes back from a raw query as
+ * whatever the driver decides; casting to text and rebuilding a `Prisma.Decimal`
+ * from the string keeps money exact and keeps every branch of this file on the
+ * same type (Gotcha 2 — no float ever touches a rupee).
+ */
+function unifiedBilledFor(customerId: string): Promise<UnifiedBilledRow[]> {
+  return prisma.$queryRaw<UnifiedBilledRow[]>`
+    SELECT s."customerId"                            AS "customerId",
+           coalesce(sum(s."totalAmount"), 0)::text   AS total,
+           max(s."saleDate")                         AS last
+    FROM "Sale" s
+    WHERE s."customerId" = ${customerId}
+      AND ${NOT_A_MIGRATION_COPY}
+    GROUP BY s."customerId"
+  `;
+}
+
+/** The same aggregate for many customers (or all, when `ids` is null). */
+function unifiedBilledGrouped(ids: string[] | null): Promise<UnifiedBilledRow[]> {
+  return ids === null
+    ? prisma.$queryRaw<UnifiedBilledRow[]>`
+        SELECT s."customerId"                          AS "customerId",
+               coalesce(sum(s."totalAmount"), 0)::text AS total,
+               max(s."saleDate")                       AS last
+        FROM "Sale" s
+        WHERE ${NOT_A_MIGRATION_COPY}
+        GROUP BY s."customerId"
+      `
+    : prisma.$queryRaw<UnifiedBilledRow[]>`
+        SELECT s."customerId"                          AS "customerId",
+               coalesce(sum(s."totalAmount"), 0)::text AS total,
+               max(s."saleDate")                       AS last
+        FROM "Sale" s
+        WHERE s."customerId" = ANY(${ids}::text[])
+          AND ${NOT_A_MIGRATION_COPY}
+        GROUP BY s."customerId"
+      `;
+}
 
 /** Raw Decimal balance. Serialize before it leaves a route handler. */
 export type CustomerBalance = {
@@ -106,15 +177,22 @@ export async function getCustomerBalance(
   const beverage = await prisma.beverageSale.aggregate({ where, ...money });
   const bakery = await prisma.bakerySale.aggregate({ where, ...money });
   const milk = await prisma.milkSale.aggregate({ where, ...money });
+  // The unified bill. One statement, and it excludes migration A's copy —
+  // see NOT_A_MIGRATION_COPY.
+  const unified = await unifiedBilledFor(customerId);
   const payments = await prisma.customerPayment.aggregate({
     where,
     _sum: { amount: true },
     _max: { paymentDate: true },
   });
 
+  const unifiedTotal = unified[0] ? new Prisma.Decimal(unified[0].total) : ZERO;
+  const unifiedLast = unified[0]?.last ?? null;
+
   const totalBilled = sumOrZero(beverage._sum.totalAmount)
     .add(sumOrZero(bakery._sum.totalAmount))
-    .add(sumOrZero(milk._sum.totalAmount));
+    .add(sumOrZero(milk._sum.totalAmount))
+    .add(unifiedTotal);
 
   const totalPaid = sumOrZero(payments._sum.amount);
 
@@ -123,8 +201,11 @@ export async function getCustomerBalance(
     totalPaid,
     outstanding: totalBilled.sub(totalPaid),
     lastSaleDate: laterOf(
-      laterOf(beverage._max.saleDate, bakery._max.saleDate),
-      milk._max.saleDate
+      laterOf(
+        laterOf(beverage._max.saleDate, bakery._max.saleDate),
+        milk._max.saleDate
+      ),
+      unifiedLast
     ),
     lastPaymentDate: payments._max.paymentDate,
   };
@@ -188,12 +269,20 @@ export async function getCustomerBalances(
     _sum: { totalAmount: true },
     _max: { saleDate: true },
   });
+  const unified = await unifiedBilledGrouped(customerIds);
   const payments = await prisma.customerPayment.groupBy({
     by: ["customerId"],
     where,
     _sum: { amount: true },
     _max: { paymentDate: true },
   });
+
+  for (const row of unified) {
+    const current = balances.get(row.customerId);
+    if (!current) continue;
+    current.totalBilled = current.totalBilled.add(new Prisma.Decimal(row.total));
+    current.lastSaleDate = laterOf(current.lastSaleDate, row.last);
+  }
 
   for (const group of [...beverage, ...bakery, ...milk]) {
     const current = balances.get(group.customerId);
@@ -250,12 +339,21 @@ export async function getTotalOutstanding(): Promise<Prisma.Decimal> {
   const beverage = await prisma.beverageSale.groupBy({ by: ["customerId"], ...money });
   const bakery = await prisma.bakerySale.groupBy({ by: ["customerId"], ...money });
   const milk = await prisma.milkSale.groupBy({ by: ["customerId"], ...money });
+  // `null` = every customer: a customer with no rows contributes 0 to a sum of
+  // positives, so enumerating ids first would be a wasted round trip.
+  const unified = await unifiedBilledGrouped(null);
   const payments = await prisma.customerPayment.groupBy({
     by: ["customerId"],
     _sum: { amount: true },
   });
 
   const net = new Map<string, Prisma.Decimal>();
+  for (const row of unified) {
+    net.set(
+      row.customerId,
+      (net.get(row.customerId) ?? ZERO).add(new Prisma.Decimal(row.total))
+    );
+  }
   for (const group of [...beverage, ...bakery, ...milk]) {
     net.set(
       group.customerId,
@@ -283,8 +381,14 @@ export async function getTotalOutstanding(): Promise<Prisma.Decimal> {
 export type LedgerEntry = {
   id: string;
   kind: "sale" | "payment";
-  /** Which module a sale came from; absent on payments. */
-  module: "beverages" | "bakery" | "milk" | null;
+  /**
+   * Which module a sale came from; absent on payments.
+   *
+   * `"unified"` is a CROSS-MODULE bill and deliberately not one of the three:
+   * it may hold beverage, bakery and milk lines at once, so forcing it into a
+   * single module would mislabel it. Its `label` names the shops instead.
+   */
+  module: "beverages" | "bakery" | "milk" | "unified" | null;
   date: Date;
   /** Positive for a sale (increases debt), negative for a payment. */
   amount: Prisma.Decimal;
@@ -345,6 +449,34 @@ export async function getCustomerActivity(customerId: string) {
       ratePerLiter: true,
     },
   });
+  /**
+   * The unified bills. Fetched through Prisma rather than the raw aggregate the
+   * balance paths use, because the ledger needs whole rows — and the
+   * migration-A exclusion is FREE here: `beverage` and `bakery` above are
+   * already this customer's complete legacy sets, so their ids ARE the
+   * exclusion list. No extra query, no NOT EXISTS. See NOT_A_MIGRATION_COPY.
+   */
+  const legacyIds = new Set([
+    ...beverage.map((sale) => sale.id),
+    ...bakery.map((sale) => sale.id),
+  ]);
+  const unifiedRows = await prisma.sale.findMany({
+    where,
+    select: {
+      id: true,
+      saleDate: true,
+      totalAmount: true,
+      notes: true,
+      createdAt: true,
+      _count: { select: { items: true } },
+      // moduleKey only — a ledger row says WHICH shops the bill touched. No
+      // money is read off the lines; the bill's stored totalAmount is the
+      // authority, exactly as for every other row here.
+      items: { select: { moduleKey: true } },
+    },
+  });
+  const unified = unifiedRows.filter((sale) => !legacyIds.has(sale.id));
+
   const payments = await prisma.customerPayment.findMany({
     where,
     select: {
@@ -357,7 +489,29 @@ export async function getCustomerActivity(customerId: string) {
     },
   });
 
-  return { beverage, bakery, milk, payments };
+  return { beverage, bakery, milk, unified, payments };
+}
+
+/** "Beverages · Milk" — which shops one unified bill drew from, in fixed order. */
+export function unifiedSaleModules(items: { moduleKey: string }[]): string[] {
+  const order = ["beverages", "bakery", "milk"];
+  const present = new Set(items.map((item) => item.moduleKey));
+  return [
+    ...order.filter((key) => present.has(key)),
+    ...Array.from(present).filter((key) => !order.includes(key)).sort(),
+  ];
+}
+
+const MODULE_WORD: Record<string, string> = {
+  beverages: "Beverages",
+  bakery: "Bakery",
+  milk: "Milk",
+};
+
+/** The ledger/purchase label for a unified bill: "Sale · Beverages · Milk". */
+export function unifiedSaleLabel(items: { moduleKey: string }[]): string {
+  const modules = unifiedSaleModules(items).map((key) => MODULE_WORD[key] ?? key);
+  return modules.length > 0 ? `Sale · ${modules.join(" · ")}` : "Sale";
 }
 
 /**
@@ -375,7 +529,12 @@ export function summariseActivity(activity: CustomerActivity): CustomerBalance {
   let totalBilled = ZERO;
   let lastSaleDate: Date | null = null;
 
-  for (const sale of [...activity.beverage, ...activity.bakery, ...activity.milk]) {
+  for (const sale of [
+    ...activity.beverage,
+    ...activity.bakery,
+    ...activity.milk,
+    ...activity.unified,
+  ]) {
     totalBilled = totalBilled.add(sale.totalAmount);
     lastSaleDate = laterOf(lastSaleDate, sale.saleDate);
   }
@@ -405,7 +564,7 @@ export function summariseActivity(activity: CustomerActivity): CustomerBalance {
  * could reshuffle between reloads.
  */
 export function buildLedger(activity: CustomerActivity): LedgerEntry[] {
-  const { beverage, bakery, milk, payments } = activity;
+  const { beverage, bakery, milk, unified, payments } = activity;
 
   type Unsorted = Omit<LedgerEntry, "runningBalance"> & { createdAt: Date };
 
@@ -438,6 +597,16 @@ export function buildLedger(activity: CustomerActivity): LedgerEntry[] {
       amount: sale.totalAmount,
       label: `Milk sale · ${sale.liters.toString()} L`,
       itemCount: null,
+      createdAt: sale.createdAt,
+    })),
+    ...unified.map((sale) => ({
+      id: sale.id,
+      kind: "sale" as const,
+      module: "unified" as const,
+      date: sale.saleDate,
+      amount: sale.totalAmount,
+      label: unifiedSaleLabel(sale.items),
+      itemCount: sale._count.items,
       createdAt: sale.createdAt,
     })),
     ...payments.map((payment) => ({

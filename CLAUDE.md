@@ -303,6 +303,18 @@ produced `3 × Rs. 276 ... Rs. 827`. A green build could never have shown it.
 is 34 characters and overflows a 58mm roll, while `2 cottons × 380.00` fits and the currency is
 unambiguous from the total on the same line.)*
 
+#### Two more line-budget rules, both found by printing a real bill (2026-08-14)
+
+- **🥛 LITRES PRINT AS `L`, not "litres".** `12.5 litres × 12… Rs. 1,500.00` truncated the RATE at 32
+  characters; `12.5 L × 120.00   Rs. 1,500.00` fits. A truncated unit price is the same failure the
+  paise rule exists to prevent — the customer cannot check the arithmetic. The SCREEN still says
+  "litres"; it has the room. In `formatQuantity`, `components/receipt/ReceiptDocument.tsx`.
+- **The `Subtotal` row prints ONLY when it differs from `TOTAL`.** A subtotal exists to explain a
+  discount; with none it repeats the total, spending a line and inviting the customer to ask what the
+  difference is. Every unified sale is in this case by construction (that endpoint has no discounts),
+  as is any per-module bill sold at full price. A discounted bill still prints Subtotal → Discount →
+  TOTAL, unchanged. Matches the owner's answer on the mixed receipt: **one flat list, one total.**
+
 ### Receipt printing (thermal) — ⚠️ 58mm SUPERSEDED PENDING CONFIRMATION (2026-08-13)
 
 > **🔴 UPDATE 2026-08-13 — DESIGN THE RECEIPT FOR 80mm.**
@@ -379,7 +391,10 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
     /sales/[id]/route.ts   → UNIFIED sale GET one + DELETE (S4.1). ⚠️ The DELETE RESTORES
                              STOCK — and normalises `Number(item.quantity)` first, because
                              SaleItem.quantity is Decimal and computeStockDeltas takes a
-                             number. No PATCH yet (edit lands with the screen, CHECKLIST #8).
+                             number. No PATCH yet (edit is still CHECKLIST #8).
+  /receipt/sale/[id]       → the UNIFIED receipt (S4.2). Sibling of /receipt/[module]/[id],
+                             not a third module value — it reads a different table.
+  /(dashboard)/sales/      → the unified till: list + /sales/new (S4.2). ZINC accent.
   /(auth)/login            → Owner login page → /login
   /(dashboard)             → layout group ONLY, adds nothing to the URL
     /layout.tsx            → Protected layout with nav
@@ -669,12 +684,16 @@ model User {
 > repo. A full ground-truth audit on 2026-08-11 re-confirmed every claim below.
 > **If a session brief and this section disagree, run the grep. The grep wins.**
 
-> **⚠️ UPDATE 2026-08-14 — PARTIAL SWITCH-OVER.** The unified API is **LIVE**: `POST /api/sales`
-> writes `Sale`/`SaleItem` (S3, `90e8609`), and `GET /api/sales`, `GET`/`DELETE /api/sales/[id]`
-> landed with S4.1. The old per-module create routes are **ALSO still live**, and
-> **reports / receipt / receivables STILL READ THE OLD TABLES ONLY** — so a unified sale does not yet
-> appear in a customer's outstanding balance, in any report, or on a printed receipt. That read side
-> is S4.2 (receivables + receipt) and S6 (reports). Both paths coexist **BY DESIGN** until then.
+> **⚠️ UPDATE 2026-08-14 — PARTIAL SWITCH-OVER.** The unified path is **LIVE END TO END**:
+> `POST /api/sales` (S3, `90e8609`), `GET`/`DELETE` (S4.1), and the SCREEN at `/sales` + `/sales/new`
+> with its own receipt at `/receipt/sale/[id]` (S4.2). **`lib/receivables.ts` now counts unified
+> sales**, so a bill rung on the new till reaches the customer's outstanding balance.
+>
+> **STILL READING THE OLD TABLES ONLY: REPORTS** (`lib/reports.ts` — revenue, counts, trend, top
+> products) **and the CSV export.** A unified sale therefore appears in balances and on a receipt but
+> **not in any report figure** until the S6 repoint. The old per-module create routes and screens are
+> also still live. Both paths coexist **BY DESIGN** until S9.
+>
 > **The grep below now returns matches — that is EXPECTED, not the dormant state.** Once any
 > unified sale is created, Migration A's row is no longer the only `Sale` row.
 
@@ -697,7 +716,7 @@ and this section is out of date; update it in the same commit (see the process r
 | Create a sale | `tx.beverageSale.create` / `tx.bakerySale.create` | per module; a mixed-category sale is **rejected** by `loadSaleProducts` |
 | List / read / update | `prisma.{beverage,bakery}Sale.*` | `PATCH` exists and is server-verified but has **no UI** |
 | Sale form | `NewSaleForm` at `/beverages/new-sale` and `/bakery/new-sale` | posts to `SaleModule.apiBase` |
-| **`/sales`** (the SCREEN) | **does not exist** | no such page in `app/(dashboard)/`. The API `app/api/sales/` DOES exist — S4.2 builds the screen |
+| **`/sales`** (the SCREEN) | **LIVE since S4.2** | `app/(dashboard)/sales/` — list + `/sales/new` till. Zinc accent: a cross-module bill claims no module colour |
 | Reports revenue | `SUM("totalAmount") FROM "BeverageSale" / "BakerySale"` | sale-level, NOT `Σ netLineTotal` |
 | Reports top products | `prisma.{beverage,bakery}SaleItem.groupBy` on `lineTotal` | per-module item tables |
 | Receipt | `lib/receipt.ts` → the same two tables | correct: it prints what the app can actually create |
@@ -1493,7 +1512,7 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **S3** | unified `POST /api/sales` — beverages + bakery, milk designed-for | ✅ `90e8609` · **21/21** |
 | **Milk product + bridge** | `prod_milk` + delivery-to-stock, all 4 delivery paths, reconcile-by-delta | ✅ `cbcd2eb` · **22/22** |
 | **S4.1** | `GET /api/sales` · `GET`+`DELETE /api/sales/[id]` (delete RESTORES stock) · hooks | ✅ 2026-08-14 · **20/20** |
-| **S4.2** | unified sale SCREEN (`/sales`, `/sales/new`) + unified receipt + receivables bridge | ⬜ Todo |
+| **S4.2** | unified sale SCREEN (`/sales`, `/sales/new`) + unified receipt + receivables bridge | ✅ 2026-08-14 · **13/13 + browser** |
 | **S4.3** | **milk cutover** — `/milk/sales` read-only, milk stock becomes authoritative | ⬜ Todo |
 | **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ⬜ Todo |
 | **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ⬜ Todo |
@@ -1914,10 +1933,9 @@ schemas, one of them empty.
 
 **What REMAINS for this item:**
 
-1. **The unified sale SCREEN** (S4.2) — ~~plus `GET /api/sales`~~ **the API half shipped in S4.1**.
-   Still to build: `/sales` + `/sales/new`, the unified receipt, and the receivables bridge.
-   ⚠️ **A unified sale is still invisible to `lib/receivables.ts`, reports, the receipt and CSV** —
-   they all read the OLD tables. See #6.
+1. ~~The unified sale SCREEN~~ ✅ **SHIPPED in S4.2** — `/sales`, `/sales/new`,
+   `/receipt/sale/[id]`, and the receivables bridge. ⚠️ **A unified sale is STILL invisible to
+   REPORTS and the CSV export** (`lib/reports.ts` reads the old tables) — that is S6 / item #6.
 2. **The milk cutover** (S4.3) — route milk selling through `/api/sales` instead of
    `POST /api/milk/sales`. This is what **makes milk stock authoritative** and closes the provisional
    warning in the "🥛 Milk stock" section (today `/milk/sales` does not decrement, so it reads high).
@@ -1980,7 +1998,18 @@ relaxed** — the unified endpoint got its own decimal-capable `unifiedSaleCreat
 — the old tables are the only copy left to reconcile against, and the one real sale currently lives
 in one of them. See the data-count warning under #2 before dropping anything.
 
-#### `[ ]` **6. `lib/receivables.ts` still sums `BeverageSale` + `BakerySale`**
+#### `[~]` **6. `lib/receivables.ts` — now sums the UNIFIED `Sale` TOO (S4.2), old tables still there**
+
+> **UPDATED 2026-08-14.** Receivables counts `BeverageSale` + `BakerySale` + `MilkSale` **+ `Sale`**,
+> so a unified bill reaches the customer's balance. **Migration A's copy is excluded by id** —
+> `NOT_A_MIGRATION_COPY` in `lib/receivables.ts`. Without it Saif reads 16,000 instead of 11,000,
+> because the `Sale` row carries the SAME id as the `BakerySale` row it was copied from. The filter
+> is self-healing (1 row today, 0 after S5) — do not remove it before S5.
+>
+> **`lib/reports.ts` is the part that has NOT moved**: revenue, counts, trend and top products still
+> read the old tables only, so unified sales are missing from every report figure. That is S6.
+>
+> The original note below still describes the old-table dependency Migration B has to deal with.
 
 **"Dormant" understates it — corrected 2026-08-11.** Receivables was removed from the **UI** in
 batch 2, not from the **code**. The module has **16 Prisma calls** (8 of them against the old sale

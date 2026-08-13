@@ -100,7 +100,10 @@ export function ProductPicker({
                 {group.options.map((option) => (
                   <CommandItem
                     key={option.product.id}
-                    value={option.label}
+                    // `searchValue`, not `label`: it is the label PLUS the
+                    // product's own name, so typing what is written on the
+                    // bottle finds the row. See lib/sale-catalog.ts.
+                    value={option.searchValue}
                     onSelect={() => {
                       onSelect(option);
                       setOpen(false);

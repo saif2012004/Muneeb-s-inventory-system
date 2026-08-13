@@ -55,10 +55,31 @@ export const MODULE_DOT_CLASS: Record<string, string> = {
   beverages: "bg-blue-600",
   bakery: "bg-amber-600",
   milk: "bg-emerald-600",
+  /**
+   * A cross-module bill wears ZINC, not one of the three accents. The Design
+   * System's rule is never to mix module accents, and a bill that may hold
+   * beverage, bakery and milk lines has no single one to claim — painting it
+   * blue would say "beverages sale" about a row that is not.
+   */
+  unified: "bg-zinc-900",
 };
 
 export const MODULE_LABEL: Record<string, string> = {
   beverages: "Beverages",
   bakery: "Bakery",
   milk: "Milk",
+  unified: "Sale",
+};
+
+/**
+ * Where a purchase row links, or null for one with no detail screen.
+ *
+ * A map rather than `/${module}`: milk has no sale detail page, and "unified"
+ * would otherwise build `/unified`, which does not exist.
+ */
+export const MODULE_HREF: Record<string, string | null> = {
+  beverages: "/beverages",
+  bakery: "/bakery",
+  milk: null,
+  unified: "/sales",
 };

@@ -43,6 +43,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { SALE_DETAIL_SELECT } from "@/lib/sales";
+import { UNIFIED_SALE_DETAIL_SELECT } from "@/lib/unified-sales";
 import { getSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/settings-display";
 import { serializeMoney } from "@/lib/serialize";
@@ -53,6 +54,12 @@ export type ReceiptModuleKey = "beverages" | "bakery";
 export function isReceiptModuleKey(value: string): value is ReceiptModuleKey {
   return value === "beverages" || value === "bakery";
 }
+
+/**
+ * What a receipt was printed FROM. `"sale"` is the unified bill (S4.2), which
+ * lives in its own table and can hold lines from all three shops at once.
+ */
+export type ReceiptSourceKey = ReceiptModuleKey | "sale";
 
 export type ReceiptLine = {
   id: string;
@@ -67,7 +74,7 @@ export type ReceiptLine = {
 };
 
 export type ReceiptData = {
-  moduleKey: ReceiptModuleKey;
+  moduleKey: ReceiptSourceKey;
   moduleLabel: string;
   saleId: string;
   /** ISO-8601 UTC. Format with `formatDate` — Karachi, DD/MM/YYYY (Gotcha 4). */
@@ -156,6 +163,78 @@ export async function loadReceipt(
       detail: composeDetail(item.product),
       unit: item.product.unit,
       quantity: item.quantity,
+      unitPrice: serializeMoney(item.unitPrice),
+      discountPercent: serializeMoney(item.discountPercent),
+      lineTotal: serializeMoney(item.lineTotal),
+    })),
+    subtotal: serializeMoney(subtotal),
+    discountPercent: serializeMoney(sale.discountPercent),
+    totalAmount: serializeMoney(sale.totalAmount),
+    notes: sale.notes,
+    settings,
+  };
+}
+
+/**
+ * Load one UNIFIED sale, ready to print (S4.2).
+ *
+ * ---------------------------------------------------------------------------
+ * ONE FLAT LIST, ONE TOTAL — the owner's decision, 2026-08-14
+ * ---------------------------------------------------------------------------
+ * A mixed bill prints its lines in the order they were rung up, with a single
+ * TOTAL and **no per-category subtotals**. That is a deliberate answer to a
+ * question that was asked (Q1), not an omission: grouping would add ~2 printed
+ * lines per shop present and would reorder the bill away from how it was typed.
+ * Per-product visibility is a REPORTING need and is answered on screen in S6,
+ * not on the customer's receipt.
+ *
+ * `ReceiptDocument` needs no change for any of this — `ReceiptData` was already
+ * shaped like a unified sale (see the note at the top of this file), so the same
+ * renderer prints both. The unified endpoint has no discounts, so
+ * `discountPercent` is 0 and the discount rows simply do not render; subtotal
+ * therefore equals the stored total, and the subtotal is still DERIVED here in
+ * Decimal rather than in the browser.
+ *
+ * `netLineTotal` is deliberately NOT printed. With no discount it is equal to
+ * `lineTotal` to the paise, so printing both would be two identical columns on a
+ * roll where every character is budgeted.
+ *
+ * QUERY BUDGET: 2 round trips — the sale, then the settings row — awaited in
+ * SERIES, never Promise.all (connection_limit=1).
+ */
+export async function loadUnifiedReceipt(
+  saleId: string
+): Promise<ReceiptData | null> {
+  const sale = await prisma.sale.findUnique({
+    where: { id: saleId },
+    select: UNIFIED_SALE_DETAIL_SELECT,
+  });
+  if (!sale) return null;
+
+  // Sum in Decimal, then serialize once — never add money as JS numbers.
+  const subtotal = sale.items.reduce(
+    (total, item) => total.add(item.lineTotal),
+    new Prisma.Decimal(0)
+  );
+
+  const settings = await getSettings();
+
+  return {
+    moduleKey: "sale",
+    // Not "Beverages"/"Bakery": this bill may be all three, so it names itself
+    // by what it IS rather than by a shop it might not belong to.
+    moduleLabel: "Sale",
+    saleId: sale.id,
+    saleDate: sale.saleDate.toISOString(),
+    customerName: sale.customer.name,
+    lines: sale.items.map((item) => ({
+      id: item.id,
+      name: item.product.name,
+      detail: composeDetail(item.product),
+      unit: item.product.unit,
+      // `quantity` is Decimal(10,2) on this table (Migration C) — `Number()` it
+      // here, at the boundary, or `12.5` prints as an object (Gotcha 2).
+      quantity: Number(item.quantity),
       unitPrice: serializeMoney(item.unitPrice),
       discountPercent: serializeMoney(item.discountPercent),
       lineTotal: serializeMoney(item.lineTotal),
