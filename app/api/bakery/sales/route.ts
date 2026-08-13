@@ -213,6 +213,24 @@ export async function POST(request: Request): Promise<NextResponse> {
         },
         select: SALE_DETAIL_SELECT,
       });
+    }, {
+      /**
+       * 🔴 NOT Prisma's 5s default. Measured failure, 2026-08-14: this
+       * transaction took **5,327 ms** against the live database and died with
+       * `P2028 Transaction already closed`, turning a perfectly valid sale into
+       * a 500 on the owner's main screen.
+       *
+       * It is not slow code — it is the ~1.1s-per-round-trip floor from the
+       * function/database region split (CLAUDE.md, CHECKLIST #14). A stock
+       * update plus a nested create plus the detail read-back is comfortably
+       * three round trips, so 5s was never a safe budget.
+       *
+       * Matches the PATCH route below and the unified `POST /api/sales`, both of
+       * which already set this. Widening a timeout cannot change what is
+       * written: the same rows commit, or none do.
+       */
+      timeout: 15_000,
+      maxWait: 5_000,
     });
 
     return ok(serialize(sale), 201);
