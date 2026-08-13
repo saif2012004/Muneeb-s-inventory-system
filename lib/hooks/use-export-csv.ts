@@ -26,6 +26,7 @@ import { SESSION_EXPIRED_MESSAGE, redirectToLogin } from "@/lib/api-client";
 
 const EXPORT_TIMEOUT_MS = 60_000;
 
+/** Must stay in step with `EXPORT_TYPES` in `app/api/reports/export/route.ts`. */
 export type ExportType =
   | "beverages_sales"
   | "bakery_sales"
@@ -33,7 +34,11 @@ export type ExportType =
   | "milk_purchases"
   | "milk_sales"
   | "farmer_balances"
-  | "customer_balances";
+  | "customer_balances"
+  // S6: the unified bill, and per-product units sold (#20) with milk on its
+  // own line.
+  | "sales"
+  | "product_sales";
 
 export type ExportOptions = {
   type: ExportType;

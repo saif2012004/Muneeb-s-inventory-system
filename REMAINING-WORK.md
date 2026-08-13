@@ -123,12 +123,16 @@ it retires with the other per-module paths at S9.
 predates the bridge, so it was never added. Everything since the bridge is correct; the owner sets
 the true opening litres at handover, like every other shelf count.
 
-### 🔴 KNOWN PROVISIONAL STATE (important)
+### ✅ CLOSED 2026-08-14 — reports read the unified tables too
 
-**REPORTS still read the OLD tables.** `lib/reports.ts` (revenue, counts, trend, top products) and
-the CSV export have not been repointed, so a sale rung up on the unified till appears in the
-customer's balance and on its receipt but in **no report figure**. Closed by S6. Receivables was
-bridged in S4.2 and is correct.
+~~REPORTS still read the OLD tables.~~ **S6 repointed them.** Revenue, counts, trend, top products
+and the CSV exports all read **old tables ∪ unified lines**, per-module revenue is
+`Σ netLineTotal` grouped by `moduleKey`, and migration A's duplicate is excluded by the one shared
+rule in `lib/unified-sales.ts`. Verified 12/12, including that the modules still sum exactly to the
+combined total and that the baseline reads 11,000 rather than 16,000.
+
+**What is left of S6:** the **on-screen per-product table**. `getProductSales()` exists and the
+`product_sales` CSV export ships it; the reports UI has not been given a place to show it yet.
 
 ---
 
@@ -182,7 +186,7 @@ the unified screen is proven, migrate the real sales into the unified `Sale`/`Sa
 so reporting can read from one place. **This touches real money data — maximum care, verified
 backup first, human-approved apply, reconcile to the paise.**
 
-### S6 — Reporting repoint + PER-PRODUCT sales visibility
+### ✅ S6 — MOSTLY DONE 2026-08-14 (on-screen per-product table still to build)
 
 Point the reports/dashboard at the unified `Sale`/`SaleItem` tables. **The owner wants
 PER-PRODUCT sales visibility** — not just per-category totals, but how much of each product

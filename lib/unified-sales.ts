@@ -183,6 +183,31 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
   },
 } as const;
 
+/**
+ * 🔴 THE MIGRATION-A DEDUPE, IN ONE PLACE. Every aggregate over `Sale` needs it.
+ *
+ * Migration A COPIED the pre-existing per-module sales into `Sale`, keeping each
+ * one's ORIGINAL id. So `Sale` holds one row — `cmsjh3kly0002uve8ajkvs2ji` —
+ * whose twin is still live in `BakerySale`. Any total that sums `Sale` ON TOP OF
+ * the old tables counts that Rs. 5,000 twice: the customer's balance, the
+ * period's revenue, the module's revenue, a product's units sold.
+ *
+ * Matching by id is exact rather than heuristic — a genuinely new unified sale
+ * gets a fresh cuid and cannot collide — and it is SELF-HEALING: it excludes 1
+ * row today and 0 once S5 folds the old rows in, so there is nothing to remember
+ * to undo.
+ *
+ * ⚠️ THE SQL ASSUMES THE `Sale` TABLE IS ALIASED `s`. Every caller aliases it
+ * that way; if you write a query that does not, alias it rather than editing
+ * this — one definition is the point. Lives here rather than in
+ * `lib/receivables.ts` or `lib/reports.ts` because BOTH need it and a rule with
+ * two copies is a rule that will disagree with itself.
+ */
+export const NOT_A_MIGRATION_COPY = Prisma.sql`
+  NOT EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
+  AND NOT EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
+`;
+
 // ---------------------------------------------------------------------------
 // Listing (S4)
 // ---------------------------------------------------------------------------

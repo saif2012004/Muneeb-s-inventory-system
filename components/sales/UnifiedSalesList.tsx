@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { DeleteSaleDialog } from "@/components/sales/DeleteSaleDialog";
 import { UnifiedSaleLineItems } from "@/components/sales/UnifiedSaleLineItems";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,9 +60,9 @@ const MODULE_CHIP: Record<string, { class: string; label: string }> = {
  * the row says which — from the lines' snapshotted `moduleKey`s, in a fixed
  * order the server sets, never from the products' categories today.
  *
- * ⚠️ NO Export CSV button, deliberately: `/api/reports/export` has no unified
- * type yet — that lands with the S6 reporting repoint. A button that produced an
- * empty or wrong file would be worse than no button.
+ * Export CSV writes the `sales` type (added in S6): one row per BILL, with the
+ * shops it drew from, so a spreadsheet can sum the Total column without
+ * double-counting a mixed bill.
  *
  * Accent is ZINC throughout: the Design System forbids mixing module accents on
  * one screen, and a cross-module bill has no single one.
@@ -120,12 +121,24 @@ export function UnifiedSalesList() {
       description="Every bill, across beverages, bakery and milk."
       accent="zinc"
       action={
-        <Button asChild className="h-11 rounded-lg bg-zinc-900 hover:bg-zinc-800">
-          <Link href="/sales/new">
-            <Plus className="mr-2 size-4" aria-hidden />
-            New sale
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          {/* Exports exactly what the filters currently show, same contract as
+              the per-module lists. Landed with S6 — before that there was no
+              unified export type and a button would have produced a wrong file. */}
+          <ExportCsvButton
+            type="sales"
+            dateFrom={dateFrom || undefined}
+            dateTo={dateTo || undefined}
+            label="Export"
+            disabled={invalidRange}
+          />
+          <Button asChild className="h-11 rounded-lg bg-zinc-900 hover:bg-zinc-800">
+            <Link href="/sales/new">
+              <Plus className="mr-2 size-4" aria-hidden />
+              New sale
+            </Link>
+          </Button>
+        </div>
       }
     />
   );

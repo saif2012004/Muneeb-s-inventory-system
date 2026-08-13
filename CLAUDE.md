@@ -689,10 +689,11 @@ model User {
 > with its own receipt at `/receipt/sale/[id]` (S4.2). **`lib/receivables.ts` now counts unified
 > sales**, so a bill rung on the new till reaches the customer's outstanding balance.
 >
-> **STILL READING THE OLD TABLES ONLY: REPORTS** (`lib/reports.ts` — revenue, counts, trend, top
-> products) **and the CSV export.** A unified sale therefore appears in balances and on a receipt but
-> **not in any report figure** until the S6 repoint. The old per-module create routes and screens are
-> also still live. Both paths coexist **BY DESIGN** until S9.
+> **REPORTS WERE REPOINTED IN S6 (2026-08-14).** Revenue, counts, trend, top products and the CSV
+> exports all read **old tables ∪ unified lines**, so a till bill appears everywhere. Per-module
+> revenue is **`Σ netLineTotal` grouped by `moduleKey`** — never a sale's `totalAmount`, which would
+> attribute a mixed bill entirely to one shop. The old per-module create routes and screens are still
+> live and their history is still counted; both paths coexist **BY DESIGN** until S9.
 >
 > **The grep below now returns matches — that is EXPECTED, not the dormant state.** Once any
 > unified sale is created, Migration A's row is no longer the only `Sale` row.
@@ -1515,7 +1516,7 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **S4.2** | unified sale SCREEN (`/sales`, `/sales/new`) + unified receipt + receivables bridge | ✅ 2026-08-14 · **13/13 + browser** |
 | **S4.3** | **milk cutover** — `/milk/sales` history-only, milk stock AUTHORITATIVE | ✅ 2026-08-14 |
 | **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ⬜ Todo |
-| **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ⬜ Todo |
+| **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ✅ 2026-08-14 · **12/12** (on-screen per-product table pending) |
 | **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
 | **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ⬜ Todo |
 | **S9** | remove the old per-module paths, then **Migration B** (drop the 4 old tables) — CHECKLIST #5 | ⬜ Todo |
@@ -1934,8 +1935,8 @@ schemas, one of them empty.
 **What REMAINS for this item:**
 
 1. ~~The unified sale SCREEN~~ ✅ **SHIPPED in S4.2** — `/sales`, `/sales/new`,
-   `/receipt/sale/[id]`, and the receivables bridge. ⚠️ **A unified sale is STILL invisible to
-   REPORTS and the CSV export** (`lib/reports.ts` reads the old tables) — that is S6 / item #6.
+   `/receipt/sale/[id]`, and the receivables bridge. **Reports and the CSV exports followed in S6**,
+   so a till bill now appears in every figure.
 2. ~~The milk cutover~~ ✅ **SHIPPED in S4.3.** Milk sells on the till; `/milk/sales` is a history
    screen that can no longer create one; `POST /api/milk/sales` is unreachable and retires at S9.
    **Milk stock is authoritative** — see the "🥛 Milk stock" section for the opening-number caveat.
@@ -1943,9 +1944,8 @@ schemas, one of them empty.
    `DELETE /api/sales/[id]` restores every line's quantity through the same
    `computeStockDeltas`/`applyStockDeltas` pair the per-module routes use, in one transaction.
    **The unified EDIT (PATCH) is still open** and lands with the screen — CHECKLIST #8.
-4. Old routes redirecting, and reports rewritten to `Σ netLineTotal` by `moduleKey` (that half is
-   tracked as #6 / S6 — reports still group by `beverageSaleItem` / `bakerySaleItem`,
-   `lib/reports.ts:217,224`).
+4. ~~Reports rewritten to `Σ netLineTotal` by `moduleKey`~~ ✅ **SHIPPED in S6.** What remains here
+   is only the old routes redirecting, which is S9.
 
 **Note on the original scope line:** it said `netLineTotal` would be "apportioned pro-rata with the
 residue on the largest line". **That is no longer needed.** S3 ships with NO discounts, so
@@ -2006,8 +2006,9 @@ in one of them. See the data-count warning under #2 before dropping anything.
 > because the `Sale` row carries the SAME id as the `BakerySale` row it was copied from. The filter
 > is self-healing (1 row today, 0 after S5) — do not remove it before S5.
 >
-> **`lib/reports.ts` is the part that has NOT moved**: revenue, counts, trend and top products still
-> read the old tables only, so unified sales are missing from every report figure. That is S6.
+> **`lib/reports.ts` moved in S6** — every figure is now old tables ∪ unified lines, sharing this
+> file's dedupe rule (`NOT_A_MIGRATION_COPY`, which lives in `lib/unified-sales.ts` so both files use
+> ONE definition).
 >
 > The original note below still describes the old-table dependency Migration B has to deal with.
 
@@ -2170,9 +2171,12 @@ lands on the line, not on a second stock column.
 Reports currently answer "how much did Beverages sell". The owner also needs **each product's units
 sold**, not just per-category — and **milk shown as its own line**.
 
-Lands with the S6 reporting repoint (#6): once revenue is `Σ netLineTotal` grouped by
-`SaleItem.moduleKey`, grouping by `productId` is the same query shape, and `moduleKey` is what lets
-milk appear as its own line rather than being folded into a category.
+**PARTLY SHIPPED in S6 (2026-08-14).** `getProductSales()` in `lib/reports.ts` groups by
+`(productId, moduleKey)` across the old item tables AND `SaleItem`, so every product's units and
+revenue are available with **milk on its own line** — exposed today as the **`product_sales` CSV
+export**, and `top-products` now accepts `module=milk` for the first time.
+**What remains: the on-screen per-product table.** The data and the query exist; only the reports UI
+has not been given a place to show them.
 
 ---
 

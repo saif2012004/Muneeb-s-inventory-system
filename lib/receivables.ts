@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { NOT_A_MIGRATION_COPY } from "@/lib/unified-sales";
 
 /**
  * THE RECEIVABLES CALCULATION. One implementation, like reconcileSaleLines.
@@ -48,31 +49,22 @@ import { prisma } from "@/lib/prisma";
 const ZERO = new Prisma.Decimal(0);
 
 /**
- * 🔴 THE UNIFIED SALE IS COUNTED — MINUS MIGRATION A's DUPLICATE. Do not drop
- * this filter, and do not "simplify" it into a plain SUM over `Sale`.
+ * 🔴 THE UNIFIED SALE IS COUNTED — MINUS MIGRATION A's DUPLICATE.
  *
- * Migration A COPIED the existing per-module sales into `Sale`, keeping each
- * one's ORIGINAL id. So today `Sale` holds one row — `cmsjh3kly0002uve8ajkvs2ji`
- * — whose twin is still live in `BakerySale`. Summing both tables without this
- * guard bills the owner's one real customer TWICE for the same Rs. 5,000:
+ * Without the guard the owner's one real customer is billed TWICE for the same
+ * Rs. 5,000, because migration A's `Sale` row carries the id of the `BakerySale`
+ * row it was copied from:
  *
  *     correct : 5,000 (bakery) + 6,000 (milk)             = 11,000
  *     naive   : 5,000 + 6,000 + 5,000 (the A copy)        = 16,000   ✗
  *
- * Matching by id is exact rather than heuristic: a genuinely new unified sale
- * gets a fresh cuid and can never collide with a per-module row. It is also
- * SELF-HEALING — it excludes 1 row today and 0 once S5 removes the duplicate, so
- * there is nothing to remember to undo.
- *
- * Written as a NOT EXISTS pair in raw SQL because Prisma cannot express
- * "id not in another table" in a `where` — and doing it in JS would mean
- * fetching the legacy ids first, which is two extra round trips at ~1.1s each on
- * a path the customers hub hits for every request.
+ * The rule itself lives in `lib/unified-sales.ts` — ONE definition, shared with
+ * `lib/reports.ts`, which needs exactly the same exclusion for revenue. Written
+ * as raw SQL because Prisma cannot express "id not in another table" in a
+ * `where`, and doing it in JS would mean fetching the legacy ids first: two
+ * extra round trips at ~1.1s each on a path the customers hub hits every
+ * request.
  */
-const NOT_A_MIGRATION_COPY = Prisma.sql`
-  NOT EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
-  AND NOT EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
-`;
 
 /** One row of the unified-sale aggregate. `total` is text — see below. */
 type UnifiedBilledRow = { customerId: string; total: string; last: Date | null };

@@ -5,10 +5,18 @@ import { csvAttachmentHeader, toCsv, type CsvValue } from "@/lib/csv";
 import { endOfKarachiDay, formatDate, startOfKarachiDay } from "@/lib/format";
 import { getFarmerBalances } from "@/lib/milk";
 import { prisma } from "@/lib/prisma";
-import { getCustomerBalances } from "@/lib/receivables";
+import { getCustomerBalances, unifiedSaleModules } from "@/lib/receivables";
+import { getProductSales } from "@/lib/reports";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/** Shop names for the unified exports. */
+const MODULE_WORDS: Record<string, string> = {
+  beverages: "Beverages",
+  bakery: "Bakery",
+  milk: "Milk",
+};
 
 /**
  * GET /api/reports/export?type=…&dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD
@@ -41,6 +49,17 @@ const EXPORT_TYPES = [
   "milk_sales",
   "farmer_balances",
   "customer_balances",
+  /**
+   * S6. `sales` is the UNIFIED bill — one row per bill, with the shops it drew
+   * from. `product_sales` is the owner's #20: every product's units and revenue,
+   * with **milk as its own line** because the rows carry `moduleKey`.
+   *
+   * The per-module sale exports above are deliberately kept: they still hold
+   * real history until S5 folds it in, and an export that silently stopped
+   * covering it would be worse than two files.
+   */
+  "sales",
+  "product_sales",
 ] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
@@ -238,6 +257,83 @@ async function buildExport(
           p.itemDescription,
           num(p.amount),
           p.notes,
+        ]),
+      };
+    }
+
+    /**
+     * The UNIFIED bill. One row per bill, with the shops it drew from — a mixed
+     * bill is ONE line reading "Beverages · Milk", not one line per shop, so the
+     * Total column can be summed in a spreadsheet without double-counting.
+     */
+    case "sales": {
+      const sales = await prisma.sale.findMany({
+        where: window ? { saleDate: window } : {},
+        select: {
+          id: true,
+          saleDate: true,
+          totalAmount: true,
+          notes: true,
+          customer: { select: { name: true, type: true } },
+          _count: { select: { items: true } },
+          items: { select: { moduleKey: true } },
+        },
+        orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
+      });
+
+      // Migration A's copy carries the id of the BakerySale row it was copied
+      // from, and that row is exported by `bakery_sales`. Excluding it here is
+      // the same rule lib/receivables.ts and lib/reports.ts apply — otherwise
+      // the two files together report the same Rs. 5,000 twice.
+      const legacy = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT s.id FROM "Sale" s
+        WHERE EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
+           OR EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
+      `;
+      const legacyIds = new Set(legacy.map((row) => row.id));
+
+      return {
+        headers: ["Date", "Customer", "Customer Type", "Shops", "Items", "Total", "Notes"],
+        rows: sales
+          .filter((s) => !legacyIds.has(s.id))
+          .map((s) => [
+            formatDate(s.saleDate),
+            s.customer.name,
+            s.customer.type,
+            unifiedSaleModules(s.items)
+              .map((key) => MODULE_WORDS[key] ?? key)
+              .join(" · "),
+            s._count.items,
+            num(s.totalAmount),
+            s.notes,
+          ]),
+      };
+    }
+
+    /**
+     * PER-PRODUCT SALES (#20) — how much of each product actually sold, across
+     * all three shops, with milk on its own line because the rows carry the
+     * snapshotted `moduleKey`.
+     *
+     * Unlike every other export here this one is AGGREGATED rather than a row
+     * dump, which is the point: the owner asked "how many eggs / buns / litres",
+     * not for a list of bills to add up himself.
+     */
+    case "product_sales": {
+      const rows = await getProductSales({
+        // No window = everything ever. `karachiRange` is not used: the caller's
+        // dateFrom/dateTo already arrive as Karachi day boundaries.
+        start: window?.gte ?? new Date(0),
+        end: window?.lt ?? new Date("2999-12-31T00:00:00.000Z"),
+      });
+      return {
+        headers: ["Product", "Shop", "Unit", "Quantity Sold", "Revenue"],
+        rows: rows.map((row) => [
+          row.productName,
+          MODULE_WORDS[row.moduleKey] ?? row.moduleKey,
+          row.unit,
+          row.quantity,
+          row.revenue,
         ]),
       };
     }
