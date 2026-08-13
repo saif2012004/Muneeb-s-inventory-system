@@ -25,7 +25,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
 import { formatDate, formatLiters, formatPKR } from "@/lib/format";
 import {
-  useCreateMilkSale,
   useDeleteMilkSale,
   useMilkSales,
   useUpdateMilkSale,
@@ -50,7 +49,6 @@ export function MilkSalesList() {
   const [page, setPage] = useState(1);
 
   const salesQuery = useMilkSales({ page });
-  const createSale = useCreateMilkSale();
   const updateSale = useUpdateMilkSale();
   const deleteSale = useDeleteMilkSale();
 
@@ -87,17 +85,53 @@ export function MilkSalesList() {
         action={
           <div className="flex gap-2">
             <ExportCsvButton type="milk_sales" label="Export" />
+            {/* Not a "Record sale" button any more — see the banner below. It
+                links to the till instead, so the muscle memory of coming here
+                to sell milk still lands somewhere useful. */}
             <Button
+              asChild
               className={cn("h-11 rounded-lg", MODULE_BUTTON_CLASS.emerald)}
-              onClick={() => setDialog({ open: true, target: null })}
             >
-              <Plus className="mr-2 size-4" aria-hidden />
-              Record sale
+              <Link href="/sales/new">
+                <Plus className="mr-2 size-4" aria-hidden />
+                New sale
+              </Link>
             </Button>
           </div>
         }
       />
     </>
+  );
+
+  /**
+   * THE CUTOVER NOTICE (S4.3).
+   *
+   * Milk selling moved to the unified till. This screen keeps the sales
+   * recorded BEFORE the move — including the owner's real Rs. 6,000 sale — so
+   * nothing disappears, but it can no longer create one.
+   *
+   * Stated on the screen rather than left to be discovered: an owner who comes
+   * here to sell milk and finds no button needs to be told where it went, in
+   * the same breath.
+   */
+  const cutoverNotice = (
+    <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+      <p className="text-sm font-medium text-zinc-900">
+        Milk sales are now recorded on the till.
+      </p>
+      <p className="mt-1 text-sm text-zinc-600">
+        Selling milk on{" "}
+        <Link
+          href="/sales/new"
+          className="font-medium text-emerald-700 underline underline-offset-2"
+        >
+          the new sale screen
+        </Link>{" "}
+        takes the litres out of milk stock and lets milk share a bill with
+        beverages and bakery. This page keeps the milk sales recorded before the
+        change — they are still yours to correct or export.
+      </p>
+    </div>
   );
 
   if (salesQuery.error instanceof ApiError && salesQuery.error.isSessionExpired) {
@@ -153,6 +187,7 @@ export function MilkSalesList() {
   return (
     <>
       {header}
+      {cutoverNotice}
 
       {/* Totals cover the WHOLE filtered set, not just this page — the server
           aggregates them, so paging never changes the headline figure. */}
@@ -203,15 +238,19 @@ export function MilkSalesList() {
         <EmptyState
           icon={Milk}
           accent="emerald"
-          title="No milk sales yet"
-          description="Record the milk you sell to hotels and shops. It goes straight onto their balance."
+          title="No milk sales recorded here"
+          // Past tense on purpose: this screen is now history. A new sale is
+          // rung up on the till, which is where the action sends them.
+          description="Milk sold before the move to the till would appear here. New milk sales are recorded on the sale screen."
           action={
             <Button
+              asChild
               className={cn("h-11 rounded-lg", MODULE_BUTTON_CLASS.emerald)}
-              onClick={() => setDialog({ open: true, target: null })}
             >
-              <Plus className="mr-2 size-4" aria-hidden />
-              Record sale
+              <Link href="/sales/new">
+                <Plus className="mr-2 size-4" aria-hidden />
+                New sale
+              </Link>
             </Button>
           }
         />
@@ -297,25 +336,34 @@ export function MilkSalesList() {
         onOpenChange={(open) => setDialog((current) => ({ ...current, open }))}
         mode={dialog.target ? "edit" : "create"}
         initial={dialog.target}
-        isPending={createSale.isPending || updateSale.isPending}
+        isPending={updateSale.isPending}
+        /**
+         * EDIT ONLY since the cutover (S4.3). `dialog.target` is never null now
+         * — nothing on this screen opens the dialog without an existing sale.
+         *
+         * Correcting a historical milk sale is deliberately still allowed: these
+         * rows are the owner's real records (including the Rs. 6,000 one), and
+         * removing the ability to fix a typo would strand him with a wrong
+         * number he can see and cannot touch. Editing one moves no stock, which
+         * is exactly as it was before — `MilkSale` never had a product link.
+         */
         onSubmit={(values) => {
           const target = dialog.target;
-          const done = {
-            onSuccess: () => {
-              toast.success(target ? "Sale updated" : "Sale recorded");
-              setDialog({ open: false, target: null });
-            },
-            onError: handleError("Couldn't save the sale."),
-          };
-          if (target) {
-            // customerId is intentionally not sent — the API rejects it and the
-            // dialog does not offer it.
-            const { customerId, ...patch } = values;
-            void customerId;
-            updateSale.mutate({ id: target.id, ...patch }, done);
-          } else {
-            createSale.mutate(values, done);
-          }
+          if (!target) return;
+          // customerId is intentionally not sent — the API rejects it and the
+          // dialog does not offer it.
+          const { customerId, ...patch } = values;
+          void customerId;
+          updateSale.mutate(
+            { id: target.id, ...patch },
+            {
+              onSuccess: () => {
+                toast.success("Sale updated");
+                setDialog({ open: false, target: null });
+              },
+              onError: handleError("Couldn't save the sale."),
+            }
+          );
         }}
       />
 

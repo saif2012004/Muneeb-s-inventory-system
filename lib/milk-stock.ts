@@ -30,14 +30,19 @@ import { applyStockDeltas } from "@/lib/sales";
  * and the bridge only *reads* the resulting litres.
  *
  * ---------------------------------------------------------------------------
- * ⚠️ MILK STOCK IS NOT AUTHORITATIVE YET
+ * ✅ MILK STOCK IS AUTHORITATIVE FROM S4.3 (2026-08-14) — with ONE caveat
  * ---------------------------------------------------------------------------
- * Deliveries ADD stock and unified `/api/sales` lines SUBTRACT it, but the
- * screen the owner actually uses today — `/milk/sales`, backed by
- * `POST /api/milk/sales` — does NOT decrement: `MilkSale` has no product FK and
- * no items table. Until milk selling moves onto `/api/sales` (S4), the milk
- * stock figure will read HIGH. Known and written down, deliberately, rather
- * than silently trusted. See CLAUDE.md.
+ * Both directions are now covered: deliveries ADD (this file) and sales
+ * SUBTRACT, because milk selling moved onto the unified till at S4.3 and
+ * `/milk/sales` can no longer create one. The old `POST /api/milk/sales` route
+ * still exists but is unreachable from the UI; it retires with the other
+ * per-module paths at S9.
+ *
+ * ⚠️ THE CAVEAT IS THE OPENING NUMBER, NOT THE ARITHMETIC. `prod_milk.stock`
+ * started at 0 and the real 250 L delivery predates this bridge, so it was never
+ * added. The figure is correct for everything that has happened SINCE the
+ * bridge; the owner sets the true opening litres at handover, exactly as he does
+ * for every other product's shelf count (CHECKLIST #2).
  */
 
 /**

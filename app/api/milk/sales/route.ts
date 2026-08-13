@@ -18,6 +18,21 @@ export const dynamic = "force-dynamic";
  * with one.
  *
  * ---------------------------------------------------------------------------
+ * 🔴 POST IS RETIRED FROM THE UI — CUTOVER 2026-08-14 (S4.3)
+ * ---------------------------------------------------------------------------
+ * Milk selling moved to the unified till (`POST /api/sales`), which decrements
+ * milk stock; this route does not and never did — `MilkSale` has no product FK.
+ * `/milk/sales` is now a HISTORY screen: it can still list, edit and delete the
+ * rows recorded before the move, but nothing in the app calls this POST.
+ *
+ * It is deliberately NOT deleted. The old per-module paths all retire together
+ * at S9, after a soak, and removing one early would make that rollback partial.
+ * **Do not wire a new screen to it, and do not add a stock decrement here** —
+ * that would duplicate stock logic into a table scheduled to be dropped.
+ *
+ * GET stays fully live: the history screen and the CSV export both read it.
+ *
+ * ---------------------------------------------------------------------------
  * NOT A THIRD SALE MODULE
  * ---------------------------------------------------------------------------
  * This does not reuse `components/sales/`, `lib/sale-modules.ts` or

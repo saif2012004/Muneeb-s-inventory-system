@@ -306,8 +306,12 @@ export function MilkHub() {
               <span className="block text-[15px] font-medium text-zinc-900">
                 Milk sales
               </span>
+              {/* The figures behind this link stopped growing at the S4.3
+                  cutover — new milk sales are rung up on the till. Saying so
+                  here is what stops the total reading as "all milk ever sold"
+                  when it is now "milk sold before the till". */}
               <span className="block text-sm text-zinc-500">
-                Milk you sold to hotels and shops
+                Sold before the till moved · new sales go on the bill
               </span>
             </span>
           </span>

@@ -880,29 +880,29 @@ untouched. See the create/update asymmetry note above, and
   below.
 - Multi-user roles, supplier invoicing, tax/GST.
 
-### 🥛 Milk stock — TRACKED, but NOT AUTHORITATIVE until S4. Do not trust the number yet.
+### 🥛 Milk stock — ✅ AUTHORITATIVE since the S4.3 cutover (2026-08-14)
 
-**Milk is a catalog Product (`prod_milk`, `unit: "litre"`, under `cat_milk` "Milk Shop") and its
-stock moves in two directions:**
+**Milk is a catalog Product (`prod_milk`, `unit: "litre"`, under `cat_milk` "Milk Shop") and both
+directions are now covered:**
 
 | Event | Effect on `prod_milk.stock` |
 |---|---|
 | A farmer delivery is recorded / edited / deleted | **+ / delta / −** the delivery's `totalLiters` — the bridge, `lib/milk-stock.ts` |
-| A milk line on a unified `POST /api/sales` | **−** the litres sold |
-| **A sale on `/milk/sales` (`POST /api/milk/sales`)** | **NOTHING — and this is the gap** |
+| A milk line on the till (`POST /api/sales`) | **−** the litres sold |
+| A unified sale DELETED | **+** the litres restored (S4.1) |
+| ~~A sale on `/milk/sales`~~ | **retired 2026-08-14** — that screen can no longer create a sale |
 
-**⚠️ The screen the owner actually uses today does not decrement milk stock.** `MilkSale` has no
-product FK and no items table (see the docblock in `app/api/milk/sales/route.ts`), and it was
-deliberately NOT changed — Option A was chosen: milk selling moves onto the unified `/api/sales` at
-S4, and `MilkSale` retires with `BeverageSale`/`BakerySale`.
+~~**The screen the owner uses does not decrement milk stock.**~~ **Closed by S4.3.** Milk selling
+moved to the unified till; `/milk/sales` is now a HISTORY screen (list, edit, delete, export) that
+keeps the sales recorded before the move, including the owner's real Rs. 6,000 one. `POST
+/api/milk/sales` still exists but nothing calls it — **do not wire a new screen to it, and do not add
+a stock decrement there**; it retires with the other per-module paths at S9.
 
-**So until S4, milk stock reads HIGH** — deliveries add to it and the owner's current sales screen
-never takes away. **This is a known, deliberate, time-boxed provisional state, written down so the
-figure is not silently trusted.** Do not "fix" it by adding a stock decrement to
-`POST /api/milk/sales`: that duplicates stock logic into a table that is scheduled to be dropped.
-
-**Closing condition:** when S4 routes milk selling through `/api/sales`, delete this warning and the
-number becomes authoritative.
+**⚠️ ONE CAVEAT, AND IT IS ABOUT THE OPENING NUMBER, NOT THE ARITHMETIC.** `prod_milk.stock` started
+at 0 and the real 250 L delivery predates the bridge, so it was never added. Every movement SINCE the
+bridge is correct; the starting point is not a count of the fridge. **The owner sets the true opening
+litres at handover**, exactly as he does for every other product's shelf count (CHECKLIST #2). Until
+then the figure is a running total from zero, not an inventory.
 
 #### The bridge's rules (all four delivery write paths)
 
@@ -1513,17 +1513,17 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **Milk product + bridge** | `prod_milk` + delivery-to-stock, all 4 delivery paths, reconcile-by-delta | ✅ `cbcd2eb` · **22/22** |
 | **S4.1** | `GET /api/sales` · `GET`+`DELETE /api/sales/[id]` (delete RESTORES stock) · hooks | ✅ 2026-08-14 · **20/20** |
 | **S4.2** | unified sale SCREEN (`/sales`, `/sales/new`) + unified receipt + receivables bridge | ✅ 2026-08-14 · **13/13 + browser** |
-| **S4.3** | **milk cutover** — `/milk/sales` read-only, milk stock becomes authoritative | ⬜ Todo |
+| **S4.3** | **milk cutover** — `/milk/sales` history-only, milk stock AUTHORITATIVE | ✅ 2026-08-14 |
 | **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ⬜ Todo |
 | **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ⬜ Todo |
 | **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
 | **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ⬜ Todo |
 | **S9** | remove the old per-module paths, then **Migration B** (drop the 4 old tables) — CHECKLIST #5 | ⬜ Todo |
 
-**Two things S4 carries that are easy to lose:** the **milk cutover** is what makes milk stock
-authoritative (today `/milk/sales` does not decrement, so the figure reads high — see the
-"🥛 Milk stock" section), and **raw `Sale` deletion does not restore stock**, so the unified
-DELETE/edit has to do what the per-module routes already do.
+**S4 is DONE (S4.1–S4.3, 2026-08-14).** Both of the things it carried are closed: milk stock is
+authoritative (the cutover — see the "🥛 Milk stock" section for the one caveat about the opening
+number), and `DELETE /api/sales/[id]` restores stock the way the per-module routes always did.
+**The unified EDIT/PATCH is the one piece deliberately left open — CHECKLIST #8.**
 
 **Before declaring the project ready for the client, work the PRE-HANDOFF CHECKLIST**, not this
 table. Phase 8 is polish; the checklist is everything that must be true at handoff.
@@ -1936,9 +1936,9 @@ schemas, one of them empty.
 1. ~~The unified sale SCREEN~~ ✅ **SHIPPED in S4.2** — `/sales`, `/sales/new`,
    `/receipt/sale/[id]`, and the receivables bridge. ⚠️ **A unified sale is STILL invisible to
    REPORTS and the CSV export** (`lib/reports.ts` reads the old tables) — that is S6 / item #6.
-2. **The milk cutover** (S4.3) — route milk selling through `/api/sales` instead of
-   `POST /api/milk/sales`. This is what **makes milk stock authoritative** and closes the provisional
-   warning in the "🥛 Milk stock" section (today `/milk/sales` does not decrement, so it reads high).
+2. ~~The milk cutover~~ ✅ **SHIPPED in S4.3.** Milk sells on the till; `/milk/sales` is a history
+   screen that can no longer create one; `POST /api/milk/sales` is unreachable and retires at S9.
+   **Milk stock is authoritative** — see the "🥛 Milk stock" section for the opening-number caveat.
 3. ~~A unified sale DELETE that restores stock~~ ✅ **SHIPPED in S4.1.**
    `DELETE /api/sales/[id]` restores every line's quantity through the same
    `computeStockDeltas`/`applyStockDeltas` pair the per-module routes use, in one transaction.
