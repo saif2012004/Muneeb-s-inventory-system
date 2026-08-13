@@ -374,8 +374,12 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
 ```
 /app
   /api                     → Route Handlers (serverless). runtime="nodejs" where Prisma/bcrypt used.
-    /sales/route.ts        → UNIFIED sale POST (S3, live 2026-08-13). Beverages+bakery+milk on
-                             ONE bill; no discounts; GET lands with S4.
+    /sales/route.ts        → UNIFIED sale POST (S3, live 2026-08-13) + GET list (S4.1,
+                             2026-08-14). Beverages+bakery+milk on ONE bill; no discounts.
+    /sales/[id]/route.ts   → UNIFIED sale GET one + DELETE (S4.1). ⚠️ The DELETE RESTORES
+                             STOCK — and normalises `Number(item.quantity)` first, because
+                             SaleItem.quantity is Decimal and computeStockDeltas takes a
+                             number. No PATCH yet (edit lands with the screen, CHECKLIST #8).
   /(auth)/login            → Owner login page → /login
   /(dashboard)             → layout group ONLY, adds nothing to the URL
     /layout.tsx            → Protected layout with nav
@@ -665,10 +669,13 @@ model User {
 > repo. A full ground-truth audit on 2026-08-11 re-confirmed every claim below.
 > **If a session brief and this section disagree, run the grep. The grep wins.**
 
-> **⚠️ UPDATE 2026-08-13 — PARTIAL SWITCH-OVER.** `POST /api/sales` (unified) is **LIVE** and writes
-> `Sale`/`SaleItem` (S3, commit `90e8609`). The old per-module create routes are **ALSO still live**,
-> and reports/receipt/receivables still read the old tables. Both coexist **BY DESIGN** until S4–S6
-> finish. **The grep below now returns matches — that is EXPECTED, not the dormant state.** Once any
+> **⚠️ UPDATE 2026-08-14 — PARTIAL SWITCH-OVER.** The unified API is **LIVE**: `POST /api/sales`
+> writes `Sale`/`SaleItem` (S3, `90e8609`), and `GET /api/sales`, `GET`/`DELETE /api/sales/[id]`
+> landed with S4.1. The old per-module create routes are **ALSO still live**, and
+> **reports / receipt / receivables STILL READ THE OLD TABLES ONLY** — so a unified sale does not yet
+> appear in a customer's outstanding balance, in any report, or on a printed receipt. That read side
+> is S4.2 (receivables + receipt) and S6 (reports). Both paths coexist **BY DESIGN** until then.
+> **The grep below now returns matches — that is EXPECTED, not the dormant state.** Once any
 > unified sale is created, Migration A's row is no longer the only `Sale` row.
 
 **The app runs on `BeverageSale` / `BakerySale`. `Sale` / `SaleItem` exist but NOTHING reads or
@@ -690,7 +697,7 @@ and this section is out of date; update it in the same commit (see the process r
 | Create a sale | `tx.beverageSale.create` / `tx.bakerySale.create` | per module; a mixed-category sale is **rejected** by `loadSaleProducts` |
 | List / read / update | `prisma.{beverage,bakery}Sale.*` | `PATCH` exists and is server-verified but has **no UI** |
 | Sale form | `NewSaleForm` at `/beverages/new-sale` and `/bakery/new-sale` | posts to `SaleModule.apiBase` |
-| **`/sales`** | **does not exist** | no such route in `app/` |
+| **`/sales`** (the SCREEN) | **does not exist** | no such page in `app/(dashboard)/`. The API `app/api/sales/` DOES exist — S4.2 builds the screen |
 | Reports revenue | `SUM("totalAmount") FROM "BeverageSale" / "BakerySale"` | sale-level, NOT `Σ netLineTotal` |
 | Reports top products | `prisma.{beverage,bakery}SaleItem.groupBy` on `lineTotal` | per-module item tables |
 | Receipt | `lib/receipt.ts` → the same two tables | correct: it prints what the app can actually create |
@@ -1485,7 +1492,9 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **S2** | split milk-sale code out of `lib/milk.ts` (isolate farmer code) | ✅ `9b87dc4` |
 | **S3** | unified `POST /api/sales` — beverages + bakery, milk designed-for | ✅ `90e8609` · **21/21** |
 | **Milk product + bridge** | `prod_milk` + delivery-to-stock, all 4 delivery paths, reconcile-by-delta | ✅ `cbcd2eb` · **22/22** |
-| **S4** | unified sale SCREEN + `GET /api/sales` + **milk cutover** + unified DELETE/edit that restores stock | ⬜ Todo |
+| **S4.1** | `GET /api/sales` · `GET`+`DELETE /api/sales/[id]` (delete RESTORES stock) · hooks | ✅ 2026-08-14 · **20/20** |
+| **S4.2** | unified sale SCREEN (`/sales`, `/sales/new`) + unified receipt + receivables bridge | ⬜ Todo |
+| **S4.3** | **milk cutover** — `/milk/sales` read-only, milk stock becomes authoritative | ⬜ Todo |
 | **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ⬜ Todo |
 | **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ⬜ Todo |
 | **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
@@ -1901,16 +1910,21 @@ schemas, one of them empty.
 | ✅ | **S2** — milk-sale code split out of `lib/milk.ts` | commit `9b87dc4` |
 | ✅ | **S3** — unified `POST /api/sales` (beverages + bakery; milk designed-for) | commit `90e8609`, **21/21 tested** |
 | ✅ | **Milk product + delivery-to-stock bridge** | commit `cbcd2eb`, **22/22 tested** |
+| ✅ | **S4.1** — `GET /api/sales`, `GET`+`DELETE /api/sales/[id]`, client hooks | 2026-08-14, **20/20 tested** |
 
 **What REMAINS for this item:**
 
-1. **The unified sale SCREEN** — plus **`GET /api/sales`**, deliberately left out of S3.
-2. **The milk cutover** — route milk selling through `/api/sales` instead of `POST /api/milk/sales`.
-   This is what **makes milk stock authoritative** and closes the provisional warning in the
-   "🥛 Milk stock" section (today `/milk/sales` does not decrement, so the figure reads high).
-3. **A unified sale DELETE / edit that restores stock.** 🔴 **Raw `Sale` deletion does NOT restore
-   stock today** — the per-module routes do, the unified path has no DELETE at all yet. Found while
-   testing the bridge.
+1. **The unified sale SCREEN** (S4.2) — ~~plus `GET /api/sales`~~ **the API half shipped in S4.1**.
+   Still to build: `/sales` + `/sales/new`, the unified receipt, and the receivables bridge.
+   ⚠️ **A unified sale is still invisible to `lib/receivables.ts`, reports, the receipt and CSV** —
+   they all read the OLD tables. See #6.
+2. **The milk cutover** (S4.3) — route milk selling through `/api/sales` instead of
+   `POST /api/milk/sales`. This is what **makes milk stock authoritative** and closes the provisional
+   warning in the "🥛 Milk stock" section (today `/milk/sales` does not decrement, so it reads high).
+3. ~~A unified sale DELETE that restores stock~~ ✅ **SHIPPED in S4.1.**
+   `DELETE /api/sales/[id]` restores every line's quantity through the same
+   `computeStockDeltas`/`applyStockDeltas` pair the per-module routes use, in one transaction.
+   **The unified EDIT (PATCH) is still open** and lands with the screen — CHECKLIST #8.
 4. Old routes redirecting, and reports rewritten to `Σ netLineTotal` by `moduleKey` (that half is
    tracked as #6 / S6 — reports still group by `beverageSaleItem` / `bakerySaleItem`,
    `lib/reports.ts:217,224`).

@@ -11,8 +11,10 @@ import {
 } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import {
+  SALE_LIST_ORDER,
   StockConflictError,
   applyStockDeltas,
+  buildSaleDateWindow,
   checkTotalFits,
   computeLineTotal,
   computeSaleTotal,
@@ -25,13 +27,89 @@ import {
 import { serialize } from "@/lib/serialize";
 import {
   UNIFIED_SALE_DETAIL_SELECT,
+  UNIFIED_SALE_LIST_SELECT,
   UNIFIED_SALE_PRODUCT_SELECT,
   loadUnifiedSaleProducts,
+  toUnifiedSaleListRow,
 } from "@/lib/unified-sales";
+import { saleListQuerySchema } from "@/lib/validations/sales";
 import { unifiedSaleCreateSchema } from "@/lib/validations/unified-sales";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * GET /api/sales — list unified sales, newest first.
+ *
+ * Query params (all optional): customerId · dateFrom · dateTo · page · limit.
+ *
+ * Deferred from S3 and built in S4 because the unified SCREEN needs it. It
+ * reuses the per-module list plumbing WHOLESALE — `saleListQuerySchema`,
+ * `buildSaleDateWindow`, `SALE_LIST_SELECT` (via `UNIFIED_SALE_LIST_SELECT`),
+ * `SALE_LIST_ORDER` and `toSaleListRow` — rather than restating filtering or
+ * pagination for a second table. Karachi day filtering therefore behaves
+ * identically here and on `/api/beverages/sales` because it is the same code
+ * (Gotcha 4).
+ *
+ * The one thing it adds is `modules` per row, resolved from the joined line
+ * `moduleKey`s. See `UNIFIED_SALE_LIST_SELECT` for why that costs no extra
+ * round trip.
+ *
+ * QUERY BUDGET: 2 statements (page + count), the same as the per-module lists.
+ */
+export async function GET(request: Request): Promise<NextResponse> {
+  const denied = await requireOwner();
+  if (denied) return denied;
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const parsed = saleListQuerySchema.safeParse({
+      customerId: searchParams.get("customerId") ?? undefined,
+      dateFrom: searchParams.get("dateFrom") ?? undefined,
+      dateTo: searchParams.get("dateTo") ?? undefined,
+      page: searchParams.get("page") ?? undefined,
+      limit: searchParams.get("limit") ?? undefined,
+    });
+    if (!parsed.success) return fail(firstIssue(parsed.error), 400);
+
+    const { customerId, dateFrom, dateTo, page, limit } = parsed.data;
+
+    const window = buildSaleDateWindow(dateFrom, dateTo);
+    if (isSaleProblem(window)) return fail(window.message, window.status);
+
+    const where: Prisma.SaleWhereInput = {
+      ...(customerId ? { customerId } : {}),
+      ...(window ? { saleDate: window } : {}),
+    };
+
+    // One transaction so the page and the total cannot disagree about how many
+    // rows exist — otherwise a sale created between the two queries makes the
+    // pager offer a page that isn't there.
+    const [sales, total] = await prisma.$transaction([
+      prisma.sale.findMany({
+        where,
+        select: UNIFIED_SALE_LIST_SELECT,
+        orderBy: [...SALE_LIST_ORDER],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.sale.count({ where }),
+    ]);
+
+    return ok({
+      // `totalAmount` is a Decimal — an OBJECT, not a number (Gotcha 2).
+      sales: sales.map((sale) => serialize(toUnifiedSaleListRow(sale))),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    return serverError("sales.GET", error);
+  }
+}
 
 /**
  * POST /api/sales — create a UNIFIED sale.

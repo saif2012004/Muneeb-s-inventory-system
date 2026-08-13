@@ -3,9 +3,11 @@ import { Prisma } from "@prisma/client";
 import { MODULE_CATEGORIES, type ModuleKey } from "@/lib/modules";
 import {
   SALE_DETAIL_SELECT,
+  SALE_LIST_SELECT,
   checkAllProductsResolved,
   checkNoInactiveProducts,
   isSaleProblem,
+  toSaleListRow,
   type SaleProblem,
   type SaleProduct,
 } from "@/lib/sales";
@@ -180,3 +182,65 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
     orderBy: { id: "asc" },
   },
 } as const;
+
+// ---------------------------------------------------------------------------
+// Listing (S4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The unified list `select` — `SALE_LIST_SELECT` plus each line's `moduleKey`.
+ *
+ * ⚠️ The extra `items` is a JOIN, not a second query. That is the whole reason a
+ * list row can say "beverages · milk" for FREE: at ~1.1s per round trip
+ * (CLAUDE.md), fetching the modules separately would cost a real second of the
+ * owner's time for a fact already on the rows being read.
+ *
+ * `_count` rides along from `SALE_LIST_SELECT` and still supplies `itemCount`;
+ * the joined `items` carry ONLY `moduleKey`, never money — a list row's total is
+ * the stored `totalAmount` and is never re-added from lines.
+ */
+export const UNIFIED_SALE_LIST_SELECT = {
+  ...SALE_LIST_SELECT,
+  items: { select: { moduleKey: true } },
+} as const;
+
+/** A raw row from {@link UNIFIED_SALE_LIST_SELECT}. */
+export type UnifiedSaleListRowRaw = {
+  id: string;
+  saleDate: Date;
+  totalAmount: Prisma.Decimal;
+  notes: string | null;
+  createdAt: Date;
+  customer: { id: string; name: string; type: string };
+  _count: { items: number };
+  items: { moduleKey: string }[];
+};
+
+/** Module display order — the declaration order in `MODULE_CATEGORIES`. */
+const MODULE_ORDER = Object.keys(MODULE_CATEGORIES) as ModuleKey[];
+
+/**
+ * Shape a unified list row: `_count` flattened to `itemCount` (via the shared
+ * `toSaleListRow`, not a second implementation) and the line modules deduped
+ * into a stable, ordered `modules` array.
+ *
+ * ORDER IS FIXED by `MODULE_CATEGORIES`, never by the order the lines happen to
+ * be in — otherwise the same bill would label itself "bakery · beverages" or
+ * "beverages · bakery" depending on which product the owner tapped first, and a
+ * list that reshuffles its own labels reads as two different sales.
+ *
+ * An UNRECOGNISED `moduleKey` is kept (sorted, after the known ones) rather than
+ * dropped. `moduleKey` is a snapshot on a stored row, so a value this build does
+ * not know about is history to be shown, not noise to be hidden.
+ */
+export function toUnifiedSaleListRow(row: UnifiedSaleListRowRaw) {
+  const { items, ...rest } = row;
+
+  const present = new Set(items.map((item) => item.moduleKey));
+  const known = MODULE_ORDER.filter((key) => present.has(key));
+  const unknown = Array.from(present)
+    .filter((key) => !MODULE_ORDER.includes(key as ModuleKey))
+    .sort();
+
+  return { ...toSaleListRow(rest), modules: [...known, ...unknown] };
+}
