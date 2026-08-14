@@ -249,6 +249,13 @@ export const unifiedSaleFormSchema = z.object({
   items: z
     .array(
       z.object({
+        /**
+         * The STORED line's id, present only when editing. It is what lets the
+         * server reconcile by IDENTITY rather than by array position — the
+         * distinction that stops a deleted middle line silently re-pricing
+         * every line below it (see `reconcileSaleLines` in CLAUDE.md).
+         */
+        id: z.string().optional(),
         productId: z.string().min(1, { message: "Choose a product" }),
         quantity: quantityField("decimal"),
         unitPrice,

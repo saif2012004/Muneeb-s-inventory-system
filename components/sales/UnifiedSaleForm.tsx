@@ -23,7 +23,11 @@ import { ApiError, redirectToLogin, type StockShortfall } from "@/lib/api-client
 import { formatPKR, karachiToday, toDateKey } from "@/lib/format";
 import { useProducts } from "@/lib/hooks/use-catalog";
 import { useCustomers } from "@/lib/hooks/use-customers";
-import { useCreateUnifiedSale } from "@/lib/hooks/use-unified-sales";
+import {
+  useCreateUnifiedSale,
+  useUpdateUnifiedSale,
+  type UnifiedSaleDetail,
+} from "@/lib/hooks/use-unified-sales";
 import { enterUp, lineItemInOut } from "@/lib/motion";
 import { groupUnifiedSaleProducts, indexSaleProducts } from "@/lib/sale-catalog";
 import {
@@ -63,7 +67,21 @@ import {
  * on one screen, and a bill that may hold beverage, bakery and milk lines has no
  * single accent to claim.
  */
-export function UnifiedSaleForm() {
+export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
+  /**
+   * EDIT MODE (CHECKLIST #8) when a `sale` is passed.
+   *
+   * The same form, because it is the same bill: customer, date, lines, total.
+   * Three things differ, and each follows a server rule rather than a taste:
+   *
+   *   - the CUSTOMER is fixed. Moving a bill to another customer moves money
+   *     between two people's ledgers; that is a different operation from
+   *     correcting a line, and the API does not accept it.
+   *   - an existing line's PRICE is READ-ONLY (see `priceLocked`).
+   *   - `unitPrice` is sent ONLY for new lines, so nothing is submitted that the
+   *     server would silently ignore.
+   */
+  const isEdit = sale !== undefined;
   const reduceMotion = useReducedMotion();
   const [justSaved, setJustSaved] = useState<{ id: string; total: number } | null>(
     null
@@ -82,17 +100,31 @@ export function UnifiedSaleForm() {
   // one would only produce an error the owner cannot act on.
   const productsQuery = useProducts(false);
   const createSale = useCreateUnifiedSale();
+  const updateSale = useUpdateUnifiedSale();
+  const isPending = createSale.isPending || updateSale.isPending;
 
   const form = useForm<UnifiedSaleFormValues, unknown, UnifiedSaleFormOutput>({
     resolver: zodResolver(unifiedSaleFormSchema),
     defaultValues: {
-      customerId: "",
-      saleDate: karachiToday(),
-      notes: "",
+      customerId: sale?.customer.id ?? "",
+      saleDate: sale ? new Date(sale.saleDate) : karachiToday(),
+      notes: sale?.notes ?? "",
       // Never rendered, never sent — it keeps the form value shape identical to
       // the per-module one so `LineItemRow` stays shared. See the schema.
       discountPercent: "",
-      items: [emptySaleLine()],
+      items: sale
+        ? sale.items.map((item) => ({
+            // The stored line's id rides in the form as a hidden field so the
+            // reconciler can match by IDENTITY. Matching by array position is
+            // what silently re-prices the wrong line when one is deleted from
+            // the middle — the trap CLAUDE.md calls out on reconcileSaleLines.
+            id: item.id,
+            productId: item.productId,
+            quantity: String(item.quantity),
+            unitPrice: String(item.unitPrice),
+            discountPercent: "",
+          }))
+        : [emptySaleLine()],
     },
     mode: "onTouched",
   });
@@ -202,10 +234,74 @@ export function UnifiedSaleForm() {
   // Submit
   // ------------------------------------------------------------------
 
+  /**
+   * One error path for create and edit — the failures are identical and the
+   * owner should not get two different behaviours for the same problem.
+   */
+  function handleSubmitError(error: unknown) {
+    if (error instanceof ApiError && error.isSessionExpired) {
+      toast.error(error.message);
+      redirectToLogin();
+      return;
+    }
+    /**
+     * Insufficient stock is NOT a toast. A toast disappears, and this one
+     * carries the numbers the owner needs plus the controls to fix them — so it
+     * renders into the form and stays until resolved.
+     */
+    if (error instanceof ApiError && error.isBlockedByStock) {
+      setStockBlock({ message: error.message, shortfalls: error.shortBy });
+      return;
+    }
+    toast.error(
+      error instanceof ApiError
+        ? error.message
+        : isEdit
+          ? "Couldn't update the sale."
+          : "Couldn't record the sale."
+    );
+  }
+
   const onSubmit = form.handleSubmit(
     (values) => {
       // A retry starts clean: the alert must never outlive the problem.
       setStockBlock(null);
+
+      if (isEdit) {
+        updateSale.mutate(
+          {
+            id: sale.id,
+            saleDate: toDateKey(values.saleDate),
+            notes: values.notes || null,
+            /**
+             * `unitPrice` is sent ONLY for a NEW line. For an existing one the
+             * server ignores it by design (CHECKLIST #7), so submitting it would
+             * be sending a value we know cannot take effect. The form does not
+             * offer it either — the field is read-only.
+             */
+            items: values.items.map((item) => ({
+              ...(item.id ? { id: item.id } : { unitPrice: item.unitPrice }),
+              productId: item.productId,
+              quantity: item.quantity,
+            })),
+          },
+          {
+            onSuccess: (updated) => {
+              const repriced = updated.repricedItemIds?.length ?? 0;
+              toast.success(
+                repriced > 0
+                  ? `Sale updated · ${repriced} line${repriced === 1 ? "" : "s"} re-priced`
+                  : "Sale updated"
+              );
+              setStockBlock(null);
+              setJustSaved({ id: updated.id, total: updated.totalAmount });
+            },
+            onError: handleSubmitError,
+          }
+        );
+        return;
+      }
+
       createSale.mutate(
         {
           customerId: values.customerId,
@@ -229,30 +325,12 @@ export function UnifiedSaleForm() {
           })),
         },
         {
-          onSuccess: (sale) => {
-            toast.success(`Sale recorded for ${sale.customer.name}`);
+          onSuccess: (created) => {
+            toast.success(`Sale recorded for ${created.customer.name}`);
             setStockBlock(null);
-            setJustSaved({ id: sale.id, total: sale.totalAmount });
+            setJustSaved({ id: created.id, total: created.totalAmount });
           },
-          onError: (error) => {
-            if (error instanceof ApiError && error.isSessionExpired) {
-              toast.error(error.message);
-              redirectToLogin();
-              return;
-            }
-            /**
-             * Insufficient stock is NOT a toast. A toast disappears, and this
-             * one carries the numbers the owner needs plus the controls to fix
-             * them — so it renders into the form and stays until resolved.
-             */
-            if (error instanceof ApiError && error.isBlockedByStock) {
-              setStockBlock({ message: error.message, shortfalls: error.shortBy });
-              return;
-            }
-            toast.error(
-              error instanceof ApiError ? error.message : "Couldn't record the sale."
-            );
-          },
+          onError: handleSubmitError,
         }
       );
     },
@@ -278,7 +356,7 @@ export function UnifiedSaleForm() {
   if (justSaved) {
     return (
       <>
-        <PageHeader title="Sale recorded" accent="zinc" />
+        <PageHeader title={isEdit ? "Sale updated" : "Sale recorded"} accent="zinc" />
         <motion.div
           {...enterUp(reduceMotion)}
           className="rounded-xl border border-zinc-200 bg-white p-6 text-center shadow-sm"
@@ -286,19 +364,34 @@ export function UnifiedSaleForm() {
           <span className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-zinc-100 text-zinc-700">
             <CheckCircle2 className="size-6" aria-hidden />
           </span>
-          <p className="text-[15px] font-medium text-zinc-900">Sale saved</p>
+          <p className="text-[15px] font-medium text-zinc-900">
+            {isEdit ? "Changes saved" : "Sale saved"}
+          </p>
           <p className="num mt-1 text-[28px] font-bold text-zinc-900">
             <AnimatedMoney value={justSaved.total} />
           </p>
 
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <Button
-              className="h-11 rounded-lg bg-zinc-900 hover:bg-zinc-800"
-              onClick={addAnother}
-            >
-              <Plus className="mr-2 size-4" aria-hidden />
-              Add another
-            </Button>
+            {/**
+              * 🔴 "Add another" is CREATE-ONLY, and that is a correctness fix
+              * rather than tidiness. In edit mode it would blank the lines while
+              * the form was still editing THIS bill — so the next save would
+              * replace the edited sale's lines with the new ones, silently, on a
+              * screen that looks like a fresh sale. Caught in browser testing.
+              */}
+            {isEdit ? (
+              <Button asChild className="h-11 rounded-lg bg-zinc-900 hover:bg-zinc-800">
+                <Link href="/sales">Back to sales</Link>
+              </Button>
+            ) : (
+              <Button
+                className="h-11 rounded-lg bg-zinc-900 hover:bg-zinc-800"
+                onClick={addAnother}
+              >
+                <Plus className="mr-2 size-4" aria-hidden />
+                Add another
+              </Button>
+            )}
             {/* Straight to the printable bill — the common next action at the
                 counter, and one tap rather than list -> expand -> print. */}
             <Button asChild variant="outline" className="h-11 rounded-lg">
@@ -307,9 +400,11 @@ export function UnifiedSaleForm() {
                 Print receipt
               </Link>
             </Button>
-            <Button asChild variant="outline" className="h-11 rounded-lg">
-              <Link href="/sales">View sales</Link>
-            </Button>
+            {isEdit ? null : (
+              <Button asChild variant="outline" className="h-11 rounded-lg">
+                <Link href="/sales">View sales</Link>
+              </Button>
+            )}
           </div>
         </motion.div>
       </>
@@ -323,8 +418,12 @@ export function UnifiedSaleForm() {
   return (
     <>
       <PageHeader
-        title="New sale"
-        description="Any product from any shop, on one bill. Prices default to the catalog and can be changed per sale."
+        title={isEdit ? "Edit sale" : "New sale"}
+        description={
+          isEdit
+            ? "Correct the lines on this bill. Stock adjusts by the difference, and a line's price only changes if you change its product."
+            : "Any product from any shop, on one bill. Prices default to the catalog and can be changed per sale."
+        }
         accent="zinc"
       />
 
@@ -334,16 +433,35 @@ export function UnifiedSaleForm() {
         <div className="space-y-5 pb-32">
           <section className="space-y-1.5">
             <Label htmlFor="customer">Customer</Label>
-            <CustomerCombobox
-              customers={customers}
-              isLoading={isLoading}
-              value={form.watch("customerId")}
-              invalid={Boolean(form.formState.errors.customerId)}
-              accent="zinc"
-              onChange={(customerId) =>
-                form.setValue("customerId", customerId, { shouldValidate: true })
-              }
-            />
+            {isEdit ? (
+              /**
+               * FIXED ON AN EDIT. Moving a bill to a different customer moves
+               * money between two people's ledgers — a different operation from
+               * correcting a line, and one the API does not accept. Shown as
+               * plain text rather than a disabled control the owner would poke
+               * at expecting it to open.
+               */
+              <>
+                <p className="flex h-11 items-center rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700">
+                  {sale.customer.name}
+                </p>
+                <p className="text-sm text-zinc-500">
+                  A bill stays with its customer. Delete it and ring a new one to
+                  move it.
+                </p>
+              </>
+            ) : (
+              <CustomerCombobox
+                customers={customers}
+                isLoading={isLoading}
+                value={form.watch("customerId")}
+                invalid={Boolean(form.formState.errors.customerId)}
+                accent="zinc"
+                onChange={(customerId) =>
+                  form.setValue("customerId", customerId, { shouldValidate: true })
+                }
+              />
+            )}
             {form.formState.errors.customerId ? (
               <p className="text-sm text-rose-600">
                 {form.formState.errors.customerId.message}
@@ -398,6 +516,10 @@ export function UnifiedSaleForm() {
                         searchPlaceholder="Product, brand, size or litres…"
                         // No discount on this endpoint — see the docblock.
                         showDiscount={false}
+                        // An EXISTING line's price is read-only: the server
+                        // refuses to change it, so offering the field would be
+                        // a silent no-op. New lines keep an editable price.
+                        priceLocked={isEdit && Boolean(form.getValues(`items.${index}.id`))}
                       />
                     </motion.div>
                   ))}
@@ -428,7 +550,7 @@ export function UnifiedSaleForm() {
             <StockBlockAlert
               shortfalls={stockBlock.shortfalls}
               message={stockBlock.message}
-              isRetrying={createSale.isPending}
+              isRetrying={isPending}
               onRetry={() => onSubmit()}
             />
           ) : null}
@@ -481,11 +603,13 @@ export function UnifiedSaleForm() {
               disabled={createSale.isPending}
               className="h-12 shrink-0 rounded-lg bg-zinc-900 px-6 hover:bg-zinc-800"
             >
-              {createSale.isPending ? (
+              {isPending ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
                   Saving…
                 </>
+              ) : isEdit ? (
+                "Save changes"
               ) : (
                 "Save sale"
               )}

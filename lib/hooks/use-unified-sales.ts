@@ -118,6 +118,20 @@ export type UnifiedSaleCreateInput = {
   }[];
 };
 
+/** The PATCH payload. Every field optional; see `useUpdateUnifiedSale`. */
+export type UnifiedSaleUpdateInput = {
+  saleDate?: string;
+  notes?: string | null;
+  items?: {
+    /** Present = an existing line. Absent = a new one. */
+    id?: string;
+    productId: string;
+    quantity: number;
+    /** NEW lines only — ignored by the server on an existing line. */
+    unitPrice?: number;
+  }[];
+};
+
 export type UnifiedSaleListFilters = {
   customerId?: string;
   dateFrom?: string;
@@ -208,6 +222,30 @@ export function useCreateUnifiedSale() {
   return useMutation({
     mutationFn: (input: UnifiedSaleCreateInput) =>
       api.post<UnifiedSaleDetail>("/api/sales", input),
+    onSuccess: () => invalidateAfterUnifiedSale(queryClient),
+  });
+}
+
+/**
+ * Edit a bill (CHECKLIST #8).
+ *
+ * `items` is the COMPLETE desired set of lines: an entry with an `id` is an
+ * existing line, one without is new, and a stored line left out is removed.
+ * Omit `items` entirely to edit only the header.
+ *
+ * ⚠️ Do NOT send `unitPrice` for a line that has an `id`. The server ignores it
+ * by design (CHECKLIST #7) — sending one would look like it worked and change
+ * nothing, which is worse than a rejection. The edit screen renders an existing
+ * line's price as READ-ONLY for exactly this reason.
+ */
+export function useUpdateUnifiedSale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: UnifiedSaleUpdateInput & { id: string }) =>
+      api.patch<UnifiedSaleDetail & { repricedItemIds: string[] }>(
+        `/api/sales/${id}`,
+        input
+      ),
     onSuccess: () => invalidateAfterUnifiedSale(queryClient),
   });
 }

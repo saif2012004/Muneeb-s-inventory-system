@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Pencil,
   Plus,
   ReceiptText,
   RefreshCw,
@@ -394,6 +395,17 @@ export function UnifiedSalesList() {
                       <span className="num text-[17px] font-semibold text-zinc-900">
                         {formatPKR(sale.totalAmount)}
                       </span>
+                      {/* Edit (CHECKLIST #8). A link, not a dialog: correcting a
+                          bill is the same work as ringing it up. */}
+                      <Link
+                        href={`/sales/${sale.id}/edit`}
+                        className="flex size-11 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900"
+                      >
+                        <Pencil className="size-4" aria-hidden />
+                        <span className="sr-only">
+                          Edit sale to {sale.customer.name}
+                        </span>
+                      </Link>
                       <button
                         type="button"
                         onClick={() => setPendingDelete(sale)}

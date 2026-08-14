@@ -49,6 +49,7 @@ export function LineItemRow({
   canRemove,
   searchPlaceholder,
   showDiscount = true,
+  priceLocked = false,
 }: {
   form: SaleForm;
   index: number;
@@ -65,6 +66,18 @@ export function LineItemRow({
    * pass nothing and are unchanged.
    */
   showDiscount?: boolean;
+  /**
+   * 🔒 EDIT MODE, EXISTING LINE. The price becomes read-only text.
+   *
+   * The server REFUSES to change an existing line's price — `reconcileSaleLines`
+   * takes it from the stored snapshot or the database, never from the client
+   * (CHECKLIST #7), because honouring it would let a closed bill be silently
+   * re-priced. An editable box here would therefore accept a new number, save
+   * happily, and change nothing: a silent no-op, which is worse for the owner
+   * than not offering it. Swapping the PRODUCT is the supported way to re-price
+   * a line, and the hint below says so.
+   */
+  priceLocked?: boolean;
 }) {
   // Subscribes this row only — typing in one line doesn't re-render the others.
   const row = useWatch({ control: form.control, name: `items.${index}` });
@@ -177,17 +190,34 @@ export function LineItemRow({
             <Label htmlFor={`item-${index}-price`}>
               {unitPriceFieldLabel(unit)}
             </Label>
-            <Input
-              id={`item-${index}-price`}
-              inputMode="decimal"
-              autoComplete="off"
-              className={cn(
-                "num h-11 rounded-lg",
-                errors?.unitPrice && "border-rose-400 focus-visible:ring-rose-400"
-              )}
-              {...form.register(`items.${index}.unitPrice`)}
-            />
-            {errors?.unitPrice ? (
+            {priceLocked ? (
+              <>
+                {/* Read-only, not disabled-looking: this IS the price that was
+                    charged, and the owner should be able to read it plainly. */}
+                <p
+                  id={`item-${index}-price`}
+                  className="num flex h-11 items-center rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-700"
+                >
+                  {formatPKR(Number(unitPrice) || 0)}
+                </p>
+                <p className="text-sm text-zinc-500">
+                  The price charged on this bill. Change the product to re-price
+                  the line.
+                </p>
+              </>
+            ) : (
+              <Input
+                id={`item-${index}-price`}
+                inputMode="decimal"
+                autoComplete="off"
+                className={cn(
+                  "num h-11 rounded-lg",
+                  errors?.unitPrice && "border-rose-400 focus-visible:ring-rose-400"
+                )}
+                {...form.register(`items.${index}.unitPrice`)}
+              />
+            )}
+            {priceLocked ? null : errors?.unitPrice ? (
               <p className="text-sm text-rose-600">{errors.unitPrice.message}</p>
             ) : priceIsZero ? (
               // Not an error — selling at 0 is legal, just almost always a

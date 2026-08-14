@@ -2066,12 +2066,40 @@ asymmetry note**.
 and the change could not regress anything. Verified over authenticated HTTP: a bogus client
 `unitPrice` on a quantity-only PATCH was ignored and the stored snapshot preserved.
 
+#### `[x]` **8. Sale edit UI — SHIPPED 2026-08-14 for the UNIFIED sale**
+
+`PATCH /api/sales/[id]` + `/sales/[id]/edit`. **11/11 tested, browser-verified.** It reuses
+`reconcileSaleLines` and `computeStockDeltas`, so every rule holds without being restated: a
+quantity change keeps the stored price and moves stock by the DIFFERENCE (12 → 8 frees 4), a product
+swap re-prices from the database AND re-resolves `moduleKey` (a swap can cross shops), a client
+`unitPrice` on an existing line is ignored, and a shortfall refuses the whole edit.
+
+**Two UI decisions follow the server rules rather than taste, and must not be "improved":**
+
+- **An existing line's price is READ-ONLY.** The server refuses to change it (CHECKLIST #7), so an
+  editable box would accept a number, save happily and change nothing — a silent no-op is worse for
+  the owner than not offering the field. Swapping the product is the supported way to re-price.
+- **The CUSTOMER is fixed on an edit.** Moving a bill between customers moves money between two
+  ledgers; the API does not accept it.
+
+**"Add another" is create-only** — in edit mode it blanked the lines while still editing THIS bill,
+so the next save would have replaced the edited sale's lines from a screen that looked like a fresh
+one. Caught in browser testing; it is "Back to sales" when editing.
+
+**The per-module (beverages/bakery) sale edit UI was never built and now never will be** — those
+screens retire at S9. Their `PATCH` routes remain server-verified and unused.
+
+<details>
+<summary>Original item</summary>
+
 #### `[ ]` **8. Sale edit UI for beverages/bakery**
 
 The `PATCH` route is complete, stock- and discount-aware and server-verified; **there is no
 screen.** Lands WITH #4, deliberately — an edit screen written against the current per-module
 structure would be built to be thrown away. See the carried-forward "PATCH has no UI" note before
 assuming it is dead code.
+
+</details>
 
 ---
 

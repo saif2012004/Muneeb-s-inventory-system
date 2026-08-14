@@ -104,3 +104,56 @@ export const unifiedSaleCreateSchema = z
   .strict();
 
 export type UnifiedSaleCreateInput = z.infer<typeof unifiedSaleCreateSchema>;
+
+/**
+ * The UPDATE form of a line. `id` present = an existing line kept or edited;
+ * `id` absent = a new line. Any stored line NOT in the submitted array is
+ * removed from the sale.
+ *
+ * ⚠️ `unitPrice` IS ACCEPTED HERE AND IGNORED FOR AN EXISTING LINE. That is not
+ * an oversight — it is CHECKLIST #7, closed 2026-08-11: `reconcileSaleLines`
+ * takes an existing line's price from the database or the stored snapshot and
+ * never from the client, because honouring it would let a closed bill be
+ * silently re-priced. It stays ACCEPTED rather than rejected because the sale
+ * form always sends one and a NEW line in the same array legitimately uses it.
+ *
+ * Do not "tighten" this into a rejection without checking the form: a 400 on a
+ * field the UI always sends would break every edit, and the value is already
+ * inert where it matters.
+ */
+export const unifiedSaleItemUpdateSchema = z
+  .object({
+    id: id.optional(),
+    productId: id,
+    quantity,
+    unitPrice: money.optional(),
+  })
+  .strict();
+
+/**
+ * PATCH /api/sales/[id].
+ *
+ * Every field optional. **Omitting `items` edits the header only** and leaves
+ * every line — and therefore every price snapshot — completely untouched; that
+ * is the safe edit.
+ *
+ * `.strict()` for the same reason as create: this endpoint has NO discounts, and
+ * silently dropping one a caller believed had applied would put a wrong number
+ * on a customer's bill.
+ */
+export const unifiedSaleUpdateSchema = z
+  .object({
+    saleDate: saleDate.optional(),
+    notes,
+    items: z
+      .array(unifiedSaleItemUpdateSchema)
+      .min(1, { message: "A sale must keep at least one item." })
+      .max(100, { message: "A sale can hold at most 100 lines." })
+      .optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Nothing to update",
+  });
+
+export type UnifiedSaleUpdateInput = z.infer<typeof unifiedSaleUpdateSchema>;

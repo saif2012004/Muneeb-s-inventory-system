@@ -1,15 +1,33 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
-import { fail, ok, requireOwner, serverError } from "@/lib/api";
+import {
+  fail,
+  failStockBlocked,
+  firstIssue,
+  ok,
+  requireOwner,
+  serverError,
+} from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import {
   StockConflictError,
   applyStockDeltas,
+  checkTotalFits,
+  computeSaleTotal,
   computeStockDeltas,
+  findStockShortfalls,
+  isSaleProblem,
+  reconcileSaleLines,
+  stockBlockMessage,
 } from "@/lib/sales";
 import { serialize } from "@/lib/serialize";
-import { UNIFIED_SALE_DETAIL_SELECT } from "@/lib/unified-sales";
+import {
+  UNIFIED_SALE_DETAIL_SELECT,
+  UNIFIED_SALE_PRODUCT_SELECT,
+  loadUnifiedSaleProducts,
+} from "@/lib/unified-sales";
+import { unifiedSaleUpdateSchema } from "@/lib/validations/unified-sales";
 
 // Prisma cannot run on Edge (Gotcha 3).
 export const runtime = "nodejs";
@@ -44,6 +62,204 @@ export async function GET(
     return ok(serialize(sale));
   } catch (error) {
     return serverError("sales.[id].GET", error);
+  }
+}
+
+/**
+ * PATCH /api/sales/[id] — edit a unified sale. (CHECKLIST #8)
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT `items` MEANS
+ * ---------------------------------------------------------------------------
+ * OMIT `items` and only the header changes — every line, and therefore every
+ * price snapshot, is left exactly as it was. That is the safe edit.
+ *
+ * SEND `items` and it is the COMPLETE desired set of lines:
+ *   entry WITH an `id`    -> that stored line, kept or edited
+ *   entry WITHOUT an `id` -> a new line
+ *   stored line absent    -> removed from the sale
+ *
+ * ---------------------------------------------------------------------------
+ * NOTHING ABOUT THE MONEY RULES IS RE-IMPLEMENTED HERE
+ * ---------------------------------------------------------------------------
+ * `reconcileSaleLines` decides which lines keep their stored price and which
+ * take a fresh one, and `computeStockDeltas` derives the stock movement FROM
+ * that same reconciliation. Both are the functions the per-module PATCH has used
+ * since Phase 3. So the rules hold here for free:
+ *
+ *   - a QUANTITY change keeps the stored `unitPrice` (a typo fix is not a
+ *     re-sale, and re-pricing would silently move a historical total);
+ *   - a PRODUCT swap re-snapshots FROM THE DATABASE;
+ *   - a client `unitPrice` on an EXISTING line is IGNORED (CHECKLIST #7);
+ *   - stock moves by the DIFFERENCE — 12 -> 8 frees 4, never -8.
+ *
+ * What this route adds on top is the two columns only the unified table has:
+ * `moduleKey` (re-resolved per line from the product, because a line whose
+ * PRODUCT changed may have changed shop too) and `netLineTotal` (equal to
+ * `lineTotal` — this endpoint has no discounts).
+ */
+export async function PATCH(
+  request: Request,
+  { params }: Context
+): Promise<NextResponse> {
+  const denied = await requireOwner();
+  if (denied) return denied;
+
+  try {
+    const body = await request.json().catch(() => null);
+    const parsed = unifiedSaleUpdateSchema.safeParse(body);
+    if (!parsed.success) return fail(firstIssue(parsed.error), 400);
+
+    const { saleDate, notes, items } = parsed.data;
+
+    const existing = await prisma.sale.findUnique({
+      where: { id: params.id },
+      select: {
+        id: true,
+        items: {
+          select: {
+            id: true,
+            productId: true,
+            quantity: true,
+            unitPrice: true,
+            discountPercent: true,
+            lineTotal: true,
+          },
+        },
+      },
+    });
+    if (!existing) return fail("That sale no longer exists.", 404);
+
+    const header: Prisma.SaleUpdateInput = {};
+    if (saleDate !== undefined) header.saleDate = saleDate;
+    if (notes !== undefined) header.notes = notes ?? null;
+
+    // ----- Header-only edit: lines untouched, total unchanged --------------
+    // No bill discount exists on this endpoint, so unlike the per-module PATCH
+    // there is nothing to re-foot: the stored total still equals Σ netLineTotal.
+    if (items === undefined) {
+      const sale = await prisma.sale.update({
+        where: { id: existing.id },
+        data: header,
+        select: UNIFIED_SALE_DETAIL_SELECT,
+      });
+      return ok({ ...serialize(sale), repricedItemIds: [] as string[] });
+    }
+
+    // ----- Full line reconciliation ---------------------------------------
+    const products = await loadUnifiedSaleProducts(
+      items.map((item) => item.productId),
+      (ids) =>
+        prisma.product.findMany({
+          where: { id: { in: ids } },
+          select: UNIFIED_SALE_PRODUCT_SELECT,
+        })
+    );
+    if (isSaleProblem(products)) return fail(products.message, products.status);
+
+    /**
+     * 🔴 `Number(line.quantity)` — the same Decimal trap the DELETE below
+     * documents. `SaleItem.quantity` is `Decimal(10,2)` while
+     * `ExistingSaleLine.quantity` is a hand-written `number`, and the stock
+     * maths adds it to a plain number. A Decimal here would resolve through
+     * `valueOf()` to a STRING and silently corrupt every delta.
+     */
+    const storedLines = existing.items.map((line) => ({
+      id: line.id,
+      productId: line.productId,
+      quantity: Number(line.quantity),
+      unitPrice: line.unitPrice,
+      discountPercent: line.discountPercent,
+    }));
+
+    const reconciled = reconcileSaleLines(storedLines, items, products);
+    if (isSaleProblem(reconciled)) {
+      return fail(reconciled.message, reconciled.status);
+    }
+
+    const { updates, creates, removedIds, repricedItemIds } = reconciled;
+
+    // No discounts on this endpoint, so the bill total is simply the sum of the
+    // line totals — the same invariant the create path relies on.
+    const { total: totalAmount } = computeSaleTotal(
+      [...updates, ...creates],
+      new Prisma.Decimal(0)
+    );
+    const tooLarge = checkTotalFits(totalAmount);
+    if (tooLarge) return fail(tooLarge.message, tooLarge.status);
+
+    const stockDeltas = computeStockDeltas(storedLines, reconciled);
+    const shortfalls = findStockShortfalls(stockDeltas, products);
+    if (shortfalls.length > 0) {
+      // All-or-nothing, exactly as on create: refused before the transaction
+      // opens, so no line moves stock — not even the satisfiable ones.
+      return failStockBlocked(stockBlockMessage(shortfalls), shortfalls);
+    }
+
+    /** `moduleKey` is re-resolved per line: a product swap may cross shops. */
+    const moduleOf = (productId: string) => products.get(productId)!.moduleKey;
+
+    const sale = await prisma.$transaction(
+      async (tx) => {
+        // Stock first: its conditional update aborts the whole transaction
+        // before any line is touched if the numbers moved underneath us.
+        await applyStockDeltas(tx, stockDeltas);
+
+        if (removedIds.length > 0) {
+          // `saleId` in the filter as well as the ids: a scoped delete can never
+          // reach a line on someone else's sale, whatever the payload said.
+          await tx.saleItem.deleteMany({
+            where: { id: { in: removedIds }, saleId: existing.id },
+          });
+        }
+
+        for (const update of updates) {
+          const { id, discountPercent, ...data } = update;
+          void discountPercent; // no discounts on this endpoint
+          await tx.saleItem.update({
+            where: { id },
+            data: {
+              ...data,
+              moduleKey: moduleOf(update.productId),
+              netLineTotal: update.lineTotal,
+            },
+          });
+        }
+
+        if (creates.length > 0) {
+          await tx.saleItem.createMany({
+            data: creates.map((line) => ({
+              saleId: existing.id,
+              productId: line.productId,
+              moduleKey: moduleOf(line.productId),
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              lineTotal: line.lineTotal,
+              netLineTotal: line.lineTotal,
+            })),
+          });
+        }
+
+        // Last, so the returned select sees the reconciled lines.
+        return tx.sale.update({
+          where: { id: existing.id },
+          data: { ...header, totalAmount },
+          select: UNIFIED_SALE_DETAIL_SELECT,
+        });
+      },
+      {
+        // One round trip per line update, and a bill may hold 100 of them.
+        timeout: 15_000,
+        maxWait: 5_000,
+      }
+    );
+
+    return ok({ ...serialize(sale), repricedItemIds });
+  } catch (error) {
+    if (error instanceof StockConflictError) {
+      return fail(error.message, 409);
+    }
+    return serverError("sales.[id].PATCH", error);
   }
 }
 
