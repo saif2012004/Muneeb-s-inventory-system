@@ -17,13 +17,13 @@ import {
 import Link from "next/link";
 import { toast } from "sonner";
 
+import { DateRangeFilter } from "@/components/sales/DateRangeFilter";
 import { DeleteSaleDialog } from "@/components/sales/DeleteSaleDialog";
 import { UnifiedSaleLineItems } from "@/components/sales/UnifiedSaleLineItems";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, redirectToLogin } from "@/lib/api-client";
@@ -176,37 +176,20 @@ export function UnifiedSalesList() {
       {/* Filters ------------------------------------------------------ */}
       <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="filter-from">From</Label>
-            <Input
-              id="filter-from"
-              type="date"
-              value={dateFrom}
-              aria-invalid={invalidRange || undefined}
-              aria-describedby={invalidRange ? "filter-range-error" : undefined}
-              className={cn(
-                "num h-11 rounded-lg",
-                invalidRange && "border-rose-400 focus-visible:ring-rose-400"
-              )}
-              onChange={(event) => updateFilter(() => setDateFrom(event.target.value))}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="filter-to">To</Label>
-            <Input
-              id="filter-to"
-              type="date"
-              value={dateTo}
-              aria-invalid={invalidRange || undefined}
-              aria-describedby={invalidRange ? "filter-range-error" : undefined}
-              className={cn(
-                "num h-11 rounded-lg",
-                invalidRange && "border-rose-400 focus-visible:ring-rose-400"
-              )}
-              onChange={(event) => updateFilter(() => setDateTo(event.target.value))}
-            />
-          </div>
+          {/* DD/MM/YYYY, not the device's locale (CHECKLIST #12). A native
+              date input renders mm/dd/yyyy here, which reads American against
+              every other date the app prints. */}
+          <DateRangeFilter
+            from={dateFrom}
+            to={dateTo}
+            invalid={invalidRange}
+            onChange={(next) =>
+              updateFilter(() => {
+                if (next.from !== undefined) setDateFrom(next.from);
+                if (next.to !== undefined) setDateTo(next.to);
+              })
+            }
+          />
 
           <div className="space-y-1.5">
             <Label htmlFor="filter-customer">Customer</Label>

@@ -2154,11 +2154,20 @@ layout group contributing nothing to the URL, and no `/dashboard` route exists. 
 **404s every installed home-screen launch and only breaks after install** — easy to miss, because
 it cannot be seen in the browser.
 
-#### `[ ]` **12. Native date input locale — `DD/MM/YYYY` consistency**
+#### `[~]` **12. Native date input locale — DONE on the unified list, open elsewhere**
 
-The Design System specifies `DD/MM/YYYY`. Confirm every date **input** as well as every display
-honours it — a native `<input type="date">` renders in the *device's* locale, which is not
-something the formatter controls. Check alongside Asia/Karachi day bucketing (Gotcha 4).
+**Confirmed as a real defect and fixed where it matters (2026-08-14).** The native
+`<input type="date">` rendered **mm/dd/yyyy** on this machine, so the sales filters read American
+while every date the app prints is `DD/MM/YYYY` — leaving `08/14` genuinely ambiguous on a money
+screen. A native input takes the DEVICE's locale; no formatter of ours can change it.
+
+**`/sales` now uses `components/sales/DateRangeFilter.tsx`** — the same `Calendar` +
+`formatPickedDate` the sale form uses, with a per-field clear button. Values on the wire stay
+`yyyy-MM-dd`, so Karachi-day filtering is untouched. Browser-verified.
+
+**Still raw `<input type="date">`: the per-module lists** (`/beverages`, `/bakery`) and the milk
+screens. Deliberately left — those retire at S9, and polishing a screen scheduled for deletion is
+work thrown away. **If S9 slips, fix them by swapping in `DateRangeFilter`.**
 
 #### `[ ]` **13. On-device mobile check — a real phone**
 
@@ -2188,14 +2197,19 @@ can depart from it, and what was actually charged is snapshotted on the line.
 
 **Placeholder values until handover.**
 
-#### `[ ]` **18. Billing-time price override on EVERY product (whole inventory)**
+#### `[x]` **18. Billing-time price override — SHIPPED with the unified till (2026-08-14)**
 
-An optional field on the bill to type an updated price when the catalog price has not been refreshed
-yet. Prices move faster than the owner can walk the catalog, and today he has to leave the sale to
-fix one.
+**The till already does this.** Every line on `/sales/new` carries an editable price field —
+`Unit price`, or `Price per litre` for milk — pre-filled from the catalog and overridable per sale,
+for EVERY product in the inventory. What the owner types is sent as an explicit `unitPrice` and the
+server snapshots it verbatim.
 
-**The API already supports this** — `snapshotUnitPrice` honours an explicit `unitPrice` on CREATE,
-and the unified `POST /api/sales` accepts it. **This item is the UI field only.**
+Verified: S4.1 test #6 (a 275.50 override stored exactly, alongside a line that took the catalog's
+120 by omission) and the browser pass on the till.
+
+⚠️ **CREATE ONLY, and the EDIT screen enforces that visibly.** On `/sales/[id]/edit` an existing
+line's price is rendered READ-ONLY, because `reconcileSaleLines` refuses a client price on a stored
+line (CHECKLIST #7) — an editable box there would save happily and change nothing. See #8.
 
 ⚠️ **CREATE ONLY.** The override must never reach an edit: `reconcileSaleLines` deliberately ignores
 a client `unitPrice` for an existing line (CHECKLIST #7, closed 2026-08-11), because honouring it
