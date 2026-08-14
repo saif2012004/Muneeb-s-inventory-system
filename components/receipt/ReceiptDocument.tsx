@@ -137,9 +137,22 @@ export function buildReceiptLines(receipt: ReceiptData): string[] {
       lines.push(`  ${trimPercent(line.discountPercent)}% off`);
     }
 
+    /**
+     * A CHILLED line prints the COMBINED unit price, with a marker.
+     *
+     * `3 × 305.00` must be what multiplies out to the line total, or the receipt
+     * fails the only test that matters — a customer checking it with a
+     * calculator in front of the owner (see the paise rule above). The `chilled`
+     * marker is what explains why that bottle costs more than the shelf price.
+     */
+    const chilled = (line.coolingRate ?? 0) > 0;
+    if (chilled) lines.push(`  chilled +${bareAmount(line.coolingRate ?? 0)}/unit`);
+
     lines.push(
       padRow(
-        `  ${formatQuantity(line.quantity, line.unit)} × ${bareAmount(line.unitPrice)}`,
+        `  ${formatQuantity(line.quantity, line.unit)} × ${bareAmount(
+          line.unitPrice + (line.coolingRate ?? 0)
+        )}`,
         amount(line.lineTotal)
       )
     );

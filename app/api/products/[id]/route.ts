@@ -12,6 +12,8 @@ export const dynamic = "force-dynamic";
 type Context = { params: { id: string } };
 
 const PRODUCT_SELECT = {
+  // Migration E — see the create route.
+  coolingCharge: true,
   id: true,
   name: true,
   price: true,

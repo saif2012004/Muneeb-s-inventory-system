@@ -65,6 +65,21 @@ const productSchema = z.object({
     .refine((value) => value.trim() === "" || Number(value) >= 0, {
       message: "Price cannot be negative",
     }),
+  /**
+   * COOLING CHARGE (Migration E) — beverages only, and BLANK IS MEANINGFUL.
+   *
+   * Blank submits as `null` = "this product is never chilled", so the till shows
+   * no toggle for it. A typed `0` means "chilled, at no charge" and DOES show
+   * one. Collapsing the two would put a chill toggle on every bun.
+   */
+  coolingCharge: z
+    .string()
+    .refine((value) => value.trim() === "" || Number.isFinite(Number(value)), {
+      message: "Cooling charge must be a number",
+    })
+    .refine((value) => value.trim() === "" || Number(value) >= 0, {
+      message: "Cooling charge cannot be negative",
+    }),
   size: z.string(),
   qualityTier: z.string(),
   shape: z.string(),
@@ -83,6 +98,7 @@ export function ProductDialog({
   mode,
   subCategoryId,
   subCategoryName,
+  categoryName,
   product,
   isPending,
   onSubmit,
@@ -92,11 +108,20 @@ export function ProductDialog({
   mode: "create" | "edit";
   subCategoryId: string;
   subCategoryName: string;
+  /** Which CATEGORY this product sits under — decides whether cooling shows. */
+  categoryName: string;
   /** Present in edit mode; seeds the form. */
   product?: Product;
   isPending: boolean;
   onSubmit: (values: ProductWriteInput) => void;
 }) {
+  /**
+   * Cooling is a BEVERAGES concept. Matched on the category NAME, the same
+   * two-step the sale routes use, so a renamed-but-equivalent category still
+   * works and a bakery product never offers a chill charge.
+   */
+  const isBeverage = categoryName.trim().toLowerCase() === "beverages";
+
   const form = useForm<ProductValues>({
     resolver: zodResolver(productSchema),
     defaultValues: {
@@ -104,6 +129,7 @@ export function ProductDialog({
       // Empty, not "0": a field pre-filled with 0 turns "tap and type 250"
       // into "0250". Blank submits as 0 via the coercion in handleSubmit.
       price: "",
+      coolingCharge: "",
       size: NONE,
       qualityTier: NONE,
       shape: NONE,
@@ -116,6 +142,10 @@ export function ProductDialog({
     form.reset({
       name: product?.name ?? "",
       price: product ? String(product.price) : "",
+      coolingCharge:
+        product?.coolingCharge === null || product?.coolingCharge === undefined
+          ? ""
+          : String(product.coolingCharge),
       size: product?.size ?? NONE,
       qualityTier: product?.qualityTier ?? NONE,
       shape: product?.shape ?? NONE,
@@ -128,6 +158,9 @@ export function ProductDialog({
       name: values.name,
       subCategoryId,
       price: values.price.trim() === "" ? 0 : Number(values.price),
+      // Blank -> null ("never chilled"), never 0. See the schema above.
+      coolingCharge:
+        values.coolingCharge.trim() === "" ? null : Number(values.coolingCharge),
       size: toNullable(values.size),
       qualityTier: toNullable(values.qualityTier),
       shape: toNullable(values.shape),
@@ -187,6 +220,35 @@ export function ProductDialog({
                         className="h-11 rounded-lg tabular-nums"
                       />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            ) : null}
+
+            {/* COOLING CHARGE — beverages only (the owner's instruction), and
+                on BOTH create and edit, unlike price. Price has an inline
+                editor in the table; this does not, so the dialog is the only
+                place it can be set. */}
+            {isBeverage ? (
+              <FormField
+                control={form.control}
+                name="coolingCharge"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Cooling charge (PKR per unit)</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        inputMode="decimal"
+                        placeholder="Leave blank if never chilled"
+                        className="h-11 rounded-lg tabular-nums"
+                      />
+                    </FormControl>
+                    <p className="text-sm text-zinc-500">
+                      Added per unit when the sale is marked chilled. Leave blank
+                      and no chill option appears on the bill.
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )}

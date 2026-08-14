@@ -67,8 +67,15 @@ type DialogState =
   | { kind: "add-subcategory"; category: CategoryNode }
   | { kind: "rename-subcategory"; subCategory: SubCategoryNode }
   | { kind: "delete-subcategory"; subCategory: SubCategoryNode }
-  | { kind: "add-product"; subCategory: SubCategoryNode }
-  | { kind: "edit-product"; product: Product; subCategory: SubCategoryNode }
+  // `categoryName` rides along so the dialog can show the COOLING CHARGE field
+  // for beverages only (Migration E) — a chill charge on buns would be noise.
+  | { kind: "add-product"; subCategory: SubCategoryNode; categoryName: string }
+  | {
+      kind: "edit-product";
+      product: Product;
+      subCategory: SubCategoryNode;
+      categoryName: string;
+    }
   | { kind: "delete-product"; product: Product };
 
 export function CatalogManager() {
@@ -378,7 +385,7 @@ export function CatalogManager() {
                                 size="sm"
                                 className="h-9 rounded-lg"
                                 onClick={() =>
-                                  setDialog({ kind: "add-product", subCategory })
+                                  setDialog({ kind: "add-product", subCategory, categoryName: category.name })
                                 }
                               >
                                 <PackagePlus className="mr-2 size-4" aria-hidden />
@@ -443,7 +450,7 @@ export function CatalogManager() {
                                   variant="outline"
                                   className="h-11 rounded-lg"
                                   onClick={() =>
-                                    setDialog({ kind: "add-product", subCategory })
+                                    setDialog({ kind: "add-product", subCategory, categoryName: category.name })
                                   }
                                 >
                                   <Plus className="mr-2 size-4" aria-hidden />
@@ -460,6 +467,7 @@ export function CatalogManager() {
                                   kind: "edit-product",
                                   product,
                                   subCategory,
+                                  categoryName: category.name,
                                 })
                               }
                               onDelete={(product) =>
@@ -612,6 +620,7 @@ export function CatalogManager() {
           mode={dialog.kind === "add-product" ? "create" : "edit"}
           subCategoryId={dialog.subCategory.id}
           subCategoryName={dialog.subCategory.name}
+          categoryName={dialog.categoryName}
           product={dialog.kind === "edit-product" ? dialog.product : undefined}
           isPending={createProduct.isPending || updateProduct.isPending}
           onSubmit={(values: ProductWriteInput) => {

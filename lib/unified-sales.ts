@@ -46,6 +46,9 @@ export const UNIFIED_SALE_PRODUCT_SELECT = {
   price: true,
   stock: true,
   isActive: true,
+  // Migration E. Rides along in the select the route already runs, so the
+  // cooling charge costs ZERO extra round trips — same reasoning as `stock`.
+  coolingCharge: true,
   subCategory: {
     select: {
       categoryId: true,
@@ -61,11 +64,25 @@ export type UnifiedSaleProductRow = {
   price: Prisma.Decimal;
   stock: Prisma.Decimal | number;
   isActive: boolean;
+  /** NULL = never chilled, so no toggle. See the schema. */
+  coolingCharge: Prisma.Decimal | null;
   subCategory: { categoryId: string; category: { id: string; name: string } };
 };
 
-/** A resolved product, carrying the module its line will be recorded under. */
-export type UnifiedSaleProduct = SaleProduct & { moduleKey: ModuleKey };
+/**
+ * A resolved product, carrying the module its line will be recorded under and
+ * the cooling charge the till may apply.
+ *
+ * 🔒 THE RATE COMES FROM HERE — THE SERVER — NEVER FROM THE CLIENT. The till
+ * sends only `chilled: true/false`; the amount is read off the catalog row. A
+ * client-supplied rate would be a second price channel to police, and the whole
+ * point of the owner's instruction ("the cooling charges has to be added from
+ * the catalog") is that there is one place the number lives.
+ */
+export type UnifiedSaleProduct = SaleProduct & {
+  moduleKey: ModuleKey;
+  coolingCharge: Prisma.Decimal | null;
+};
 
 /**
  * Which module a line belongs to, from its product's Category.
@@ -148,7 +165,11 @@ export async function loadUnifiedSaleProducts(
         status: 409,
       };
     }
-    resolved.set(row.id, { ...byId.get(row.id)!, moduleKey });
+    resolved.set(row.id, {
+      ...byId.get(row.id)!,
+      moduleKey,
+      coolingCharge: row.coolingCharge,
+    });
   }
 
   return resolved;
@@ -177,6 +198,10 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
       ...SALE_DETAIL_SELECT.items.select,
       moduleKey: true,
       netLineTotal: true,
+      // The rate actually charged on this line, snapshotted (Migration E). The
+      // receipt and the detail view read it; neither recomputes it from the
+      // catalog, which would let a later change move a printed bill.
+      coolingRate: true,
     },
     // cuid is time-prefixed, so id order is insertion order.
     orderBy: { id: "asc" },

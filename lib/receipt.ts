@@ -64,6 +64,8 @@ export type ReceiptSourceKey = ReceiptModuleKey | "sale";
 export type ReceiptLine = {
   id: string;
   name: string;
+  /** Cooling charge per unit actually applied. 0 = not chilled. */
+  coolingRate?: number;
   /** Size / tier / shape, already composed — the same detail the screen shows. */
   detail: string | null;
   unit: string | null;
@@ -232,6 +234,7 @@ export async function loadUnifiedReceipt(
       name: item.product.name,
       detail: composeDetail(item.product),
       unit: item.product.unit,
+      coolingRate: serializeMoney(item.coolingRate),
       // `quantity` is Decimal(10,2) on this table (Migration C) — `Number()` it
       // here, at the boundary, or `12.5` prints as an object (Gotcha 2).
       quantity: Number(item.quantity),

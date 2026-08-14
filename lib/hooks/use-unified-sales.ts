@@ -70,6 +70,12 @@ export type UnifiedSaleItem = {
   quantity: number;
   /** The SNAPSHOT taken when the line was written — not today's catalog price. */
   unitPrice: number;
+  /**
+   * The cooling charge per unit ACTUALLY applied to this line (Migration E).
+   * 0 = not chilled. Snapshotted like the price, so a later catalog change
+   * cannot move a printed bill.
+   */
+  coolingRate: number;
   /** Always 0 on this endpoint: the unified sale has no discounts. */
   discountPercent: number;
   lineTotal: number;

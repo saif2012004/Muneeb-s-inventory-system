@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 /** Shared shape so list and detail responses never drift. */
 const PRODUCT_SELECT = {
+  // Migration E — the owner sets this per beverage size; the till reads it.
+  coolingCharge: true,
   id: true,
   name: true,
   price: true,

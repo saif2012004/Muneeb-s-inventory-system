@@ -260,6 +260,16 @@ export const unifiedSaleFormSchema = z.object({
         quantity: quantityField("decimal"),
         unitPrice,
         discountPercent,
+        /**
+         * COOLING (Migration E) — a toggle, never a rate. The amount lives in
+         * the catalog and the server reads it from there; the bill only records
+         * WHETHER this line was chilled.
+         *
+         * OPTIONAL so this value shape stays assignable to the per-module one
+         * and `LineItemRow` can remain a single shared component — the same
+         * reason `id` is optional. A required extra field would fork the row.
+         */
+        chilled: z.boolean().optional(),
       })
     )
     .min(1, { message: "Add at least one item to the sale." })
@@ -278,4 +288,15 @@ export type UnifiedSaleFormOutput = z.output<typeof unifiedSaleFormSchema>;
 /** A fresh, empty line. `unitPrice` is filled in when a product is chosen. */
 export function emptySaleLine(): SaleFormValues["items"][number] {
   return { productId: "", quantity: "1", unitPrice: "", discountPercent: "" };
+}
+
+/** A fresh line for the UNIFIED till, which also carries the chill toggle. */
+export function emptyUnifiedSaleLine(): UnifiedSaleFormValues["items"][number] {
+  return {
+    productId: "",
+    quantity: "1",
+    unitPrice: "",
+    discountPercent: "",
+    chilled: false,
+  };
 }

@@ -2185,17 +2185,38 @@ bottom nav, numeric keypads (`inputMode="decimal"`), and reduced-motion.
 **placeholder values until handover** — the owner sets the real numbers himself, the same way stock
 and shop details are his to enter (CHECKLIST #2 / #2b).
 
-#### `[ ]` **17. Cooling / chilling charge — per product, set by the owner**
+#### `[x]` **17. Cooling / chilling charge — SHIPPED 2026-08-14 (Migration E)**
 
-A per-product catalog field for the cooling charge, **set by the owner himself and independently for
-EACH beverage size** — a 1.5L and a 2.25L do not carry the same charge, so one global rate would be
-wrong for every size but one.
+**10/10 tested, browser-verified.** `Product.coolingCharge` (nullable) + `SaleItem.coolingRate`
+(default 0). The owner sets the charge **per product** in the catalog — beverages only, since a chill
+charge on buns is noise — and the bill carries **a TOGGLE and nothing else**.
 
-At billing: a **toggle** (this sale is chilled / not) plus a **rate override**, defaulting to the
-catalog value. Same shape as the price override in #18 — the catalog holds the usual number, the bill
-can depart from it, and what was actually charged is snapshotted on the line.
+> 🔴 **NO RATE FIELD ON THE BILL.** The owner's instruction, 2026-08-14: *"no field when making bill.
+> during bill just add a toggle to add cooling charges. the cooling charges has to be added from the
+> catalog."* So the client sends `chilled: true/false` and the SERVER reads the amount off the
+> catalog row. A client-supplied `coolingRate` is a 400 (`.strict()`). **Do not add a rate override
+> to the till** — it would be a second place the number lives, and the point is that there is one.
 
-**Placeholder values until handover.**
+**The money rule.** `lineTotal = round(quantity × (unitPrice + coolingRate), 2)` — a chilled unit
+simply costs more, folded into the SAME `computeLineTotal` every other sale uses. So
+`netLineTotal === lineTotal` and `totalAmount === Σ netLineTotal` stay true by construction and
+nothing in reports, receivables or the receipt learns a new concept. Verified: 3 × (275.50 + 30) =
+**916.50**, Σ netLineTotal checked in SQL.
+
+**NULL ≠ 0 on `coolingCharge`.** Null = never chilled, so no toggle appears. 0 = chilled at no
+charge, which DOES show one. Collapsing them puts a chill toggle on every bun.
+
+**The rate is SNAPSHOTTED.** Raising the catalog charge to 500 left a stored bill at its 30 — tested.
+An EXISTING line's toggle is not offered on the edit screen for the same reason the price is
+read-only there (CHECKLIST #7): the server keeps the stored rate, so an editable control would be a
+silent no-op.
+
+**Receipt** prints the combined unit price with a `chilled +30.00/unit` marker, so `2 × 305.50`
+multiplies out to the line total — the calculator test that the paise rule exists for. Still inside
+32 columns.
+
+**No real product has a charge yet** — the owner sets them, exactly as he does stock and shop
+details. Until he does, no toggle appears anywhere.
 
 #### `[x]` **18. Billing-time price override — SHIPPED with the unified till (2026-08-14)**
 

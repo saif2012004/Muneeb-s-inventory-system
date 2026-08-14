@@ -92,6 +92,22 @@ export const subCategoryUpdateSchema = z
     message: "Nothing to update",
   });
 
+/**
+ * The per-unit COOLING CHARGE (Migration E), set by the owner in the catalog.
+ *
+ * NULLABLE, and the null is meaningful: null = this product is never chilled,
+ * so the till shows no toggle for it. `0` would mean "chilled, at no charge"
+ * and WOULD show one. Clearing the field sends null, not 0.
+ *
+ * Same 2dp money bounds as `price` — it is money on a bill.
+ */
+const coolingCharge = z
+  .number({ message: "Cooling charge must be a number" })
+  .min(0, { message: "Cooling charge cannot be negative" })
+  .max(99_999_999.99, { message: "Cooling charge is too large" })
+  .nullable()
+  .optional();
+
 // ---------------------------------------------------------------------------
 // Product
 // ---------------------------------------------------------------------------
@@ -100,6 +116,7 @@ export const productCreateSchema = z.object({
   name,
   subCategoryId: id,
   price,
+  coolingCharge,
   size,
   qualityTier,
   shape,
@@ -116,6 +133,7 @@ export const productUpdateSchema = z
     name: name.optional(),
     subCategoryId: id.optional(),
     price: price.optional(),
+    coolingCharge,
     stock: stock.optional(),
     size,
     qualityTier,

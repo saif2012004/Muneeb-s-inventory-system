@@ -170,25 +170,54 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
     if (isSaleProblem(products)) return fail(products.message, products.status);
 
+    const noCharge = items.find(
+      (item) => item.chilled && !products.get(item.productId)!.coolingCharge
+    );
+    if (noCharge) {
+      const product = products.get(noCharge.productId)!;
+      return fail(
+        `"${product.name}" has no cooling charge set in the catalog, so it can't be billed as chilled. Set one on the product first.`,
+        400
+      );
+    }
+
     const lines = items.map((item) => {
       // Non-null: loadUnifiedSaleProducts already proved every id resolves.
       const product = products.get(item.productId)!;
 
       // Create-only override (Gotcha 5): an explicit unitPrice wins here and
-      // ONLY here. There is no unified update path yet, and when one is built it
-      // must ignore the client price for an existing line.
+      // ONLY here. The update path ignores a client price for an existing line.
       const unitPrice = snapshotUnitPrice(product, item.unitPrice);
+
+      /**
+       * COOLING (Migration E). The client sends a BOOLEAN; the rate is read off
+       * the catalog row, never from the request — one place the number lives.
+       *
+       * `chilled` on a product with no charge is a 400 rather than a silent 0:
+       * it means a toggle was offered that should not exist, and charging
+       * nothing while pretending to have chilled it hides the bug.
+       */
+      const coolingRate =
+        item.chilled && product.coolingCharge
+          ? product.coolingCharge
+          : new Prisma.Decimal(0);
 
       // `item.quantity` is the VALIDATED REQUEST VALUE, passed straight through.
       // Never a derived one: decimal.js builds from a number's shortest decimal
       // form, so a 2dp input is exact — but float noise in a COMPUTED value
       // (0.1 + 0.2 -> 0.30000000000000004) would survive into the money.
       // The discount argument is omitted, so it defaults to 0.
-      const lineTotal = computeLineTotal(unitPrice, item.quantity);
+      //
+      // A chilled line simply costs more PER UNIT, so the charge is folded into
+      // the price handed to the SAME `computeLineTotal` every other sale uses —
+      // no second money implementation, and `netLineTotal === lineTotal` and
+      // `totalAmount === Σ netLineTotal` both stay true by construction.
+      const lineTotal = computeLineTotal(unitPrice.add(coolingRate), item.quantity);
 
       return {
         productId: item.productId,
         moduleKey: product.moduleKey,
+        coolingRate,
         // A NUMBER, not a Decimal: this same object feeds `computeStockDeltas`,
         // whose SaleLine contract is `quantity: number` because it does plain
         // arithmetic on it (`prior.quantity - line.quantity`). Prisma accepts a
@@ -248,6 +277,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       moduleKey: line.moduleKey,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
+      // Snapshotted like the price: a later catalog change must not move a
+      // printed bill. 0 when the line was not chilled.
+      coolingRate: line.coolingRate,
       lineTotal: line.lineTotal,
       netLineTotal: line.netLineTotal,
     }));

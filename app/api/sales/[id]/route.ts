@@ -14,6 +14,7 @@ import {
   StockConflictError,
   applyStockDeltas,
   checkTotalFits,
+  computeLineTotal,
   computeSaleTotal,
   computeStockDeltas,
   findStockShortfalls,
@@ -122,6 +123,8 @@ export async function PATCH(
             productId: true,
             quantity: true,
             unitPrice: true,
+            // Kept, never recomputed: cooling is part of what was charged.
+            coolingRate: true,
             discountPercent: true,
             lineTotal: true,
           },
@@ -179,10 +182,73 @@ export async function PATCH(
 
     const { updates, creates, removedIds, repricedItemIds } = reconciled;
 
+    /**
+     * COOLING, RE-APPLIED AFTER RECONCILIATION (Migration E).
+     *
+     * `reconcileSaleLines` knows nothing about cooling — it computes each line
+     * total from the price alone. So the rate is resolved here and the total
+     * recomputed with the SAME helper, rather than teaching the shared
+     * reconciler a rule only this endpoint has.
+     *
+     *   EXISTING line -> the STORED rate, always. Cooling is part of what was
+     *                    charged; re-opening a bill must not change it, exactly
+     *                    as with `unitPrice` (CHECKLIST #7). The edit screen does
+     *                    not offer the toggle on a stored line.
+     *   NEW line      -> the catalog's charge if `chilled`, else 0.
+     */
+    const storedRateById = new Map(
+      existing.items.map((line) => [line.id, line.coolingRate])
+    );
+    const zero = new Prisma.Decimal(0);
+
+    const chilledWithoutCharge = items.find(
+      (item) => !item.id && item.chilled && !products.get(item.productId)!.coolingCharge
+    );
+    if (chilledWithoutCharge) {
+      const product = products.get(chilledWithoutCharge.productId)!;
+      return fail(
+        `"${product.name}" has no cooling charge set in the catalog, so it can't be billed as chilled. Set one on the product first.`,
+        400
+      );
+    }
+
+    const withCooling = <T extends { productId: string; quantity: number; unitPrice: Prisma.Decimal; lineTotal: Prisma.Decimal }>(
+      line: T,
+      rate: Prisma.Decimal
+    ): T & { coolingRate: Prisma.Decimal } => ({
+      ...line,
+      coolingRate: rate,
+      lineTotal: computeLineTotal(line.unitPrice.add(rate), line.quantity),
+    });
+
+    const pricedUpdates = updates.map((line) => {
+      const stored = existing.items.find((item) => item.id === line.id);
+      /**
+       * A line whose PRODUCT changed keeps NO cooling. The old product's charge
+       * belongs to the old product, the toggle is not offered on an edit, and
+       * silently carrying a Pepsi chill charge onto a bun would be worse than
+       * dropping it — the owner can see a missing charge, not a stowaway one.
+       */
+      const rate =
+        stored && stored.productId === line.productId
+          ? (storedRateById.get(line.id) ?? zero)
+          : zero;
+      return withCooling(line, rate);
+    });
+
+    const pricedCreates = creates.map((line, index) => {
+      // `creates` preserves the order of the submitted entries without ids.
+      const source = items.filter((item) => !item.id)[index];
+      const product = products.get(line.productId)!;
+      const rate =
+        source?.chilled && product.coolingCharge ? product.coolingCharge : zero;
+      return withCooling(line, rate);
+    });
+
     // No discounts on this endpoint, so the bill total is simply the sum of the
     // line totals — the same invariant the create path relies on.
     const { total: totalAmount } = computeSaleTotal(
-      [...updates, ...creates],
+      [...pricedUpdates, ...pricedCreates],
       new Prisma.Decimal(0)
     );
     const tooLarge = checkTotalFits(totalAmount);
@@ -213,7 +279,7 @@ export async function PATCH(
           });
         }
 
-        for (const update of updates) {
+        for (const update of pricedUpdates) {
           const { id, discountPercent, ...data } = update;
           void discountPercent; // no discounts on this endpoint
           await tx.saleItem.update({
@@ -226,14 +292,15 @@ export async function PATCH(
           });
         }
 
-        if (creates.length > 0) {
+        if (pricedCreates.length > 0) {
           await tx.saleItem.createMany({
-            data: creates.map((line) => ({
+            data: pricedCreates.map((line) => ({
               saleId: existing.id,
               productId: line.productId,
               moduleKey: moduleOf(line.productId),
               quantity: line.quantity,
               unitPrice: line.unitPrice,
+              coolingRate: line.coolingRate,
               lineTotal: line.lineTotal,
               netLineTotal: line.lineTotal,
             })),

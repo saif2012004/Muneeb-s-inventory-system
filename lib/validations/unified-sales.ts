@@ -88,6 +88,19 @@ export const unifiedSaleItemCreateSchema = z
     productId: id,
     quantity,
     unitPrice: money.optional(),
+    /**
+     * COOLING (Migration E) — a BOOLEAN, never a rate.
+     *
+     * The owner's instruction was explicit: the charge is set in the catalog and
+     * the bill only carries a toggle. So the client says *whether* this line was
+     * chilled and the SERVER reads the amount off the product. There is exactly
+     * one place the number lives, and no second price channel to police.
+     *
+     * Sending `chilled: true` for a product with NO cooling charge is a 400,
+     * not a silent 0 — it means the till offered a toggle it should not have,
+     * and swallowing it would hide the bug while charging nothing.
+     */
+    chilled: z.boolean().optional(),
   })
   .strict();
 
@@ -127,6 +140,14 @@ export const unifiedSaleItemUpdateSchema = z
     productId: id,
     quantity,
     unitPrice: money.optional(),
+    /**
+     * NEW lines only. On an EXISTING line the stored `coolingRate` is kept and
+     * this is ignored — the same rule as `unitPrice`, for the same reason:
+     * cooling is part of what was charged, and a printed bill must not change
+     * because someone re-opened it. The edit screen does not offer the toggle
+     * on a stored line.
+     */
+    chilled: z.boolean().optional(),
   })
   .strict();
 

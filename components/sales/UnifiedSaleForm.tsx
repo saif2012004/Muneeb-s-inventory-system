@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { ApiError, redirectToLogin, type StockShortfall } from "@/lib/api-client";
 import { formatPKR, karachiToday, toDateKey } from "@/lib/format";
 import { useProducts } from "@/lib/hooks/use-catalog";
@@ -31,12 +32,74 @@ import {
 import { enterUp, lineItemInOut } from "@/lib/motion";
 import { groupUnifiedSaleProducts, indexSaleProducts } from "@/lib/sale-catalog";
 import {
-  emptySaleLine,
+  emptyUnifiedSaleLine,
   previewLineTotal,
   unifiedSaleFormSchema,
   type UnifiedSaleFormOutput,
   type UnifiedSaleFormValues,
 } from "@/lib/validations/sale-form";
+
+/**
+ * The chill toggle for one line (Migration E).
+ *
+ * ---------------------------------------------------------------------------
+ * A TOGGLE, AND NOTHING ELSE — the owner's instruction
+ * ---------------------------------------------------------------------------
+ * "no field when making bill. during bill just add a toggle... the cooling
+ * charges has to be added from the catalog". So the bill shows whether the item
+ * was chilled and what that adds; the AMOUNT is set once, in the catalog, and
+ * the server reads it from there. There is no rate box here to disagree with it.
+ *
+ * It appears ONLY for a product that has a cooling charge — null means "never
+ * chilled" and a bun must not offer one.
+ *
+ * It lives here rather than inside `LineItemRow` so that shared component (used
+ * by the two per-module screens as well) needs no new required field.
+ */
+function ChillToggle({
+  form,
+  index,
+  optionsById,
+  locked,
+}: {
+  form: ReturnType<typeof useForm<UnifiedSaleFormValues, unknown, UnifiedSaleFormOutput>>;
+  index: number;
+  optionsById: Map<string, { product: { coolingCharge: number | null } }>;
+  locked: boolean;
+}) {
+  const productId = useWatch({ control: form.control, name: `items.${index}.productId` });
+  const chilled = useWatch({ control: form.control, name: `items.${index}.chilled` });
+  const charge = productId ? optionsById.get(productId)?.product.coolingCharge : null;
+
+  if (charge === null || charge === undefined) return null;
+
+  // On an EXISTING line the server keeps the stored rate, so the toggle would
+  // be a no-op. State is shown, not offered — same stance as the locked price.
+  if (locked) {
+    return chilled ? (
+      <p className="-mt-1 px-4 pb-3 text-sm text-zinc-500">
+        Chilled · {formatPKR(charge)} per unit was added to this line.
+      </p>
+    ) : null;
+  }
+
+  return (
+    <label className="-mt-1 flex min-h-[44px] cursor-pointer items-center justify-between gap-3 px-4 pb-3">
+      <span className="text-sm text-zinc-600">
+        Chilled{" "}
+        <span className="num text-zinc-400">
+          (+{formatPKR(charge)} per unit)
+        </span>
+      </span>
+      <Switch
+        checked={chilled ?? false}
+        onCheckedChange={(next) =>
+          form.setValue(`items.${index}.chilled`, next, { shouldDirty: true })
+        }
+      />
+    </label>
+  );
+}
 
 /**
  * THE UNIFIED TILL — one bill, any product from any shop.
@@ -123,8 +186,11 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
             quantity: String(item.quantity),
             unitPrice: String(item.unitPrice),
             discountPercent: "",
+            // Stored lines keep their charge and cannot toggle it — the server
+            // ignores the flag for them. Shown as text beneath the row instead.
+            chilled: item.coolingRate > 0,
           }))
-        : [emptySaleLine()],
+        : [emptyUnifiedSaleLine()],
     },
     mode: "onTouched",
   });
@@ -161,9 +227,23 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
    * The server recomputes every figure on Decimal and its answer is what gets
    * stored; this exists so the owner can watch the bill add up.
    */
+  /**
+   * A line's per-unit cooling charge, for the preview only. The SERVER decides
+   * the real one from the catalog row; this exists so the total bar agrees with
+   * what the owner is about to be charged.
+   */
+  const coolingFor = (item: { productId?: string; chilled?: boolean } | undefined) => {
+    if (!item?.chilled || !item.productId) return 0;
+    return optionsById.get(item.productId)?.product.coolingCharge ?? 0;
+  };
+
   const runningTotal = (watchedItems ?? []).reduce(
     (total, item) =>
-      total + previewLineTotal(item?.quantity ?? "", item?.unitPrice ?? ""),
+      total +
+      previewLineTotal(
+        item?.quantity ?? "",
+        String((Number(item?.unitPrice) || 0) + coolingFor(item))
+      ),
     0
   );
 
@@ -280,7 +360,12 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
              * offer it either — the field is read-only.
              */
             items: values.items.map((item) => ({
-              ...(item.id ? { id: item.id } : { unitPrice: item.unitPrice }),
+              // A stored line sends neither price nor chill flag: the server
+              // keeps both, so submitting them would be sending values we know
+              // cannot take effect.
+              ...(item.id
+                ? { id: item.id }
+                : { unitPrice: item.unitPrice, chilled: item.chilled ?? false }),
               productId: item.productId,
               quantity: item.quantity,
             })),
@@ -341,7 +426,7 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
 
   /** Keep customer + date, clear the lines — the next bill is usually the same shop. */
   function addAnother() {
-    form.setValue("items", [emptySaleLine()]);
+    form.setValue("items", [emptyUnifiedSaleLine()]);
     form.setValue("notes", "");
     form.clearErrors();
     setJustSaved(null);
@@ -520,6 +605,13 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
                         // refuses to change it, so offering the field would be
                         // a silent no-op. New lines keep an editable price.
                         priceLocked={isEdit && Boolean(form.getValues(`items.${index}.id`))}
+                        extraUnitCost={coolingFor(watchedItems?.[index])}
+                      />
+                      <ChillToggle
+                        form={form}
+                        index={index}
+                        optionsById={optionsById}
+                        locked={isEdit && Boolean(form.getValues(`items.${index}.id`))}
                       />
                     </motion.div>
                   ))}
@@ -537,7 +629,7 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
               type="button"
               variant="outline"
               className="h-11 w-full rounded-lg border-dashed"
-              onClick={() => append(emptySaleLine())}
+              onClick={() => append(emptyUnifiedSaleLine())}
             >
               <Plus className="mr-2 size-4" aria-hidden />
               Add item

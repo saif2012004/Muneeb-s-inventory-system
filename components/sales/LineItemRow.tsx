@@ -50,6 +50,7 @@ export function LineItemRow({
   searchPlaceholder,
   showDiscount = true,
   priceLocked = false,
+  extraUnitCost = 0,
 }: {
   form: SaleForm;
   index: number;
@@ -78,6 +79,16 @@ export function LineItemRow({
    * a line, and the hint below says so.
    */
   priceLocked?: boolean;
+  /**
+   * A per-unit cost the LINE carries beyond its price — today, the cooling
+   * charge (Migration E). Added to the unit price for THIS ROW'S preview so the
+   * line total the owner reads is the same figure the bill total sums and the
+   * server stores. Without it a chilled line would show Rs. 825 while the total
+   * bar said Rs. 915, and the owner would have to work out which was lying.
+   *
+   * Defaults to 0, so the two per-module screens are byte-identical.
+   */
+  extraUnitCost?: number;
 }) {
   // Subscribes this row only — typing in one line doesn't re-render the others.
   const row = useWatch({ control: form.control, name: `items.${index}` });
@@ -89,14 +100,15 @@ export function LineItemRow({
 
   const selected = productId ? optionsById.get(productId) : undefined;
   const unit = selected?.product.unit ?? null;
-  const lineTotal = previewLineTotal(quantity, unitPrice, discountPercent);
+  const pricePerUnit = String((Number(unitPrice) || 0) + extraUnitCost);
+  const lineTotal = previewLineTotal(quantity, pricePerUnit, discountPercent);
   /**
    * What the line WOULD have been without its discount, shown struck through
    * beside the total. The discount is the thing the owner is most likely to
    * mistype (a stray 0 turns 5% into 50%), and a bare "Rs. 465" gives them
    * nothing to check it against — "Rs. 930 → Rs. 465" is immediately wrong-looking.
    */
-  const undiscountedTotal = previewLineTotal(quantity, unitPrice);
+  const undiscountedTotal = previewLineTotal(quantity, pricePerUnit);
   const hasDiscount = lineTotal !== undiscountedTotal;
 
   const errors = form.formState.errors.items?.[index];

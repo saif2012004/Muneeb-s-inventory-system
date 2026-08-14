@@ -40,6 +40,19 @@ model Product {
   qualityTier     String? // "premium" | "simple" | null
   shape           String? // "circle" | "rectangular_round" | null (russ)
   unit            String? // "cotton" (eggs) | "piece" | "bottle" | null
+  /// Per-unit COOLING CHARGE, set by the owner in the catalog (Migration E).
+  ///
+  /// NULL means this product is never chilled — bakery, milk — and the till
+  /// shows NO toggle for it. That is deliberately different from 0, which would
+  /// mean "chilled, at no charge" and WOULD show a toggle. Buns must not offer
+  /// one.
+  ///
+  /// Per PRODUCT, not per category: a 1.5L and a 2.25L do not carry the same
+  /// charge, so one global rate would be wrong for every size but one.
+  ///
+  /// The BILL never sets the amount — it carries a toggle and the server reads
+  /// this column. One place the number lives.
+  coolingCharge   Decimal?    @db.Decimal(10, 2)
   /// Units on hand. TEMPORARY seed value of 100 — the owner sets real numbers
   /// via the catalog stock editor.
   ///
@@ -212,6 +225,13 @@ model SaleItem {
   /// decimal simply does not get in their way.
   quantity        Decimal @db.Decimal(10, 2)
   unitPrice       Decimal @db.Decimal(10, 2)
+  /// The cooling rate ACTUALLY CHARGED on this line, per unit (Migration E).
+  ///
+  /// Snapshotted exactly like `unitPrice`, and for the same reason: editing the
+  /// catalog's charge later must never move a bill that has already been
+  /// printed. 0 = not chilled, which is also every line written before this
+  /// column existed.
+  coolingRate     Decimal @default(0) @db.Decimal(10, 2)
   discountPercent Decimal @default(0) @db.Decimal(5, 2)
   lineTotal       Decimal @db.Decimal(10, 2)
   /// This line’s share of the bill AFTER the whole-bill discount.

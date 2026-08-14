@@ -39,6 +39,8 @@ export type Product = {
   name: string;
   /** Already a NUMBER — the route serializes the Decimal (Gotcha 2). */
   price: number;
+  /** Per-unit cooling charge, or null when this product is never chilled. */
+  coolingCharge: number | null;
   size: string | null;
   /** Units on hand. Beverages + bakery; milk has no products. */
   stock: number;
@@ -165,6 +167,13 @@ export type ProductWriteInput = {
   name: string;
   subCategoryId: string;
   price: number;
+  /**
+   * Per-unit cooling charge (Migration E). `null` = never chilled, so the till
+   * shows no toggle; `0` = chilled at no charge, which does. Beverages only in
+   * the UI, but the type does not enforce that — the server accepts it on any
+   * product and simply never shows a toggle where it is null.
+   */
+  coolingCharge?: number | null;
   size: string | null;
   /**
    * OPTIONAL on write. A new product takes the column default rather than the
