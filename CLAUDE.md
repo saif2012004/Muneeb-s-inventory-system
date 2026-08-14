@@ -1543,7 +1543,7 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **S4.1** | `GET /api/sales` · `GET`+`DELETE /api/sales/[id]` (delete RESTORES stock) · hooks | ✅ 2026-08-14 · **20/20** |
 | **S4.2** | unified sale SCREEN (`/sales`, `/sales/new`) + unified receipt + receivables bridge | ✅ 2026-08-14 · **13/13 + browser** |
 | **S4.3** | **milk cutover** — `/milk/sales` history-only, milk stock AUTHORITATIVE | ✅ 2026-08-14 |
-| **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ⬜ Todo |
+| **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ✅ 2026-08-14 · applied + verified |
 | **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ✅ 2026-08-14 · **12/12 + 8/8**, table shipped |
 | **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
 | **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ⬜ Todo |
@@ -1848,7 +1848,7 @@ delete and every other destructive step here was confirmed.
 > | `BakerySale` | **1** — Rs. 5,000, customer Saif, still in the OLD table |
 > | `MilkSale` | **1** — Rs. 6,000 |
 > | `BeverageSale` | **0** |
-> | `Sale` (unified) | 1 — migration A's copy of the bakery row, not a second sale |
+> | `Sale` (unified) | **2 as of S5 (2026-08-14)** — migration A's bakery copy + the milk copy. NEITHER is a new sale; both are copies excluded from every total by `notAMigrationCopy()` |
 > | `Customer` | **1** — Saif |
 > | `CustomerPayment` | 0 |
 >

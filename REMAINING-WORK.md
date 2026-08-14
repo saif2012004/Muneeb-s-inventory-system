@@ -179,7 +179,25 @@ bill is deleted (stock restored) and re-rung meanwhile.
 
 </details>
 
-### S5 — Move the real sales into the unified table (data migration, GATED)
+### ✅ S5 — DONE 2026-08-14 (applied and verified)
+
+The bakery sale was already copied faithfully by migration A, so S5 was ONE milk sale:
+`MilkSale cmsjh84mt0009uve8xh13m74k` (50 L x 120 = 6,000) copied into `Sale` + `SaleItem` with the
+SAME id and original timestamps, `moduleKey` "milk", `netLineTotal` 6,000. Stock deliberately
+untouched — that sale predates the bridge, and decrementing would drive `prod_milk` to -50.
+
+**No figure moved**, which is the design: both copies are excluded from every total by
+`notAMigrationCopy()` until S9 drops the old tables. Verified after: Saif 11,000 on both the profile
+and list paths, reports 5,000 / 6,000 / 11,000, "Sales by product" still one milk row of 50 L,
+fingerprint `b57a51bb...` identical, `prod_milk` 0.00, farmer net owed 5,000.
+
+Rollback, if ever needed, is two deletes by id:
+`DELETE FROM "SaleItem" WHERE id='cmsjh84mt0009uve8xh13m74k';` then the same on `"Sale"`.
+
+<details>
+<summary>Original plan (kept for the record)</summary>
+
+#### S5 — Move the real sales into the unified table (data migration, GATED)
 
 The 2 real sales currently live in the old per-module tables (`BakerySale`, `MilkSale`). Once
 the unified screen is proven, migrate the real sales into the unified `Sale`/`SaleItem` tables
