@@ -16,7 +16,7 @@ import type {
   ReportPeriod,
   TrendGrouping,
   TrendModule,
-} from "@/lib/reports";
+} from "@/lib/reports-display";
 
 export type ReportSummary = {
   period: ReportPeriod;
@@ -68,6 +68,21 @@ export const reportKeys = {
     [...reportKeys.all, "trend", module, groupBy, period] as const,
   topProducts: (module: ProductModule, period: ReportPeriod, limit: number) =>
     [...reportKeys.all, "top-products", module, period, limit] as const,
+  productSales: (period: ReportPeriod) =>
+    [...reportKeys.all, "product-sales", period] as const,
+};
+
+/** One product's units and revenue in the period, in the shop it sold as. */
+export type ProductSalesRow = {
+  productId: string;
+  productName: string;
+  /** "beverages" | "bakery" | "milk" — the SNAPSHOT, so milk is its own line. */
+  moduleKey: string;
+  /** "litre" / "cotton" — a bare 12.5 beside a bare 3 is ambiguous. */
+  unit: string | null;
+  /** May be fractional: 12.5 litres of milk. */
+  quantity: number;
+  revenue: number;
 };
 
 /**
@@ -125,6 +140,21 @@ export function useTrend(options: {
       api.get<TrendPoint[]>(
         `/api/reports/trend?module=${module}&groupBy=${groupBy}&period=${period}`
       ),
+  });
+}
+
+/**
+ * Every product's units and revenue for the period (#20).
+ *
+ * Its own query rather than part of the summary: it is two round trips and it
+ * renders below the fold, so it loads behind its own skeleton while the
+ * headline figures are already on screen — the same reason /balances is split.
+ */
+export function useProductSales(period: ReportPeriod) {
+  return useQuery({
+    queryKey: reportKeys.productSales(period),
+    queryFn: () =>
+      api.get<ProductSalesRow[]>(`/api/reports/product-sales?period=${period}`),
   });
 }
 

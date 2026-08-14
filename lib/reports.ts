@@ -1,11 +1,20 @@
 import { Prisma } from "@prisma/client";
 
 import { karachiRange, type DateRange } from "@/lib/format";
+import {
+  PRODUCT_MODULES,
+  TREND_GROUPINGS,
+  TREND_MODULES,
+  type ProductModule,
+  type ReportPeriod,
+  type TrendGrouping,
+  type TrendModule,
+} from "@/lib/reports-display";
 import { getAllFarmerTotals } from "@/lib/milk";
 import { prisma } from "@/lib/prisma";
 // The migration-A dedupe, shared with lib/receivables.ts — ONE definition, so
 // revenue and balances cannot disagree about which Sale rows are real.
-import { NOT_A_MIGRATION_COPY } from "@/lib/unified-sales";
+import { notAMigrationCopy } from "@/lib/unified-sales";
 // NOTE: lib/receivables.ts is intentionally NOT imported any more. It still
 // exists and still works; nothing calls it. See getBalanceTotals() below.
 
@@ -44,15 +53,23 @@ const ZERO = new Prisma.Decimal(0);
 // Periods
 // ---------------------------------------------------------------------------
 
-export const REPORT_PERIODS = ["today", "week", "month", "year"] as const;
-export type ReportPeriod = (typeof REPORT_PERIODS)[number];
-
-export const REPORT_PERIOD_LABELS: Record<ReportPeriod, string> = {
-  today: "Today",
-  week: "This Week",
-  month: "This Month",
-  year: "This Year",
-};
+/**
+ * Periods, groupings and module keys now live in `lib/reports-display.ts` —
+ * client-safe, Prisma-free — and are re-exported here so every server caller
+ * and API route is unchanged. See Gotcha 3b: client components must not reach
+ * this module, because it imports Prisma.
+ */
+export {
+  REPORT_PERIODS,
+  REPORT_PERIOD_LABELS,
+  TREND_MODULES,
+  TREND_GROUPINGS,
+  PRODUCT_MODULES,
+  type ReportPeriod,
+  type TrendModule,
+  type TrendGrouping,
+  type ProductModule,
+} from "@/lib/reports-display";
 
 /**
  * A report period resolved to a half-open UTC window whose boundaries are
@@ -79,11 +96,6 @@ export function reportRange(period: ReportPeriod): DateRange {
 // Trend — revenue over time
 // ---------------------------------------------------------------------------
 
-export const TREND_MODULES = ["beverages", "bakery", "milk"] as const;
-export type TrendModule = (typeof TREND_MODULES)[number];
-
-export const TREND_GROUPINGS = ["day", "week", "month"] as const;
-export type TrendGrouping = (typeof TREND_GROUPINGS)[number];
 
 /**
  * Table per module. A FIXED map, never built from user input — the table name
@@ -208,7 +220,7 @@ export async function getTrend(options: {
       JOIN "Sale" s ON s.id = i."saleId"
       WHERE i."moduleKey" = ${module}
         AND s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
-        AND ${NOT_A_MIGRATION_COPY}
+        AND ${notAMigrationCopy()}
     ) AS combined
     GROUP BY 1
     ORDER BY 1
@@ -228,15 +240,6 @@ export async function getTrend(options: {
 // Top products
 // ---------------------------------------------------------------------------
 
-/**
- * MILK JOINED THIS LIST IN S6. It could not be here before: a `MilkSale` is
- * litres × rate on a single row with no product, so there was nothing to group
- * by. A milk line on the till IS a product line (`prod_milk`, quantity in
- * litres), so milk now answers "how much did I sell" the same way the other two
- * do — which is what the owner asked for in #20.
- */
-export const PRODUCT_MODULES = ["beverages", "bakery", "milk"] as const;
-export type ProductModule = (typeof PRODUCT_MODULES)[number];
 
 /** The per-module item table for the OLD sales. Milk has none — see above. */
 const PRODUCT_ITEM_TABLE: Record<ProductModule, string | null> = {
@@ -326,7 +329,7 @@ export async function getTopProducts(options: {
       JOIN "Sale" s ON s.id = i."saleId"
       WHERE i."moduleKey" = ${module}
         AND s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
-        AND ${NOT_A_MIGRATION_COPY}
+        AND ${notAMigrationCopy()}
     ) AS combined
     GROUP BY product_id
     ORDER BY SUM(revenue) DESC
@@ -415,7 +418,30 @@ export async function getProductSales(range: DateRange): Promise<ProductSalesRow
       FROM "SaleItem" i
       JOIN "Sale" s ON s.id = i."saleId"
       WHERE s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
-        AND ${NOT_A_MIGRATION_COPY}
+        AND ${notAMigrationCopy()}
+
+      UNION ALL
+
+      /* ------------------------------------------------------------------
+       * THE RETIRED MilkSale ROWS, attributed to the milk product.
+       *
+       * A MilkSale predates the till and has no product line - it is litres
+       * times rate on a single row. Left out, this table would report 12.5 L
+       * of milk while the summary directly above it reported the full 62.5,
+       * and the owner would be left deciding which screen to believe.
+       *
+       * It IS milk sold, its litres and rate are recorded, and prod_milk is
+       * what it would be sold as today - so it is mapped there rather than
+       * dropped. No double count: once S5 copies these rows into Sale, the
+       * copy carries the same id and notAMigrationCopy() excludes it above.
+       *
+       * NOTE - no backticks in this comment: it lives inside a JS template
+       * literal, where a backtick ends the SQL string mid-statement.
+       * ------------------------------------------------------------------ */
+      SELECT 'prod_milk', 'milk',
+             ms.liters, ms."totalAmount"
+      FROM "MilkSale" ms
+      WHERE ms."saleDate" >= ${range.start} AND ms."saleDate" < ${range.end}
     ) AS combined
     GROUP BY product_id, module_key
     ORDER BY SUM(revenue) DESC
@@ -622,26 +648,26 @@ export async function getReportSummary(
        * ------------------------------------------------------------------ */
       (SELECT SUM(i."netLineTotal")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'beverages' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${NOT_A_MIGRATION_COPY})                            AS u_bev_revenue,
+           AND ${notAMigrationCopy()})                            AS u_bev_revenue,
       (SELECT COUNT(DISTINCT s.id) FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'beverages' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${NOT_A_MIGRATION_COPY})                            AS u_bev_count,
+           AND ${notAMigrationCopy()})                            AS u_bev_count,
       (SELECT SUM(i."netLineTotal")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'bakery' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${NOT_A_MIGRATION_COPY})                            AS u_bak_revenue,
+           AND ${notAMigrationCopy()})                            AS u_bak_revenue,
       (SELECT COUNT(DISTINCT s.id) FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'bakery' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${NOT_A_MIGRATION_COPY})                            AS u_bak_count,
+           AND ${notAMigrationCopy()})                            AS u_bak_count,
       (SELECT SUM(i."netLineTotal")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${NOT_A_MIGRATION_COPY})                            AS u_milk_revenue,
+           AND ${notAMigrationCopy()})                            AS u_milk_revenue,
       (SELECT COUNT(DISTINCT s.id) FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${NOT_A_MIGRATION_COPY})                            AS u_milk_count,
+           AND ${notAMigrationCopy()})                            AS u_milk_count,
       /* Litres SOLD on the till: the milk line's quantity IS litres. */
       (SELECT SUM(i.quantity)::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${NOT_A_MIGRATION_COPY})                            AS u_milk_liters
+           AND ${notAMigrationCopy()})                            AS u_milk_liters
   `;
 
   // Balances are NOT fetched here — they are six queries and would hold the

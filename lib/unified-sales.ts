@@ -212,11 +212,34 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
  * `lib/receivables.ts` or `lib/reports.ts` because BOTH need it and a rule with
  * two copies is a rule that will disagree with itself.
  */
-export const NOT_A_MIGRATION_COPY = Prisma.sql`
-  NOT EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
-  AND NOT EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
-  AND NOT EXISTS (SELECT 1 FROM "MilkSale" m WHERE m.id = s.id)
-`;
+/**
+ * 🔴 A FUNCTION, NOT A CONST — and that is load-bearing, not style.
+ *
+ * As a top-level `const` this called `Prisma.sql` AT MODULE EVALUATION. Module
+ * evaluation happens wherever the module is bundled, and `lib/reports.ts`
+ * imports this while ALSO exporting constants that client components read
+ * (`REPORT_PERIODS`, the period labels). That dragged the fragment into the
+ * browser bundle, where `Prisma.sql` cannot run:
+ *
+ *     Unhandled Runtime Error
+ *     sqltag is unable to run in this browser environment
+ *
+ * — and the whole `/reports` page died on hydration. Tree-shaking cannot save a
+ * top-level call with a side effect; deferring it into a function can, because
+ * nothing executes unless a server path calls it.
+ *
+ * Found by OPENING THE PAGE. `tsc`, `next lint`, `npm run build` and every API
+ * test passed with the page broken, because the server render succeeded and only
+ * hydration threw. This is the "verify in a real browser" rule in CLAUDE.md
+ * earning its place again.
+ */
+export function notAMigrationCopy(): Prisma.Sql {
+  return Prisma.sql`
+    NOT EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
+    AND NOT EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
+    AND NOT EXISTS (SELECT 1 FROM "MilkSale" m WHERE m.id = s.id)
+  `;
+}
 
 // ---------------------------------------------------------------------------
 // Listing (S4)

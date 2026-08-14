@@ -7,6 +7,7 @@ import { RevenueTrendChart } from "@/components/reports/RevenueTrendChart";
 import { TopProductsChart } from "@/components/reports/TopProductsChart";
 import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { ProductSalesTable } from "@/components/reports/ProductSalesTable";
 import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ import {
   REPORT_PERIOD_LABELS,
   type ReportPeriod,
   type TrendGrouping,
-} from "@/lib/reports";
+} from "@/lib/reports-display";
 import { cn } from "@/lib/utils";
 
 /**
@@ -338,6 +339,14 @@ export function ReportsDashboard() {
           />
         </section>
       </div>
+
+      {/* Sales by product (#20) ---------------------------------------
+          Below the two charts on purpose: they answer "what sells best",
+          this answers "how much of each thing did I sell" — a figure the
+          owner checks against the shelf, so it reads as a table. Loads
+          behind its own skeleton, so the headline numbers above never wait
+          on it. */}
+      <ProductSalesTable period={period} />
 
       {/* Milk block ---------------------------------------------------
           Milk is the only module with money moving BOTH ways, so it gets a

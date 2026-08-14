@@ -159,6 +159,34 @@ bcryptjs and the Prisma client cannot run on Edge. Use the split-config pattern:
   hits against a dev bundle. Confirm you have the production artifact (a few hundred KB, no
   comments) before trusting either result. Verified clean on the Phase 2.1 build.
 
+### 3b. 🔴 NEVER call `Prisma.sql` (or any Prisma runtime API) at MODULE TOP LEVEL in a file the client graph can reach
+
+**A top-level `const X = Prisma.sql\`…\`` executes wherever the module is bundled — including the
+browser, where it throws and kills the page on hydration.**
+
+Found 2026-08-14, and it had shipped: `lib/reports.ts` exports `REPORT_PERIODS` and
+`REPORT_PERIOD_LABELS`, which **client components import**. S6 added
+`import { NOT_A_MIGRATION_COPY } from "@/lib/unified-sales"` to that same file, so the SQL fragment
+was evaluated in the browser bundle and `/reports` died with:
+
+```
+Unhandled Runtime Error
+sqltag is unable to run in this browser environment
+```
+
+**Tree-shaking cannot save you here** — a top-level call with a side effect is retained whenever any
+part of the module is. The fix is to make it **lazy**: `export function notAMigrationCopy()` that
+returns the `Prisma.sql` when a server path calls it. Nothing runs at import.
+
+**What makes this dangerous is the failure signature: everything green.** `tsc`, `next lint`,
+`npm run build` and the entire API test suite all passed — the SERVER render succeeded, and only
+hydration threw. It was caught by opening the page. This is the "verify UI in a real browser, not on
+a build" rule (Phase 3 carried-forward note) applying to a purely server-side-looking change.
+
+**The deeper smell, unfixed:** `lib/reports.ts` mixes server-only aggregation with constants that
+client components read. Splitting the client-safe constants into their own module would make this
+class of bug impossible rather than merely avoided. Worth doing if that file is opened again.
+
 ### 4. Dates must be handled in Asia/Karachi, not server UTC
 Vercel serverless functions run in UTC. The owner logs morning and evening deliveries in Pakistan time. A delivery logged near midnight PKT can land on the wrong calendar day if you use `new Date()` server-side.
 
@@ -1516,7 +1544,7 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **S4.2** | unified sale SCREEN (`/sales`, `/sales/new`) + unified receipt + receivables bridge | ✅ 2026-08-14 · **13/13 + browser** |
 | **S4.3** | **milk cutover** — `/milk/sales` history-only, milk stock AUTHORITATIVE | ✅ 2026-08-14 |
 | **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ⬜ Todo |
-| **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ✅ 2026-08-14 · **12/12** (on-screen per-product table pending) |
+| **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ✅ 2026-08-14 · **12/12 + 8/8**, table shipped |
 | **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
 | **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ⬜ Todo |
 | **S9** | remove the old per-module paths, then **Migration B** (drop the 4 old tables) — CHECKLIST #5 | ⬜ Todo |
@@ -2175,8 +2203,11 @@ sold**, not just per-category — and **milk shown as its own line**.
 `(productId, moduleKey)` across the old item tables AND `SaleItem`, so every product's units and
 revenue are available with **milk on its own line** — exposed today as the **`product_sales` CSV
 export**, and `top-products` now accepts `module=milk` for the first time.
-**What remains: the on-screen per-product table.** The data and the query exist; only the reports UI
-has not been given a place to show them.
+✅ **COMPLETE 2026-08-14.** The on-screen table ships as `components/reports/ProductSalesTable.tsx`
+on `/reports`, backed by `GET /api/reports/product-sales`, alongside the `product_sales` CSV. The
+retired `MilkSale` rows are mapped to `prod_milk` inside `getProductSales` so the table reconciles
+EXACTLY with the module revenue shown above it — otherwise it would report 12.5 L of milk while the
+summary said 62.5, and the owner would have to pick which of his own screens to believe.
 
 ---
 

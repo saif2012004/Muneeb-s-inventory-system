@@ -15,7 +15,7 @@ import {
 
 import { formatPKR } from "@/lib/format";
 import type { TrendPoint } from "@/lib/hooks/use-reports";
-import type { TrendGrouping } from "@/lib/reports";
+import type { TrendGrouping } from "@/lib/reports-display";
 
 /**
  * Revenue over time, one line per sales module.

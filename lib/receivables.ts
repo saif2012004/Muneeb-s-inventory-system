@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { NOT_A_MIGRATION_COPY } from "@/lib/unified-sales";
+import { notAMigrationCopy } from "@/lib/unified-sales";
 
 /**
  * THE RECEIVABLES CALCULATION. One implementation, like reconcileSaleLines.
@@ -82,7 +82,7 @@ function unifiedBilledFor(customerId: string): Promise<UnifiedBilledRow[]> {
            max(s."saleDate")                         AS last
     FROM "Sale" s
     WHERE s."customerId" = ${customerId}
-      AND ${NOT_A_MIGRATION_COPY}
+      AND ${notAMigrationCopy()}
     GROUP BY s."customerId"
   `;
 }
@@ -95,7 +95,7 @@ function unifiedBilledGrouped(ids: string[] | null): Promise<UnifiedBilledRow[]>
                coalesce(sum(s."totalAmount"), 0)::text AS total,
                max(s."saleDate")                       AS last
         FROM "Sale" s
-        WHERE ${NOT_A_MIGRATION_COPY}
+        WHERE ${notAMigrationCopy()}
         GROUP BY s."customerId"
       `
     : prisma.$queryRaw<UnifiedBilledRow[]>`
@@ -104,7 +104,7 @@ function unifiedBilledGrouped(ids: string[] | null): Promise<UnifiedBilledRow[]>
                max(s."saleDate")                       AS last
         FROM "Sale" s
         WHERE s."customerId" = ANY(${ids}::text[])
-          AND ${NOT_A_MIGRATION_COPY}
+          AND ${notAMigrationCopy()}
         GROUP BY s."customerId"
       `;
 }
