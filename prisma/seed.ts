@@ -58,6 +58,27 @@ type ProductSeed = {
    * replaces by walking the shelf. Milk sets it to 0 — see prod_milk.
    */
   stock?: number;
+  /**
+   * SELLING UNITS (Migration F, CHECKLIST #19) - the packs this product is also
+   * sold in, on top of the single base unit.
+   *
+   * STOCK IS ONE POOL, always counted in BASE units. A unit only says how many
+   * base units leave that pool per pack sold, which is why `baseFactor` lives
+   * on the unit and not in a second stock column: selling one peti of eggs
+   * decrements the same number that selling 360 singles would.
+   */
+  units?: UnitSeed[];
+};
+
+/**
+ * One selling unit. `price` is the price OF THE PACK, not per base unit - a
+ * peti is not 360 x the single-egg price, which is the entire reason the price
+ * lives here rather than being derived.
+ */
+type UnitSeed = {
+  name: string;
+  baseFactor: number;
+  price: number;
 };
 
 /** "2.25L" -> "2_25l". Keeps generated ids readable and URL-safe. */
@@ -185,6 +206,186 @@ const beverageProducts: ProductSeed[] = [
   })),
 ];
 
+
+// ---------------------------------------------------------------------------
+// BOTTLES PER PET - the owner's own matrix (answered 2026-08-17)
+// ---------------------------------------------------------------------------
+
+/**
+ * A PET IS 12 BOTTLES HERE, NOT 24. Written down because every reference table
+ * online says 24, and this shop's is 12 for most sizes. The number is PER BRAND
+ * AND PER SIZE - it is not a constant, which is why it lives on the product's
+ * unit row rather than anywhere global.
+ *
+ * Straight from the owner's answers. Where a size is missing from a brand's
+ * row, that brand does not sell that size.
+ *
+ * GOURMET 1.5L HAS TWO PETS - 4 and 6. That is not a typo and not a conflict to
+ * resolve: he genuinely buys both cases. Two units on one product is exactly
+ * what the (productId, name) unique key allows, so they are named "pet 4" and
+ * "pet 6" to keep them distinct on the bill.
+ *
+ * `size` reuses the EXISTING vocabulary ("half_litre" prints as "0.5L") rather
+ * than introducing "500ml" alongside it, so the catalog does not end up showing
+ * the same bottle under two spellings.
+ */
+const PET_MATRIX: {
+  brand: string;
+  subId: string;
+  /** Present already in the catalog? Then reuse its id and only ADD units. */
+  existing?: boolean;
+  sizes: { size: string; label: string; pets: number[] }[];
+}[] = [
+  {
+    brand: "Pepsi",
+    subId: "sub_pepsi",
+    existing: true,
+    sizes: [
+      { size: "250ml", label: "250ml", pets: [24] },
+      { size: "350ml", label: "350ml", pets: [12] },
+      { size: "half_litre", label: "0.5L", pets: [12] },
+      { size: "1L", label: "1L", pets: [6] },
+      { size: "1.5L", label: "1.5L", pets: [6] },
+      { size: "2.25L", label: "2.25L", pets: [4] },
+    ],
+  },
+  {
+    brand: "Coke Cola",
+    subId: "sub_coke_cola",
+    existing: true,
+    sizes: [
+      { size: "250ml", label: "250ml", pets: [24] },
+      { size: "350ml", label: "350ml", pets: [12] },
+      { size: "half_litre", label: "0.5L", pets: [12] },
+      { size: "1L", label: "1L", pets: [6] },
+      { size: "1.5L", label: "1.5L", pets: [6] },
+      { size: "2L", label: "2L", pets: [6] },
+      { size: "2.25L", label: "2.25L", pets: [6] },
+    ],
+  },
+  {
+    brand: "Sprite",
+    subId: "sub_sprite",
+    sizes: [
+      { size: "250ml", label: "250ml", pets: [24] },
+      { size: "350ml", label: "350ml", pets: [12] },
+      { size: "half_litre", label: "0.5L", pets: [12] },
+      { size: "1L", label: "1L", pets: [6] },
+      { size: "1.5L", label: "1.5L", pets: [6] },
+      { size: "2L", label: "2L", pets: [6] },
+      { size: "2.25L", label: "2.25L", pets: [6] },
+    ],
+  },
+  // Dew / 7Up / Mirinda share one shape: no 2L, and a 4-bottle 2.25L pet.
+  ...(["Dew", "7Up", "Mirinda"] as const).map((brand) => ({
+    brand,
+    subId: `sub_${slug(brand)}`,
+    sizes: [
+      { size: "250ml", label: "250ml", pets: [24] },
+      { size: "350ml", label: "350ml", pets: [12] },
+      { size: "half_litre", label: "0.5L", pets: [12] },
+      { size: "1L", label: "1L", pets: [6] },
+      { size: "1.5L", label: "1.5L", pets: [6] },
+      { size: "2.25L", label: "2.25L", pets: [4] },
+    ],
+  })),
+  // Gourmet is sold BY FLAVOUR. The four flavourless "Gourmet <size>" rows
+  // already in the catalog are left exactly as they are - the owner deactivates
+  // whichever set he does not use.
+  ...(["Gourmet Cola", "Gourmet Lemon"] as const).map((brand) => ({
+    brand,
+    subId: "sub_gourmet",
+    sizes: [
+      { size: "300ml", label: "300ml", pets: [12] },
+      { size: "half_litre", label: "0.5L", pets: [12] },
+      { size: "1L", label: "1L", pets: [6] },
+      { size: "1.5L", label: "1.5L", pets: [4, 6] },
+      { size: "2.25L", label: "2.25L", pets: [4] },
+    ],
+  })),
+  {
+    brand: "Sting",
+    subId: "sub_sting",
+    sizes: [
+      { size: "250ml", label: "250ml", pets: [24] },
+      { size: "half_litre", label: "0.5L", pets: [12] },
+    ],
+  },
+  {
+    brand: "Fruitien Joy",
+    subId: "sub_fruitien_joy",
+    sizes: [
+      { size: "200ml", label: "200ml", pets: [24] },
+      { size: "1L", label: "1L", pets: [12] },
+    ],
+  },
+  {
+    brand: "Mojo",
+    subId: "sub_mojo",
+    sizes: [
+      { size: "half_litre", label: "0.5L", pets: [12] },
+      { size: "1L", label: "1L", pets: [6] },
+    ],
+  },
+];
+
+/** Local quarter: one product, one size, 12 to the pet. */
+const LOCAL_QUARTER = { id: "prod_local_quarter", subId: "sub_local_quarter" };
+
+/**
+ * A pet unit row. Named "pet" when the product has one, "pet 4"/"pet 6" when it
+ * has two - the name is what prints on the bill and what the till sends, so it
+ * has to distinguish them.
+ *
+ * PRICE 0, like every seeded price. The owner sets what a case costs; we have
+ * no business inventing it (same rule as stock and shop details).
+ */
+function petUnits(bottles: number[]): UnitSeed[] {
+  return bottles.map((count) => ({
+    name: bottles.length > 1 ? `pet ${count}` : "pet",
+    baseFactor: count,
+    price: 0,
+  }));
+}
+
+const petBrandSubCategories: SubCategorySeed[] = [
+  ...PET_MATRIX.filter(
+    (brand) => !brand.existing && brand.subId !== "sub_gourmet"
+  ).map((brand) => ({
+    id: brand.subId,
+    name: brand.brand,
+    categoryId: "cat_beverages",
+  })),
+  { id: LOCAL_QUARTER.subId, name: "Local Quarter", categoryId: "cat_beverages" },
+];
+
+const petProducts: ProductSeed[] = [
+  ...PET_MATRIX.flatMap((brand) =>
+    brand.sizes.map(({ size, label, pets }) => ({
+      // An EXISTING row keeps its id, so this only ADDS its pet units and the
+      // owner's price survives (the seed is upsert-with-`update: {}`).
+      id: `prod_${slug(brand.brand)}_${slug(size)}`,
+      name: `${brand.brand} ${label}`,
+      subCategoryId: brand.subId,
+      size,
+      qualityTier: null,
+      shape: null,
+      unit: "bottle",
+      units: petUnits(pets),
+    }))
+  ),
+  {
+    id: LOCAL_QUARTER.id,
+    name: "Local Quarter",
+    subCategoryId: LOCAL_QUARTER.subId,
+    size: null,
+    qualityTier: null,
+    shape: null,
+    unit: "bottle",
+    units: petUnits([12]),
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Bakery
 // ---------------------------------------------------------------------------
@@ -249,7 +450,25 @@ const bakeryProducts: ProductSeed[] = [
     }))
   ),
 
-  // Sold by the cotton: quantity on a sale line = number of cottons.
+  /**
+   * EGGS - one stock pool counted in SINGLE EGGS, sold in three packs.
+   *
+   * The owner's rule, verbatim (2026-08-17): "The eggs stocks must be in single
+   * eggs like 1000 eggs or whatever, when dozen sales (reduce stock by 12),
+   * tray sales (reduce stock by 30), when peti sales (reduce stocks by 360)."
+   *
+   * So `unit` is "egg", not "cotton": the base unit is what STOCK is counted
+   * in, and every factor below is relative to it. A peti is 12 trays = 360
+   * eggs, which is the number that leaves the pool.
+   *
+   * The existing `prod_eggs` row keeps `unit: "cotton"` - this seed is additive
+   * and never overwrites (`update: {}`). Change the label in the catalog UI if
+   * the owner wants it; the UNITS are what the stock maths reads, and those are
+   * added by this run.
+   *
+   * Prices are the owner's placeholders from the same answer (200 / 500 /
+   * 7000), not invented ones.
+   */
   {
     id: "prod_eggs",
     name: "Eggs",
@@ -257,7 +476,12 @@ const bakeryProducts: ProductSeed[] = [
     size: null,
     qualityTier: null,
     shape: null,
-    unit: "cotton",
+    unit: "egg",
+    units: [
+      { name: "dozen", baseFactor: 12, price: 200 },
+      { name: "tray", baseFactor: 30, price: 500 },
+      { name: "peti", baseFactor: 360, price: 7000 },
+    ],
   },
 ];
 
@@ -306,14 +530,42 @@ const milkProducts: ProductSeed[] = [
 // Exported so the data can be inspected/counted without opening a connection.
 export const SUB_CATEGORIES = [
   ...beverageSubCategories,
+  ...petBrandSubCategories,
   ...bakerySubCategories,
   ...milkSubCategories,
 ];
-export const PRODUCTS = [
+/**
+ * MERGE BY ID, DO NOT CONCATENATE.
+ *
+ * Pepsi and Coke Cola appear in BOTH lists: `beverageProducts` has carried
+ * their four original sizes since Phase 2, and the pet matrix names the same
+ * four again because the owner sells cases of them. Listing a product twice
+ * would be harmless at runtime (the second upsert is a no-op under
+ * `update: {}`) but it makes every count wrong and hides the overlap.
+ *
+ * The FIRST entry wins on fields - the Phase 2 row is the one whose id the
+ * database already holds - and the units of both are kept, so the existing
+ * bottle row simply gains its pet.
+ */
+function mergeById(products: ProductSeed[]): ProductSeed[] {
+  const byId = new Map<string, ProductSeed>();
+  for (const product of products) {
+    const existing = byId.get(product.id);
+    if (!existing) {
+      byId.set(product.id, product);
+      continue;
+    }
+    existing.units = [...(existing.units ?? []), ...(product.units ?? [])];
+  }
+  return Array.from(byId.values());
+}
+
+export const PRODUCTS = mergeById([
   ...beverageProducts,
+  ...petProducts,
   ...bakeryProducts,
   ...milkProducts,
-];
+]);
 export { CATEGORIES };
 
 async function main() {
@@ -341,7 +593,7 @@ async function main() {
     // directly would pass `stock: undefined` for the others, and Prisma treats
     // an explicit undefined as "not provided", so the default still applies —
     // but being explicit here keeps the intent readable.
-    const { stock, ...fields } = product;
+    const { stock, units, ...fields } = product;
     await prisma.product.upsert({
       where: { id: product.id },
       update: {},
@@ -352,11 +604,27 @@ async function main() {
         ...(stock === undefined ? {} : { stock }),
       },
     });
+
+    // Units are upserted SEPARATELY rather than nested in the create above,
+    // because a product that already exists takes `update: {}` and would never
+    // reach a nested create - and the whole point of this pass is to add pets
+    // to rows the owner has been using since Phase 2.
+    //
+    // `update: {}` here too: once a unit exists, its factor and price are the
+    // owner's. A re-run must not reset a case price he typed in.
+    for (const unit of units ?? []) {
+      await prisma.productUnit.upsert({
+        where: { productId_name: { productId: product.id, name: unit.name } },
+        update: {},
+        create: { productId: product.id, ...unit },
+      });
+    }
   }
 
   console.log(
     `Seed complete: ${CATEGORIES.length} categories, ` +
-      `${SUB_CATEGORIES.length} sub-categories, ${PRODUCTS.length} products.`
+      `${SUB_CATEGORIES.length} sub-categories, ${PRODUCTS.length} products, ` +
+      `${PRODUCTS.reduce((n, p) => n + (p.units?.length ?? 0), 0)} selling units.`
   );
 }
 

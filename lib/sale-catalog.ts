@@ -220,8 +220,16 @@ export function pluralizeUnit(unit: string | null, quantity: number): string {
  */
 export function formatQuantityWithUnit(
   quantity: number,
-  unit: string | null
+  unit: string | null,
+  /**
+   * The SELLING UNIT the line was sold in (Migration F), when there was one.
+   * It wins over the product's base unit and is printed VERBATIM — "2 peti",
+   * not "2 petis": these are the owner's own pack names, and English
+   * pluralisation does not apply to them.
+   */
+  unitName?: string | null
 ): string {
+  if (unitName) return `${quantity} ${unitName}`;
   if (!unitIsInformative(unit)) return String(quantity);
   return `${quantity} ${pluralizeUnit(unit, quantity)}`;
 }

@@ -35,10 +35,28 @@ const stock = z
 
 const id = z.string().min(1, { message: "A valid id is required" });
 
+/**
+ * Ascending, because this list IS the order of the Size dropdown.
+ *
+ * The four sub-litre sizes and 2L arrived with the owner's bottles-per-pet
+ * matrix (2026-08-17, CHECKLIST #19). They are not cosmetic: this is a zod
+ * enum, so a size the catalog holds but this list does not KNOW cannot be saved
+ * — editing "7Up 250ml" to fix a typo would have been rejected, or silently
+ * blanked its size, on a product the seed had just created.
+ *
+ * "half_litre" (labelled "0.5L") is kept as the spelling for 500ml rather than
+ * adding a second "500ml" beside it, so the same bottle cannot appear in the
+ * catalog under two names.
+ */
 export const PRODUCT_SIZES = [
+  "200ml",
+  "250ml",
+  "300ml",
+  "350ml",
   "half_litre",
   "1L",
   "1.5L",
+  "2L",
   "2.25L",
   "large",
   "small",
@@ -50,11 +68,36 @@ export const PRODUCT_SIZES = [
 // recreate the variant products the rework deleted.
 export const QUALITY_TIERS = ["premium", "simple"] as const;
 export const PRODUCT_SHAPES = ["circle", "rectangular_round"] as const;
-export const PRODUCT_UNITS = ["cotton", "piece", "bottle"] as const;
+/**
+ * THE BASE UNIT — what `stock` is counted in, and what every selling unit's
+ * `baseFactor` multiplies (Migration F).
+ *
+ * "egg" and "litre" are here because two products in the catalog already use
+ * them and this enum is what the editor validates against. `prod_milk` has been
+ * "litre" since 2026-08-13 and was NOT in this list — so opening the milk
+ * product in the edit dialog offered no matching option, and saving would have
+ * dropped its unit. `prod_eggs` became "egg" on 2026-08-18 when the owner
+ * defined the egg pool in single eggs.
+ *
+ * "cotton" stays: it is what `prod_eggs` used to be, and removing a value from
+ * this enum is what breaks editing a row that still holds it.
+ */
+export const PRODUCT_UNITS = [
+  "cotton",
+  "egg",
+  "piece",
+  "bottle",
+  "litre",
+] as const;
 
 /** Display labels. "half_litre" is stored; "0.5L" is what the owner reads. */
 export const SIZE_LABELS: Record<(typeof PRODUCT_SIZES)[number], string> = {
+  "200ml": "200ml",
+  "250ml": "250ml",
+  "300ml": "300ml",
+  "350ml": "350ml",
   half_litre: "0.5L",
+  "2L": "2L",
   "1L": "1L",
   "1.5L": "1.5L",
   "2.25L": "2.25L",
@@ -108,6 +151,51 @@ const coolingCharge = z
   .nullable()
   .optional();
 
+/**
+ * A SELLING UNIT on a product (S8) — "dozen" 12 @ 200, "pet 6" 6 @ 560.
+ *
+ * `baseFactor` must be > 0: a unit worth zero base units would sell goods
+ * without touching stock, which is the one failure this feature exists to
+ * prevent. Two decimals, matching the column.
+ */
+const productUnit = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, { message: "Unit name is required" })
+    .max(40, { message: "Unit name must be 40 characters or fewer" }),
+  baseFactor: z
+    .number({ message: "Units per pack must be a number" })
+    .positive({ message: "Units per pack must be greater than zero" })
+    .max(1_000_000, { message: "Units per pack is too large" })
+    .multipleOf(0.01, { message: "Units per pack can have at most 2 decimals" }),
+  price: z
+    .number({ message: "Unit price must be a number" })
+    .min(0, { message: "Unit price cannot be negative" })
+    .max(99_999_999.99, { message: "Unit price is too large" }),
+  isDefault: z.boolean().optional(),
+});
+
+/**
+ * The COMPLETE desired set of units, replace-all — the same contract as a sale's
+ * `items`. Omit the field entirely to leave the existing units untouched; send
+ * `[]` to remove them all and go back to selling in base units.
+ *
+ * Duplicated names are rejected here rather than at the database's unique index,
+ * so the owner gets a sentence instead of a constraint violation.
+ */
+const productUnits = z
+  .array(productUnit)
+  .max(10, { message: "A product can have at most 10 selling units" })
+  .refine(
+    (units) => new Set(units.map((u) => u.name.toLowerCase())).size === units.length,
+    { message: "Two selling units have the same name" }
+  )
+  .refine((units) => units.filter((u) => u.isDefault).length <= 1, {
+    message: "Only one selling unit can be the default",
+  })
+  .optional();
+
 // ---------------------------------------------------------------------------
 // Product
 // ---------------------------------------------------------------------------
@@ -117,6 +205,7 @@ export const productCreateSchema = z.object({
   subCategoryId: id,
   price,
   coolingCharge,
+  units: productUnits,
   size,
   qualityTier,
   shape,
@@ -134,6 +223,7 @@ export const productUpdateSchema = z
     subCategoryId: id.optional(),
     price: price.optional(),
     coolingCharge,
+    units: productUnits,
     stock: stock.optional(),
     size,
     qualityTier,

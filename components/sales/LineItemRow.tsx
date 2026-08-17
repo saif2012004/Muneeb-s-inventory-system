@@ -51,6 +51,8 @@ export function LineItemRow({
   showDiscount = true,
   priceLocked = false,
   extraUnitCost = 0,
+  afterProduct = null,
+  unitName = null,
 }: {
   form: SaleForm;
   index: number;
@@ -89,6 +91,27 @@ export function LineItemRow({
    * Defaults to 0, so the two per-module screens are byte-identical.
    */
   extraUnitCost?: number;
+  /**
+   * SELLING UNIT (Migration F) — rendered directly under the Product picker,
+   * and the name of whatever it has selected.
+   *
+   * Two separate props for one feature, on purpose:
+   *
+   * - `afterProduct` is a SLOT. The picker needs the form's `setValue` and the
+   *   catalog's unit rows, neither of which this shared row should learn about
+   *   for the sake of one screen. It lives in the till (`UnifiedSaleForm`) and
+   *   is passed in, so the two per-module screens render byte-identically by
+   *   passing nothing. It sits under Product because choosing a unit REWRITES
+   *   the price below it — a control that changes a field has to appear before
+   *   it, not under the line total.
+   *
+   * - `unitName` re-labels the quantity and price fields. Once a peti is chosen
+   *   the quantity is 1 PETI at 7,000 a peti, and leaving the base-unit labels
+   *   showed "Quantity (eggs)" and "Price per egg" beside 7000 — which reads as
+   *   Rs. 7,000 per egg. Found in browser testing, 2026-08-18.
+   */
+  afterProduct?: React.ReactNode;
+  unitName?: string | null;
 }) {
   // Subscribes this row only — typing in one line doesn't re-render the others.
   const row = useWatch({ control: form.control, name: `items.${index}` });
@@ -99,7 +122,17 @@ export function LineItemRow({
   const discountPercent = row?.discountPercent ?? "";
 
   const selected = productId ? optionsById.get(productId) : undefined;
-  const unit = selected?.product.unit ?? null;
+  /**
+   * The unit the LINE is priced and counted in: the chosen selling unit when
+   * there is one, otherwise the product's base unit. Everything user-facing
+   * below reads this, so the labels can never disagree with the price.
+   *
+   * `unitIsInformative` is bypassed for a selling unit — a pack name is always
+   * worth showing. It exists to suppress "12 pieces"/"3 bottles", where the
+   * unit only repeats what the product name already said; "1 peti" is the whole
+   * point of the line.
+   */
+  const unit = unitName || selected?.product.unit || null;
   const pricePerUnit = String((Number(unitPrice) || 0) + extraUnitCost);
   const lineTotal = previewLineTotal(quantity, pricePerUnit, discountPercent);
   /**
@@ -119,10 +152,10 @@ export function LineItemRow({
   const parsedQuantity = Number(quantity);
   const quantitySummary =
     selected &&
-    unitIsInformative(unit) &&
+    (Boolean(unitName) || unitIsInformative(unit)) &&
     Number.isFinite(parsedQuantity) &&
     parsedQuantity > 0
-      ? formatQuantityWithUnit(parsedQuantity, unit)
+      ? formatQuantityWithUnit(parsedQuantity, unit, unitName)
       : null;
 
   return (
@@ -173,13 +206,14 @@ export function LineItemRow({
           {errors?.productId ? (
             <p className="text-sm text-rose-600">{errors.productId.message}</p>
           ) : null}
+          {afterProduct}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             {/* Names the unit as soon as one is known: "Quantity (cottons)". */}
             <Label htmlFor={`item-${index}-quantity`}>
-              {quantityFieldLabel(unit)}
+              {unitName ? `Quantity (${unitName})` : quantityFieldLabel(unit)}
             </Label>
             <Input
               id={`item-${index}-quantity`}
@@ -200,7 +234,7 @@ export function LineItemRow({
 
           <div className="space-y-1.5">
             <Label htmlFor={`item-${index}-price`}>
-              {unitPriceFieldLabel(unit)}
+              {unitName ? `Price per ${unitName}` : unitPriceFieldLabel(unit)}
             </Label>
             {priceLocked ? (
               <>

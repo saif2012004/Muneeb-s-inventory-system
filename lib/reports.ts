@@ -322,9 +322,13 @@ export async function getTopProducts(options: {
     FROM (
       ${oldSource}
       SELECT
-        i."productId"     AS product_id,
-        i.quantity        AS quantity,
-        i."netLineTotal"  AS revenue
+        i."productId"                  AS product_id,
+        /* BASE UNITS (the owner's Q3, option A): a peti counts as 360 eggs, not
+           as 1. That is the figure that reconciles against stock, which is what
+           the owner checks it against — and the only one that stays comparable
+           across months when the same goods sell in different units. */
+        i.quantity * i."unitFactor"    AS quantity,
+        i."netLineTotal"               AS revenue
       FROM "SaleItem" i
       JOIN "Sale" s ON s.id = i."saleId"
       WHERE i."moduleKey" = ${module}
@@ -414,7 +418,8 @@ export async function getProductSales(range: DateRange): Promise<ProductSalesRow
       UNION ALL
 
       SELECT i."productId", i."moduleKey",
-             i.quantity, i."netLineTotal"
+             /* BASE UNITS — see the note in getTopProducts. */
+             i.quantity * i."unitFactor", i."netLineTotal"
       FROM "SaleItem" i
       JOIN "Sale" s ON s.id = i."saleId"
       WHERE s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
@@ -665,7 +670,7 @@ export async function getReportSummary(
          WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
            AND ${notAMigrationCopy()})                            AS u_milk_count,
       /* Litres SOLD on the till: the milk line's quantity IS litres. */
-      (SELECT SUM(i.quantity)::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
+      (SELECT SUM(i.quantity * i."unitFactor")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
          WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
            AND ${notAMigrationCopy()})                            AS u_milk_liters
   `;

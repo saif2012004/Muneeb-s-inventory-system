@@ -187,6 +187,29 @@ a build" rule (Phase 3 carried-forward note) applying to a purely server-side-lo
 client components read. Splitting the client-safe constants into their own module would make this
 class of bug impossible rather than merely avoided. Worth doing if that file is opened again.
 
+### 3c. 🔴 An ENUMERATED payload silently drops every field you forget to add to it
+
+**Three write paths build their request body field by field rather than spreading the form's values.
+A control the form gains but the list never learns about is dropped in silence: the request
+succeeds, the toast is cheerful, and the value the owner typed is simply gone.**
+
+It has now happened three times, all found on 2026-08-18 by reading rows back out of the database
+after using the screen:
+
+| Where | Field dropped | What the owner saw |
+|---|---|---|
+| `UnifiedSaleForm` create payload | `chilled` (Migration E) | A chilled bill saved at the plain price — feature shipped and unreachable |
+| `UnifiedSaleForm` create payload | `unitName` (Migration F) | **A peti of eggs saved as ONE egg at Rs. 7,000, taking 1 off the pool instead of 360** |
+| `CatalogManager` edit-product mutate | `coolingCharge`, `units` | "Product updated", nothing changed |
+
+**Nothing automated can see this.** `tsc` is happy because every field is optional; lint is happy;
+the API tests are happy because they hand the endpoint a correct body themselves. Only the browser,
+plus a look at the stored row, catches it.
+
+Each of the three sites now carries a 🔴 comment saying every control must be listed. **If you add a
+field to one of those forms, add it to the payload — and verify by reading the row back, not by the
+toast.**
+
 ### 4. Dates must be handled in Asia/Karachi, not server UTC
 Vercel serverless functions run in UTC. The owner logs morning and evening deliveries in Pakistan time. A delivery logged near midnight PKT can land on the wrong calendar day if you use `new Date()` server-side.
 
@@ -507,10 +530,35 @@ model Product {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
+  coolingCharge   Decimal?     @db.Decimal(10, 2)  // Migration E. NULL != 0 — see #17
+  // Migration F: the packs this product also sells in. Stock stays ONE pool,
+  // counted in the base `unit`; a ProductUnit only says how many base units
+  // leave it per pack. See CHECKLIST #19.
+  units           ProductUnit[]
+
   // REQUIRED back-relations (do not remove, migration fails without them)
   beverageSaleItems BeverageSaleItem[]
   bakerySaleItems   BakerySaleItem[]
   saleItems         SaleItem[]        // unified Sale (Migration A)
+}
+
+// A SELLING UNIT (Migration F, 2026-08-18). `baseFactor` is how many base units
+// one of these contains — 12 for a dozen, 360 for a peti of eggs, 12 for a pet
+// of most bottles here (NOT 24). `price` is the price OF THE PACK, not per base
+// unit: a peti is not 360 x the single-egg price, which is exactly why it is
+// stored rather than derived.
+model ProductUnit {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name       String   // "dozen" | "tray" | "peti" | "pet" | "pet 4" — the owner's word
+  baseFactor Decimal  @db.Decimal(10, 2)
+  price      Decimal  @db.Decimal(10, 2)
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@unique([productId, name])
+  @@index([productId])
 }
 ```
 
@@ -541,6 +589,12 @@ model SaleItem {
   quantity        Decimal @db.Decimal(10, 2)
   moduleKey       String   // "beverages" | "bakery" | "milk" — SNAPSHOT, never re-derived
   netLineTotal    Decimal @db.Decimal(10, 2)
+  coolingRate     Decimal @default(0) @db.Decimal(10, 2)  // Migration E, SNAPSHOT
+  // Migration F, both SNAPSHOTS. unitName is what the bill says it sold ("2
+  // peti"); unitFactor is what stock moved by (quantity x factor = base units).
+  // Re-defining or deleting the catalog's unit cannot move a closed bill.
+  unitName        String?
+  unitFactor      Decimal @default(1) @db.Decimal(10, 2)
   // ... see prisma/schema.prisma for the full model
 }
 ```
@@ -1546,7 +1600,7 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **S5** | migrate the 2 real sales onto `Sale` / `SaleItem` | ✅ 2026-08-14 · applied + verified |
 | **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ✅ 2026-08-14 · **12/12 + 8/8**, table shipped |
 | **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
-| **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ⬜ Todo |
+| **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ✅ 2026-08-18 · Migration F · **13/13 + browser** |
 | **S9** | remove the old per-module paths, then **Migration B** (drop the 4 old tables) — CHECKLIST #5 | ⬜ Todo |
 
 **S4 is DONE (S4.1–S4.3, 2026-08-14).** Both of the things it carried are closed: milk stock is
@@ -2210,7 +2264,15 @@ bottom nav, numeric keypads (`inputMode="decimal"`), and reduced-motion.
 **placeholder values until handover** — the owner sets the real numbers himself, the same way stock
 and shop details are his to enter (CHECKLIST #2 / #2b).
 
-#### `[x]` **17. Cooling / chilling charge — SHIPPED 2026-08-14 (Migration E)**
+#### `[x]` **17. Cooling / chilling charge — SHIPPED 2026-08-14 (Migration E), till payload FIXED 2026-08-18**
+
+> ⚠️ **It was unreachable from the till until 2026-08-18.** The toggle rendered and the server was
+> correct, but `chilled` was never put into the create payload — so every bill saved unchilled,
+> cheerfully. Found while testing units (same bug, same shape: see the two 🔴 payload warnings in
+> `UnifiedSaleForm.tsx` and `CatalogManager.tsx`). **The catalog's EDIT dialog dropped
+> `coolingCharge` the same way**, so a charge could only ever be set when a product was created.
+> Both fixed and browser-verified: 2 × (100 + 30) = **Rs. 260**, rate 30 snapshotted on the line.
+
 
 **10/10 tested, browser-verified.** `Product.coolingCharge` (nullable) + `SaleItem.coolingRate`
 (default 0). The owner sets the charge **per product** in the catalog — beverages only, since a chill
@@ -2262,25 +2324,48 @@ a client `unitPrice` for an existing line (CHECKLIST #7, closed 2026-08-11), bec
 would let a closed bill be silently re-priced. See the create/update asymmetry under **Price
 snapshot**.
 
-#### `[ ]` **19. Multi-unit products — ONE stock pool, several selling units**
+#### `[x]` **19. Multi-unit products — SHIPPED 2026-08-18 (Migration F)**
 
-The same physical goods sell in more than one unit, and **stock must be a single shared pool** or the
-two units drift apart and oversell each other.
+**13/13 server tests + browser-verified.** `ProductUnit` (name · `baseFactor` · price, unique per
+product) plus `SaleItem.unitName` / `SaleItem.unitFactor`, both SNAPSHOTTED. The owner's matrix is
+seeded; his prices replace the placeholders at handover.
 
-| Product | Units | Prices (placeholder) |
+**🔴 THE ONE RULE: STOCK IS ONE POOL, COUNTED IN BASE UNITS.** A selling unit only says how many base
+units leave that pool. `computeStockDeltas` multiplies `quantity × unitFactor`, so 2 peti + 3 dozen of
+eggs is **756 eggs off one number** — there is no second stock column, and two units cannot drift
+apart or oversell each other.
+
+| Product | Base unit | Selling units |
 |---|---|---|
-| **Eggs** | dozen · tray (**30**) · peti (**360** = 12 trays) | 200 / 500 / 7000 |
-| **Beverages** | single bottle · pet | per size |
+| **Eggs** | **`egg`** — the owner's rule, verbatim: stock in single eggs | dozen = 12 · tray = 30 · peti = **360** (12 trays), at 200 / 500 / 7000 |
+| **Beverages** | `bottle` | `pet`, per brand AND per size — see the matrix in `prisma/seed.ts` |
 
-**🔴 LOCAL QUARTER = 12 BOTTLES PER PET, NOT 24.** Write it down because every reference table says
-24 and the owner's is 12. **Bottles-per-pet is PER SIZE**, so it is a per-product number, not a
-constant.
+**🔴 A PET IS 12 BOTTLES, NOT 24**, for most sizes here. Every reference table online says 24. The
+number is **per brand and per size**, which is why it lives on the product's unit row and not in any
+constant. **Gourmet 1.5L carries TWO pets — 4 and 6** (named `pet 4` / `pet 6`); that is real, not a
+conflict to resolve.
 
-Selling one peti must decrement the shared egg pool by 360 — which is why `Product.stock` being
-`Decimal` (Migration D) and quantity being `Decimal` (Migration C) already fit: a conversion factor
-lands on the line, not on a second stock column.
+**`prod_eggs.unit` changed `cotton` → `egg`** on 2026-08-18. It had zero sale history, so nothing
+historical moved. The seed could not do it — the seed is additive (`update: {}`) and must never
+overwrite a row the owner may have edited.
 
-**Placeholder prices until handover.**
+Three rules that follow, and must not be softened:
+
+- **The client sends the unit's NAME. The factor never leaves the server.** `unitFactor` in a request
+  body is a 400 (`.strict()`). A wrong factor is the one value that silently drains a stock pool.
+- **The factor is SNAPSHOTTED on the line.** Re-defining a pet from 12 to 6 in the catalog does not
+  move what a closed bill sold, and deleting a unit does not orphan one.
+- **A shortfall is reported in BASE units** — "100 in stock but this sale needs 360" — because the
+  pool is eggs. Reporting it in peti would be a number the owner cannot check against his shelf.
+
+**Reports count base units too** (`quantity × unitFactor`), per the owner's answer, so the per-product
+table says 756 eggs rather than "2 peti and 3 dozen".
+
+⚠️ **The seed created 47 new beverage products at price 0** to hold the matrix (Sprite, Dew, 7Up,
+Mirinda, Sting, Fruitien Joy, Mojo, Local Quarter, Gourmet Cola/Lemon, plus the 250ml/350ml/2L sizes
+of Pepsi and Coke Cola). **The owner prices what he stocks and deactivates the rest** — the same
+handover step as stock counts and shop details. The four flavourless `Gourmet <size>` rows are left
+exactly as they were.
 
 #### `[ ]` **20. Per-product sales visibility in reporting**
 

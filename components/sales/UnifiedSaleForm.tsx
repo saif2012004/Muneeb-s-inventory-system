@@ -30,7 +30,11 @@ import {
   type UnifiedSaleDetail,
 } from "@/lib/hooks/use-unified-sales";
 import { enterUp, lineItemInOut } from "@/lib/motion";
-import { groupUnifiedSaleProducts, indexSaleProducts } from "@/lib/sale-catalog";
+import {
+  groupUnifiedSaleProducts,
+  indexSaleProducts,
+  type SaleProductOption,
+} from "@/lib/sale-catalog";
 import {
   emptyUnifiedSaleLine,
   previewLineTotal,
@@ -38,6 +42,76 @@ import {
   type UnifiedSaleFormOutput,
   type UnifiedSaleFormValues,
 } from "@/lib/validations/sale-form";
+
+/**
+ * The SELLING-UNIT picker for one line (S8).
+ *
+ * Shown only for a product that HAS units — everything else sells one base unit
+ * at a time and needs no control. Choosing a unit rewrites the line's price from
+ * the catalog, because a peti is not thirty times a dozen.
+ *
+ * The bill sends the unit's NAME; the factor never leaves the server. A wrong
+ * factor is the one value that could silently drain a stock pool.
+ */
+function UnitPicker({
+  form,
+  index,
+  optionsById,
+  locked,
+}: {
+  form: ReturnType<typeof useForm<UnifiedSaleFormValues, unknown, UnifiedSaleFormOutput>>;
+  index: number;
+  optionsById: Map<string, SaleProductOption>;
+  locked: boolean;
+}) {
+  const productId = useWatch({ control: form.control, name: `items.${index}.productId` });
+  const chosen = useWatch({ control: form.control, name: `items.${index}.unitName` });
+  const units = productId ? (optionsById.get(productId)?.product.units ?? []) : [];
+
+  if (units.length === 0) return null;
+
+  // On an EXISTING line the server keeps the stored unit and factor, so a picker
+  // would be a silent no-op — the same stance as the locked price.
+  if (locked) {
+    return chosen ? (
+      <p className="pt-1 text-sm text-zinc-500">Sold as {chosen}.</p>
+    ) : null;
+  }
+
+  return (
+    <div className="space-y-1.5 pt-3">
+      <Label htmlFor={`item-${index}-unit`}>Sold as</Label>
+      <select
+        id={`item-${index}-unit`}
+        value={chosen ?? ""}
+        className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900"
+        onChange={(event) => {
+          const name = event.target.value;
+          form.setValue(`items.${index}.unitName`, name, { shouldDirty: true });
+          // Re-price from the chosen unit — the catalog's number for THAT pack.
+          // The owner can still type over it; that override is create-only and
+          // the server snapshots whatever it receives (Gotcha 5).
+          const unit = units.find((u) => u.name === name);
+          form.setValue(
+            `items.${index}.unitPrice`,
+            String(unit ? unit.price : (optionsById.get(productId)?.product.price ?? 0)),
+            { shouldValidate: false }
+          );
+        }}
+      >
+        <option value="">
+          Single {optionsById.get(productId)?.product.unit ?? "unit"}
+        </option>
+        {units.map((unit) => (
+          <option key={unit.id} value={unit.name}>
+            {unit.name} · {unit.baseFactor} ·{" "}
+            {formatPKR(unit.price)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 /**
  * The chill toggle for one line (Migration E).
@@ -189,6 +263,7 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
             // Stored lines keep their charge and cannot toggle it — the server
             // ignores the flag for them. Shown as text beneath the row instead.
             chilled: item.coolingRate > 0,
+            unitName: item.unitName ?? "",
           }))
         : [emptyUnifiedSaleLine()],
     },
@@ -365,7 +440,11 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
               // cannot take effect.
               ...(item.id
                 ? { id: item.id }
-                : { unitPrice: item.unitPrice, chilled: item.chilled ?? false }),
+                : {
+                    unitPrice: item.unitPrice,
+                    chilled: item.chilled ?? false,
+                    ...(item.unitName ? { unitName: item.unitName } : {}),
+                  }),
               productId: item.productId,
               quantity: item.quantity,
             })),
@@ -403,10 +482,29 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
            * field — even as 0 — is a 400. The form state carries one only so
            * `LineItemRow` can stay shared.
            */
+          /**
+           * 🔴 EVERY PER-LINE CONTROL THIS SCREEN OFFERS MUST BE LISTED HERE.
+           *
+           * This is an explicit field list, so a control the form gained but
+           * this map never learned about is silently dropped: the sale saves,
+           * the toast is cheerful, and the line is stored without it. Both
+           * `chilled` (Migration E) and `unitName` (Migration F) were missed
+           * exactly that way — a peti of eggs saved as ONE egg at Rs. 7,000
+           * and took 1 off the stock pool instead of 360. Found in the browser
+           * on 2026-08-18; nothing in tsc, lint or the API tests could see it,
+           * because the API was given a correct payload by every test.
+           */
           items: values.items.map((item) => ({
             productId: item.productId,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            // A BOOLEAN, never a rate — the amount comes off the catalog row
+            // server-side (the owner's instruction; see ChillToggle).
+            chilled: item.chilled ?? false,
+            // The unit's NAME only. Omitted entirely when selling the base
+            // unit, because the server's `.strict()` schema treats "" as an
+            // unknown unit rather than as "no unit".
+            ...(item.unitName ? { unitName: item.unitName } : {}),
           })),
         },
         {
@@ -606,6 +704,25 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
                         // a silent no-op. New lines keep an editable price.
                         priceLocked={isEdit && Boolean(form.getValues(`items.${index}.id`))}
                         extraUnitCost={coolingFor(watchedItems?.[index])}
+                        /**
+                         * The unit picker goes INSIDE the row, under Product,
+                         * because choosing a unit rewrites the price field
+                         * below it. And `unitName` re-labels the quantity and
+                         * price: with a peti chosen, "Price per egg: 7000"
+                         * reads as Rs. 7,000 an egg.
+                         */
+                        unitName={watchedItems?.[index]?.unitName || null}
+                        afterProduct={
+                          <UnitPicker
+                            form={form}
+                            index={index}
+                            optionsById={optionsById}
+                            locked={
+                              isEdit &&
+                              Boolean(form.getValues(`items.${index}.id`))
+                            }
+                          />
+                        }
                       />
                       <ChillToggle
                         form={form}

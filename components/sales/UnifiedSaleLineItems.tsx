@@ -105,7 +105,11 @@ export function UnifiedSaleLineItems({ saleId }: { saleId: string }) {
                     attribution stable if the owner recategorises a product. */}
                 {moduleStyle?.label ?? item.moduleKey}
                 {detail ? ` · ${detail}` : ""} ·{" "}
-                {formatQuantityWithUnit(item.quantity, item.product.unit)} ×{" "}
+                {formatQuantityWithUnit(
+                  item.quantity,
+                  item.product.unit,
+                  item.unitName
+                )} ×{" "}
                 {formatPKR(item.unitPrice)}
               </p>
             </div>

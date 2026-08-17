@@ -100,6 +100,23 @@ export function ProductTable({
                       per {product.unit}
                     </span>
                   ) : null}
+                  {/* SELLING UNITS (Migration F). Shown here because the pack a
+                      product sells in, and how many base units that pack costs
+                      the shelf, is catalog information the owner has to be able
+                      to check without opening the edit dialog — a wrong factor
+                      is the one value that silently drains a stock pool. */}
+                  {product.units.length > 0 ? (
+                    <span className="num block text-xs text-zinc-500">
+                      {product.units
+                        .map(
+                          (unit) =>
+                            `${unit.name} = ${unit.baseFactor} ${product.unit ?? "unit"}${
+                              unit.baseFactor === 1 ? "" : "s"
+                            }`
+                        )
+                        .join(" · ")}
+                    </span>
+                  ) : null}
                 </TableCell>
 
                 <TableCell className="tabular-nums text-zinc-600">

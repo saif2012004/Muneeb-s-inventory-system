@@ -153,6 +153,15 @@ export const SALE_DETAIL_SELECT = {
 export type SaleLine = {
   productId: string;
   quantity: number;
+  /**
+   * BASE UNITS PER SELLING UNIT (S8). 12 for a dozen, 360 for a peti, 6 for a
+   * six-bottle pet. Absent or 1 = the line is already in base units, which is
+   * every per-module line and every line written before S8.
+   *
+   * 🔒 STOCK MOVES BY `quantity x unitFactor`, never by quantity alone. Selling
+   * one peti of eggs takes 360 eggs out of the pool.
+   */
+  unitFactor?: number;
   unitPrice: Prisma.Decimal;
   /** The discount actually applied to this line, snapshotted with the price. */
   discountPercent: Prisma.Decimal;
@@ -458,6 +467,8 @@ export type ExistingSaleLine = {
   id: string;
   productId: string;
   quantity: number;
+  /** The SNAPSHOTTED factor this line was sold at. Absent or 1 = base units. */
+  unitFactor?: number;
   unitPrice: Prisma.Decimal;
   discountPercent: Prisma.Decimal;
 };
@@ -469,6 +480,8 @@ export type SubmittedSaleLine = {
   quantity: number;
   unitPrice?: number;
   discountPercent?: number;
+  /** Resolved by the caller from the chosen selling unit (S8). */
+  unitFactor?: number;
 };
 
 export type LineReconciliation = {
@@ -543,6 +556,9 @@ export function reconcileSaleLines(
       creates.push({
         productId: line.productId,
         quantity: line.quantity,
+        // Carried through so stock moves in BASE units. The caller resolves it
+        // from the chosen selling unit; absent means base units.
+        unitFactor: line.unitFactor,
         unitPrice,
         discountPercent,
         lineTotal: computeLineTotal(unitPrice, line.quantity, discountPercent),
@@ -588,6 +604,10 @@ export function reconcileSaleLines(
       id: prior.id,
       productId: line.productId,
       quantity: line.quantity,
+      // An EXISTING line keeps the factor it was SOLD at, never today's — the
+      // same snapshot rule as its price. Changing the catalog's peti size must
+      // not retroactively change how much stock a past bill consumed.
+      unitFactor: prior.unitFactor,
       unitPrice,
       discountPercent,
       lineTotal: computeLineTotal(unitPrice, line.quantity, discountPercent),
@@ -655,13 +675,25 @@ export function computeStockDeltas(
     deltas.set(productId, (deltas.get(productId) ?? 0) + amount);
   };
 
-  // New lines take stock.
-  for (const line of result.creates) add(line.productId, -line.quantity);
+  /**
+   * BASE units a line consumes: `quantity x unitFactor` (S8).
+   *
+   * Every delta below goes through this rather than reading `quantity`, because
+   * stock is counted in base units and a line may be in dozens or petis. A
+   * per-module line has no factor and multiplies by 1, so those routes are
+   * unchanged.
+   */
+  const base = (line: { quantity: number; unitFactor?: number }) =>
+    line.quantity * (line.unitFactor ?? 1);
 
-  // Removed lines give their full stored quantity back.
+  // New lines take stock.
+  for (const line of result.creates) add(line.productId, -base(line));
+
+  // Removed lines give their full stored quantity back — at the factor THEY were
+  // sold at, not today's catalog factor.
   for (const id of result.removedIds) {
     const prior = priorById.get(id);
-    if (prior) add(prior.productId, prior.quantity);
+    if (prior) add(prior.productId, base(prior));
   }
 
   // Kept lines move by the DIFFERENCE — or, when the product changed, give the
@@ -669,14 +701,14 @@ export function computeStockDeltas(
   for (const line of result.updates) {
     const prior = priorById.get(line.id);
     if (!prior) {
-      add(line.productId, -line.quantity);
+      add(line.productId, -base(line));
       continue;
     }
     if (prior.productId === line.productId) {
-      add(line.productId, prior.quantity - line.quantity);
+      add(line.productId, base(prior) - base(line));
     } else {
-      add(prior.productId, prior.quantity);
-      add(line.productId, -line.quantity);
+      add(prior.productId, base(prior));
+      add(line.productId, -base(line));
     }
   }
 

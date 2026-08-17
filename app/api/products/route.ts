@@ -12,6 +12,11 @@ export const dynamic = "force-dynamic";
 const PRODUCT_SELECT = {
   // Migration E — the owner sets this per beverage size; the till reads it.
   coolingCharge: true,
+  // Migration F — the selling units this product may be sold in (S8).
+  units: {
+    select: { id: true, name: true, baseFactor: true, price: true, isDefault: true },
+    orderBy: { baseFactor: "asc" },
+  },
   id: true,
   name: true,
   price: true,
@@ -87,7 +92,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const parsed = productCreateSchema.safeParse(await request.json());
     if (!parsed.success) return fail(firstIssue(parsed.error), 400);
 
-    const { subCategoryId, ...rest } = parsed.data;
+    const { subCategoryId, units, ...rest } = parsed.data;
 
     const subCategory = await prisma.subCategory.findUnique({
       where: { id: subCategoryId },
@@ -96,7 +101,13 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!subCategory) return fail("That sub-category no longer exists.", 404);
 
     const product = await prisma.product.create({
-      data: { ...rest, subCategoryId },
+      // Selling units (S8) are created with the product in ONE statement — a
+      // nested create, not a second round trip, which matters at ~1.1s each.
+      data: {
+        ...rest,
+        subCategoryId,
+        ...(units && units.length > 0 ? { units: { create: units } } : {}),
+      },
       select: PRODUCT_SELECT,
     });
 

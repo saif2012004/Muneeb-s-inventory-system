@@ -14,6 +14,11 @@ type Context = { params: { id: string } };
 const PRODUCT_SELECT = {
   // Migration E — see the create route.
   coolingCharge: true,
+  // Migration F — the selling units this product may be sold in (S8).
+  units: {
+    select: { id: true, name: true, baseFactor: true, price: true, isDefault: true },
+    orderBy: { baseFactor: "asc" },
+  },
   id: true,
   name: true,
   price: true,
@@ -70,11 +75,37 @@ export async function PATCH(
       if (!subCategory) return fail("That sub-category no longer exists.", 404);
     }
 
-    const product = await prisma.product.update({
-      where: { id: params.id },
-      data: parsed.data,
-      select: PRODUCT_SELECT,
-    });
+    const { units, ...fields } = parsed.data;
+
+    /**
+     * SELLING UNITS ARE REPLACE-ALL (S8), inside ONE transaction with the
+     * product update — the same contract a sale's `items` uses.
+     *
+     * Omitting `units` leaves the existing ones alone, which is what the inline
+     * price and stock editors do when they PATCH a single field. Sending an
+     * array replaces the set; sending `[]` clears it and the product goes back
+     * to selling in base units.
+     *
+     * Delete-then-create rather than a diff: a unit carries no history of its
+     * own — every sold line has ALREADY snapshotted the name and factor it was
+     * sold at (`SaleItem.unitName` / `unitFactor`), so rewriting the catalog's
+     * rows cannot disturb a single past bill.
+     */
+    const product = await prisma.$transaction(async (tx) => {
+      if (units !== undefined) {
+        await tx.productUnit.deleteMany({ where: { productId: params.id } });
+        if (units.length > 0) {
+          await tx.productUnit.createMany({
+            data: units.map((unit) => ({ ...unit, productId: params.id })),
+          });
+        }
+      }
+      return tx.product.update({
+        where: { id: params.id },
+        data: fields,
+        select: PRODUCT_SELECT,
+      });
+    }, { timeout: 15_000, maxWait: 5_000 });
 
     return ok(serialize(product));
   } catch (error) {

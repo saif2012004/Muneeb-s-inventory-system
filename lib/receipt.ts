@@ -66,6 +66,12 @@ export type ReceiptLine = {
   name: string;
   /** Cooling charge per unit actually applied. 0 = not chilled. */
   coolingRate?: number;
+  /**
+   * The SELLING UNIT this line was sold in (Migration F) — "peti", "tray", … or
+   * null for the base unit. SNAPSHOTTED on the line, so a printed bill keeps
+   * saying "2 peti" even if the catalog later renames or deletes that unit.
+   */
+  unitName?: string | null;
   /** Size / tier / shape, already composed — the same detail the screen shows. */
   detail: string | null;
   unit: string | null;
@@ -235,6 +241,7 @@ export async function loadUnifiedReceipt(
       detail: composeDetail(item.product),
       unit: item.product.unit,
       coolingRate: serializeMoney(item.coolingRate),
+      unitName: item.unitName,
       // `quantity` is Decimal(10,2) on this table (Migration C) — `Number()` it
       // here, at the boundary, or `12.5` prints as an object (Gotcha 2).
       quantity: Number(item.quantity),

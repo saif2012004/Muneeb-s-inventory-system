@@ -21,7 +21,6 @@ import {
   computeStockDeltas,
   findStockShortfalls,
   isSaleProblem,
-  snapshotUnitPrice,
   stockBlockMessage,
 } from "@/lib/sales";
 import { serialize } from "@/lib/serialize";
@@ -181,13 +180,52 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
+    /**
+     * SELLING UNITS (S8). A line naming a unit the product does not have is a
+     * 400 naming the fix, never a silent fall back to base units — falling back
+     * would bill a peti at one egg's price and take one egg out of stock.
+     */
+    const badUnit = items.find(
+      (item) =>
+        item.unitName &&
+        !products.get(item.productId)!.units.some((u) => u.name === item.unitName)
+    );
+    if (badUnit) {
+      const product = products.get(badUnit.productId)!;
+      const available = product.units.map((u) => u.name).join(", ") || "none";
+      return fail(
+        `"${product.name}" has no selling unit called "${badUnit.unitName}". Units on this product: ${available}.`,
+        400
+      );
+    }
+
     const lines = items.map((item) => {
       // Non-null: loadUnifiedSaleProducts already proved every id resolves.
       const product = products.get(item.productId)!;
 
-      // Create-only override (Gotcha 5): an explicit unitPrice wins here and
-      // ONLY here. The update path ignores a client price for an existing line.
-      const unitPrice = snapshotUnitPrice(product, item.unitPrice);
+      /**
+       * The chosen SELLING UNIT (S8), or the base unit when none was named.
+       * Both its PRICE and its FACTOR come from the catalog row — the request
+       * carries only a name.
+       */
+      const unit = item.unitName
+        ? product.units.find((u) => u.name === item.unitName)
+        : undefined;
+
+      /**
+       * Create-only override (Gotcha 5): an explicit unitPrice wins here and
+       * ONLY here. Otherwise the price is the UNIT's when one was chosen — a
+       * peti is not 30 x the dozen price — and the product's when it was not.
+       *
+       * This replaces the `snapshotUnitPrice` call: that helper knows only about
+       * a product's own price, and with selling units the default price depends
+       * on which unit was chosen. The RULE it encoded is unchanged and stated
+       * here — client override on create only, never on update.
+       */
+      const unitPrice =
+        item.unitPrice !== undefined
+          ? new Prisma.Decimal(item.unitPrice)
+          : (unit?.price ?? product.price);
 
       /**
        * COOLING (Migration E). The client sends a BOOLEAN; the rate is read off
@@ -218,6 +256,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         productId: item.productId,
         moduleKey: product.moduleKey,
         coolingRate,
+        unitName: unit?.name ?? null,
+        // BASE units per selling unit. Stock moves by quantity x this.
+        unitFactor: unit ? Number(unit.baseFactor) : 1,
         // A NUMBER, not a Decimal: this same object feeds `computeStockDeltas`,
         // whose SaleLine contract is `quantity: number` because it does plain
         // arithmetic on it (`prior.quantity - line.quantity`). Prisma accepts a
@@ -280,6 +321,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       // Snapshotted like the price: a later catalog change must not move a
       // printed bill. 0 when the line was not chilled.
       coolingRate: line.coolingRate,
+      // What it was sold AS, and what stock moved by (S8). Both snapshotted.
+      unitName: line.unitName,
+      unitFactor: line.unitFactor,
       lineTotal: line.lineTotal,
       netLineTotal: line.netLineTotal,
     }));

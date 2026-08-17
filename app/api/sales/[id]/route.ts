@@ -125,6 +125,9 @@ export async function PATCH(
             unitPrice: true,
             // Kept, never recomputed: cooling is part of what was charged.
             coolingRate: true,
+            // What it was sold AS and what stock moved by (S8). Both kept.
+            unitName: true,
+            unitFactor: true,
             discountPercent: true,
             lineTotal: true,
           },
@@ -171,11 +174,47 @@ export async function PATCH(
       id: line.id,
       productId: line.productId,
       quantity: Number(line.quantity),
+      // The factor this line was SOLD at, so stock reconciles in base units and
+      // against the same figure it originally consumed (S8).
+      unitFactor: Number(line.unitFactor),
       unitPrice: line.unitPrice,
       discountPercent: line.discountPercent,
     }));
 
-    const reconciled = reconcileSaleLines(storedLines, items, products);
+    /**
+     * A NEW line may name a selling unit; an existing one keeps what it has.
+     * The factor is resolved HERE, from the catalog, and handed to the
+     * reconciler — it is never accepted from the request.
+     */
+    const badUnit = items.find(
+      (item) =>
+        !item.id &&
+        item.unitName &&
+        !products.get(item.productId)!.units.some((u) => u.name === item.unitName)
+    );
+    if (badUnit) {
+      const product = products.get(badUnit.productId)!;
+      const available = product.units.map((u) => u.name).join(", ") || "none";
+      return fail(
+        `"${product.name}" has no selling unit called "${badUnit.unitName}". Units on this product: ${available}.`,
+        400
+      );
+    }
+
+    const submitted = items.map((item) => {
+      if (item.id) return item;
+      const unit = item.unitName
+        ? products.get(item.productId)!.units.find((u) => u.name === item.unitName)
+        : undefined;
+      return {
+        ...item,
+        unitFactor: unit ? Number(unit.baseFactor) : 1,
+        // A new line takes the UNIT's price unless the owner typed one.
+        unitPrice: item.unitPrice ?? (unit ? Number(unit.price) : undefined),
+      };
+    });
+
+    const reconciled = reconcileSaleLines(storedLines, submitted, products);
     if (isSaleProblem(reconciled)) {
       return fail(reconciled.message, reconciled.status);
     }
@@ -238,7 +277,7 @@ export async function PATCH(
 
     const pricedCreates = creates.map((line, index) => {
       // `creates` preserves the order of the submitted entries without ids.
-      const source = items.filter((item) => !item.id)[index];
+      const source = submitted.filter((item) => !item.id)[index];
       const product = products.get(line.productId)!;
       const rate =
         source?.chilled && product.coolingCharge ? product.coolingCharge : zero;
@@ -294,13 +333,16 @@ export async function PATCH(
 
         if (pricedCreates.length > 0) {
           await tx.saleItem.createMany({
-            data: pricedCreates.map((line) => ({
+            data: pricedCreates.map((line, index) => ({
               saleId: existing.id,
               productId: line.productId,
               moduleKey: moduleOf(line.productId),
               quantity: line.quantity,
               unitPrice: line.unitPrice,
               coolingRate: line.coolingRate,
+              unitName:
+                submitted.filter((item) => !item.id)[index]?.unitName ?? null,
+              unitFactor: line.unitFactor ?? 1,
               lineTotal: line.lineTotal,
               netLineTotal: line.lineTotal,
             })),
@@ -377,7 +419,12 @@ export async function DELETE(
       // what it took.
       select: {
         id: true,
-        items: { select: { id: true, productId: true, quantity: true } },
+        // `unitFactor` is REQUIRED here, not decoration: a deleted peti line must
+        // give back 360 eggs, not 1. Selecting only `quantity` would restore the
+        // count of SELLING units and quietly lose the rest of the pool (S8).
+        items: {
+          select: { id: true, productId: true, quantity: true, unitFactor: true },
+        },
         _count: { select: { items: true } },
       },
     });
@@ -389,6 +436,8 @@ export async function DELETE(
         productId: line.productId,
         // 🔴 See the docblock above. Never pass the Decimal through.
         quantity: Number(line.quantity),
+        // Base units per selling unit, so the restore matches what was taken.
+        unitFactor: Number(line.unitFactor),
         // Not used by the stock maths; present to satisfy ExistingSaleLine.
         unitPrice: new Prisma.Decimal(0),
         discountPercent: new Prisma.Decimal(0),

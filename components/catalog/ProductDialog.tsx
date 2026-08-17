@@ -2,8 +2,8 @@
 
 import { useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2 } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { Loader2, Trash2 } from "lucide-react";
+import { useFieldArray, useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
@@ -84,6 +84,19 @@ const productSchema = z.object({
   qualityTier: z.string(),
   shape: z.string(),
   unit: z.string(),
+  /**
+   * SELLING UNITS (S8) — strings while typing, for the same reason price is:
+   * a number input cannot represent "being typed", and a half-typed "1." is
+   * NaN. Coerced on submit.
+   */
+  units: z.array(
+    z.object({
+      name: z.string(),
+      baseFactor: z.string(),
+      price: z.string(),
+      isDefault: z.boolean(),
+    })
+  ),
 });
 
 type ProductValues = z.infer<typeof productSchema>;
@@ -130,12 +143,15 @@ export function ProductDialog({
       // into "0250". Blank submits as 0 via the coercion in handleSubmit.
       price: "",
       coolingCharge: "",
+      units: [],
       size: NONE,
       qualityTier: NONE,
       shape: NONE,
       unit: NONE,
     },
   });
+
+  const unitRows = useFieldArray({ control: form.control, name: "units" });
 
   useEffect(() => {
     if (!open) return;
@@ -146,6 +162,12 @@ export function ProductDialog({
         product?.coolingCharge === null || product?.coolingCharge === undefined
           ? ""
           : String(product.coolingCharge),
+      units: (product?.units ?? []).map((unit) => ({
+        name: unit.name,
+        baseFactor: String(unit.baseFactor),
+        price: String(unit.price),
+        isDefault: unit.isDefault,
+      })),
       size: product?.size ?? NONE,
       qualityTier: product?.qualityTier ?? NONE,
       shape: product?.shape ?? NONE,
@@ -161,6 +183,18 @@ export function ProductDialog({
       // Blank -> null ("never chilled"), never 0. See the schema above.
       coolingCharge:
         values.coolingCharge.trim() === "" ? null : Number(values.coolingCharge),
+      /**
+       * REPLACE-ALL, and rows with no name are dropped rather than sent — an
+       * empty row is one the owner started and abandoned, not a unit.
+       */
+      units: values.units
+        .filter((unit) => unit.name.trim() !== "")
+        .map((unit) => ({
+          name: unit.name.trim(),
+          baseFactor: Number(unit.baseFactor) || 1,
+          price: Number(unit.price) || 0,
+          isDefault: unit.isDefault,
+        })),
       size: toNullable(values.size),
       qualityTier: toNullable(values.qualityTier),
       shape: toNullable(values.shape),
@@ -255,6 +289,86 @@ export function ProductDialog({
               />
             ) : null}
 
+            {/* SELLING UNITS (S8). Eggs sell as dozen/tray/peti and beverages as
+                bottle/pet, all drawing on ONE stock pool — so a unit says how
+                many BASE units it contains, and that is what stock moves by.
+                Left empty, the product simply sells one base unit at a time. */}
+            <div className="space-y-2 rounded-lg border border-zinc-200 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-zinc-900">Selling units</p>
+                  <p className="text-xs text-zinc-500">
+                    Stock is counted in {form.getValues("unit") !== NONE ? `${form.getValues("unit")}s` : "single units"}.
+                    A pack takes that many out of the same pool.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-lg"
+                  onClick={() =>
+                    unitRows.append({
+                      name: "",
+                      baseFactor: "",
+                      price: "",
+                      isDefault: unitRows.fields.length === 0,
+                    })
+                  }
+                >
+                  Add unit
+                </Button>
+              </div>
+
+              {unitRows.fields.length === 0 ? (
+                <p className="text-xs text-zinc-500">
+                  None — sold one at a time.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[1fr_5rem_6rem_2.75rem] gap-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+                    <span>Unit</span>
+                    <span>Contains</span>
+                    <span>Price</span>
+                    <span className="sr-only">Remove</span>
+                  </div>
+                  {unitRows.fields.map((row, index) => (
+                    <div
+                      key={row.id}
+                      className="grid grid-cols-[1fr_5rem_6rem_2.75rem] gap-2"
+                    >
+                      <Input
+                        {...form.register(`units.${index}.name`)}
+                        placeholder="dozen"
+                        className="h-11 rounded-lg"
+                      />
+                      <Input
+                        {...form.register(`units.${index}.baseFactor`)}
+                        inputMode="decimal"
+                        placeholder="12"
+                        className="h-11 rounded-lg tabular-nums"
+                      />
+                      <Input
+                        {...form.register(`units.${index}.price`)}
+                        inputMode="decimal"
+                        placeholder="200"
+                        className="h-11 rounded-lg tabular-nums"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="size-11 rounded-lg p-0 text-zinc-400 hover:text-rose-600"
+                        onClick={() => unitRows.remove(index)}
+                      >
+                        <Trash2 className="size-4" aria-hidden />
+                        <span className="sr-only">Remove unit {index + 1}</span>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2">
               <SelectField
                 form={form}
@@ -333,7 +447,14 @@ function SelectField({
   options,
 }: {
   form: ReturnType<typeof useForm<ProductValues>>;
-  name: keyof ProductValues;
+  /**
+   * Only the STRING fields. `keyof ProductValues` used to be equivalent, but S8
+   * added `units`, an array — and a Select cannot render one. Narrowing here
+   * makes that a compile error at the call site rather than a runtime surprise.
+   */
+  name: {
+    [K in keyof ProductValues]: ProductValues[K] extends string ? K : never;
+  }[keyof ProductValues];
   label: string;
   options: { value: string; label: string }[];
 }) {

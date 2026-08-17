@@ -101,6 +101,17 @@ export const unifiedSaleItemCreateSchema = z
      * and swallowing it would hide the bug while charging nothing.
      */
     chilled: z.boolean().optional(),
+    /**
+     * The SELLING UNIT's name (S8) — "dozen", "tray", "peti", "pet 6".
+     *
+     * A NAME, never a factor or a price: the server looks the unit up on the
+     * product and takes both from there. A client-supplied factor is the one
+     * value that could silently drain stock — a peti recorded as one egg, or 360
+     * eggs taken for a dozen — so it is not accepted at all.
+     *
+     * Omitted = the base unit, which is every line before S8.
+     */
+    unitName: z.string().min(1).max(40).optional(),
   })
   .strict();
 
@@ -148,6 +159,17 @@ export const unifiedSaleItemUpdateSchema = z
      * on a stored line.
      */
     chilled: z.boolean().optional(),
+    /**
+     * The SELLING UNIT's name (S8) — "dozen", "tray", "peti", "pet 6".
+     *
+     * A NAME, never a factor or a price: the server looks the unit up on the
+     * product and takes both from there. A client-supplied factor is the one
+     * value that could silently drain stock — a peti recorded as one egg, or 360
+     * eggs taken for a dozen — so it is not accepted at all.
+     *
+     * Omitted = the base unit, which is every line before S8.
+     */
+    unitName: z.string().min(1).max(40).optional(),
   })
   .strict();
 

@@ -78,7 +78,25 @@ function bareAmount(value: number): string {
  * standard symbol and no shop owner will misread it, whereas "12…" tells the
  * customer nothing. The SCREEN still says "litres" — it has the room.
  */
-function formatQuantity(quantity: number, unit: string | null): string {
+function formatQuantity(
+  quantity: number,
+  unit: string | null,
+  unitName?: string | null
+): string {
+  /**
+   * A SELLING UNIT wins over the product's base unit (Migration F).
+   *
+   * `2 peti × 7,000.00` is what the owner sold and what the customer is being
+   * charged for; printing `720 eggs` — the base units the stock pool moved by —
+   * would be a number that does not multiply out against the peti price, which
+   * is the one failure this whole receipt is built to avoid.
+   *
+   * Printed VERBATIM, unpluralised: these are the owner's own words for a pack
+   * ("peti", "tray", "dozen"), and English pluralisation rules do not apply to
+   * a Punjabi/Urdu word. `2 petis` would be us correcting his vocabulary on his
+   * own receipt.
+   */
+  if (unitName) return `${quantity} ${unitName}`;
   if (!unit || unit === "piece" || unit === "bottle") return String(quantity);
   if (unit === "litre") return `${quantity} L`;
   return `${quantity} ${unit}${quantity === 1 ? "" : "s"}`;
@@ -150,7 +168,7 @@ export function buildReceiptLines(receipt: ReceiptData): string[] {
 
     lines.push(
       padRow(
-        `  ${formatQuantity(line.quantity, line.unit)} × ${bareAmount(
+        `  ${formatQuantity(line.quantity, line.unit, line.unitName)} × ${bareAmount(
           line.unitPrice + (line.coolingRate ?? 0)
         )}`,
         amount(line.lineTotal)

@@ -76,6 +76,14 @@ export type UnifiedSaleItem = {
    * cannot move a printed bill.
    */
   coolingRate: number;
+  /**
+   * The SELLING UNIT this line was sold in (S8), or null for the base unit.
+   * A NAME, snapshotted — renaming the catalog's unit cannot change what a
+   * printed bill says it sold.
+   */
+  unitName: string | null;
+  /** Base units per selling unit, snapshotted. 1 = base unit. */
+  unitFactor: number;
   /** Always 0 on this endpoint: the unified sale has no discounts. */
   discountPercent: number;
   lineTotal: number;
@@ -121,6 +129,8 @@ export type UnifiedSaleCreateInput = {
     quantity: number;
     /** Create-only price override; the server snapshots it verbatim. */
     unitPrice?: number;
+    /** The selling unit's NAME (S8). The factor never leaves the server. */
+    unitName?: string;
   }[];
 };
 
@@ -135,6 +145,8 @@ export type UnifiedSaleUpdateInput = {
     quantity: number;
     /** NEW lines only — ignored by the server on an existing line. */
     unitPrice?: number;
+    /** NEW lines only: the selling unit's NAME. The factor is the server's. */
+    unitName?: string;
   }[];
 };
 

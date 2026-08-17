@@ -49,6 +49,12 @@ export const UNIFIED_SALE_PRODUCT_SELECT = {
   // Migration E. Rides along in the select the route already runs, so the
   // cooling charge costs ZERO extra round trips — same reasoning as `stock`.
   coolingCharge: true,
+  // Migration F (S8). A JOIN on the same query: the selling units a line may be
+  // sold in, with the price and base-unit factor of each.
+  units: {
+    select: { name: true, baseFactor: true, price: true, isDefault: true },
+    orderBy: { baseFactor: "asc" },
+  },
   subCategory: {
     select: {
       categoryId: true,
@@ -66,6 +72,12 @@ export type UnifiedSaleProductRow = {
   isActive: boolean;
   /** NULL = never chilled, so no toggle. See the schema. */
   coolingCharge: Prisma.Decimal | null;
+  units: {
+    name: string;
+    baseFactor: Prisma.Decimal;
+    price: Prisma.Decimal;
+    isDefault: boolean;
+  }[];
   subCategory: { categoryId: string; category: { id: string; name: string } };
 };
 
@@ -82,6 +94,20 @@ export type UnifiedSaleProductRow = {
 export type UnifiedSaleProduct = SaleProduct & {
   moduleKey: ModuleKey;
   coolingCharge: Prisma.Decimal | null;
+  /**
+   * The SELLING UNITS this product may be sold in (S8). Empty = base units only.
+   *
+   * 🔒 PRICE AND FACTOR COME FROM HERE — THE SERVER. The till sends the unit's
+   * NAME; it never sends a factor, and a wrong factor is the one thing that
+   * could silently drain stock (a peti recorded as 1 egg, or 360 taken for a
+   * dozen). Same stance as the cooling rate.
+   */
+  units: {
+    name: string;
+    baseFactor: Prisma.Decimal;
+    price: Prisma.Decimal;
+    isDefault: boolean;
+  }[];
 };
 
 /**
@@ -169,6 +195,7 @@ export async function loadUnifiedSaleProducts(
       ...byId.get(row.id)!,
       moduleKey,
       coolingCharge: row.coolingCharge,
+      units: row.units,
     });
   }
 
@@ -202,6 +229,9 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
       // receipt and the detail view read it; neither recomputes it from the
       // catalog, which would let a later change move a printed bill.
       coolingRate: true,
+      // What this line was SOLD AS and what stock moved by (Migration F).
+      unitName: true,
+      unitFactor: true,
     },
     // cuid is time-prefixed, so id order is insertion order.
     orderBy: { id: "asc" },

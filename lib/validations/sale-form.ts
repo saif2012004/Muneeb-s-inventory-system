@@ -270,6 +270,12 @@ export const unifiedSaleFormSchema = z.object({
          * reason `id` is optional. A required extra field would fork the row.
          */
         chilled: z.boolean().optional(),
+        /**
+         * The SELLING UNIT's name (S8), or "" for the base unit. Optional for
+         * the same reason `chilled` is: it keeps this value shape assignable to
+         * the per-module one so `LineItemRow` stays a single shared component.
+         */
+        unitName: z.string().optional(),
       })
     )
     .min(1, { message: "Add at least one item to the sale." })
@@ -298,5 +304,6 @@ export function emptyUnifiedSaleLine(): UnifiedSaleFormValues["items"][number] {
     unitPrice: "",
     discountPercent: "",
     chilled: false,
+    unitName: "",
   };
 }

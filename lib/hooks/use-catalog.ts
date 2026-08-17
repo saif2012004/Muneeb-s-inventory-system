@@ -41,6 +41,19 @@ export type Product = {
   price: number;
   /** Per-unit cooling charge, or null when this product is never chilled. */
   coolingCharge: number | null;
+  /**
+   * SELLING UNITS (S8). Empty = sold in base units, one at a time.
+   *
+   * `baseFactor` is how many BASE units one of these contains — 12 for a dozen,
+   * 360 for a peti — and it is what stock moves by.
+   */
+  units: {
+    id: string;
+    name: string;
+    baseFactor: number;
+    price: number;
+    isDefault: boolean;
+  }[];
   size: string | null;
   /** Units on hand. Beverages + bakery; milk has no products. */
   stock: number;
@@ -174,6 +187,11 @@ export type ProductWriteInput = {
    * product and simply never shows a toggle where it is null.
    */
   coolingCharge?: number | null;
+  /**
+   * REPLACE-ALL. Omit to leave the product's units untouched (what the inline
+   * price/stock editors do); send `[]` to clear them.
+   */
+  units?: { name: string; baseFactor: number; price: number; isDefault?: boolean }[];
   size: string | null;
   /**
    * OPTIONAL on write. A new product takes the column default rather than the

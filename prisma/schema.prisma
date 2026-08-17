@@ -72,6 +72,12 @@ model Product {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
+  /// The SELLING UNITS this product can be sold in (Migration F, S8).
+  ///
+  /// Empty = sold in whatever `stock` counts, one at a time — which is every
+  /// product today. Eggs get dozen/tray/peti; a beverage size gets bottle/pet.
+  units             ProductUnit[]
+
   // REQUIRED back-relations (do not remove, migration fails without them)
   beverageSaleItems BeverageSaleItem[]
   bakerySaleItems   BakerySaleItem[]
@@ -79,6 +85,45 @@ model Product {
 }
 
 // ---------------------------------------------------------------------------
+/// A way to SELL a product, on top of the base unit its stock is counted in.
+///
+/// ---------------------------------------------------------------------------
+/// ONE STOCK POOL, SEVERAL SELLING UNITS (S8, the owner's #19)
+/// ---------------------------------------------------------------------------
+/// `Product.stock` counts BASE units — single eggs, single bottles, litres.
+/// A unit says how many base units one of it contains, so selling a peti of eggs
+/// decrements the SAME pool by 360 and a dozen decrements it by 12. That is the
+/// whole feature: the loose-egg count can never disagree with the tray count,
+/// because there is only one count.
+///
+/// ⚠️ A TABLE, NOT MORE PRODUCTS. Three egg rows sharing a stock pointer is the
+/// discount-variant model this project already deleted once (36 products, see
+/// "Discounts, russ, eggs" in CLAUDE.md) and it fails the same way: rows that
+/// drift in price, name and active state while claiming to be one thing.
+model ProductUnit {
+  id         String  @id @default(cuid())
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// What the owner calls it: "dozen" | "tray" | "peti" | "bottle" | "pet".
+  ///
+  /// A product may hold TWO pets with different counts — Gourmet 1.5L ships both
+  /// 4 and 6 — so the name carries the count ("pet 4", "pet 6") and the unique
+  /// index below is on the NAME, not on some notion of a single pet.
+  name       String
+  /// How many BASE units one of these contains. 12 · 30 · 360 · 24 · 6 · 4.
+  /// DECIMAL so a future half-unit is expressible without another migration.
+  baseFactor Decimal @db.Decimal(10, 2)
+  /// The price of ONE of these. A peti is NOT 30 x the dozen price — that is why
+  /// each unit carries its own price rather than deriving from the product's.
+  price      Decimal @db.Decimal(10, 2)
+  /// Pre-selected on the till. At most one per product.
+  isDefault  Boolean @default(false)
+  createdAt  DateTime @default(now())
+
+  @@unique([productId, name])
+  @@index([productId])
+}
+
 // Customers (shared across all sales) + Receivables
 // ---------------------------------------------------------------------------
 
@@ -225,6 +270,19 @@ model SaleItem {
   /// decimal simply does not get in their way.
   quantity        Decimal @db.Decimal(10, 2)
   unitPrice       Decimal @db.Decimal(10, 2)
+  /// The SELLING UNIT this line was sold in, snapshotted (Migration F).
+  ///
+  /// NULL = sold in the base unit, which is every line written before S8. Kept
+  /// as a NAME rather than a foreign key on purpose: deleting or renaming a unit
+  /// in the catalog must not change what a printed bill says it sold, and a bill
+  /// that reads "2 peti" must keep reading that forever.
+  unitName        String?
+  /// Base units per selling unit, snapshotted with the name. 1 = base unit.
+  ///
+  /// 🔒 THIS IS WHAT STOCK MOVED BY: `quantity x unitFactor`. Storing it means a
+  /// later change to the catalog's peti size cannot retroactively alter how much
+  /// stock a past sale consumed — the same rule as `unitPrice` and `coolingRate`.
+  unitFactor      Decimal @default(1) @db.Decimal(10, 2)
   /// The cooling rate ACTUALLY CHARGED on this line, per unit (Migration E).
   ///
   /// Snapshotted exactly like `unitPrice`, and for the same reason: editing the

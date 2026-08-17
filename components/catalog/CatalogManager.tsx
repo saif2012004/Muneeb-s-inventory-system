@@ -645,6 +645,26 @@ export function CatalogManager() {
                   qualityTier: values.qualityTier,
                   shape: values.shape,
                   unit: values.unit,
+                  /**
+                   * 🔴 EVERY DIALOG FIELD MUST BE LISTED HERE.
+                   *
+                   * This object is written out field by field rather than
+                   * spreading `values`, so a field the dialog gained but this
+                   * list never learned about is silently dropped — the save
+                   * succeeds, the toast says "Product updated", and the value
+                   * the owner typed is simply gone. Nothing fails.
+                   *
+                   * That is exactly what happened twice: `coolingCharge`
+                   * (Migration E) and `units` (Migration F) were both editable
+                   * in the dialog and unsaveable from it, so a charge or a pet
+                   * could only ever be set when the product was CREATED. Found
+                   * 2026-08-18 by typing a case price in and reading the row
+                   * back out of the database.
+                   *
+                   * If you add a field to ProductDialog, add it here.
+                   */
+                  coolingCharge: values.coolingCharge,
+                  units: values.units,
                   // `price` is deliberately absent: the inline editor owns it,
                   // and the PATCH route treats an omitted field as unchanged.
                 },
