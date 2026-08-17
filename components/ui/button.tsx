@@ -20,11 +20,29 @@ const buttonVariants = cva(
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
       },
+      /**
+       * 44px MINIMUM — the Design System's touch target (CHECKLIST #10).
+       *
+       * shadcn ships these at 36 / 32 / 40 / 36px, which is fine for a desktop
+       * app and wrong for this one: the owner uses it one-handed on a cheap
+       * Android phone, often with wet hands behind a counter. 151 call sites had
+       * already been patched with `h-11` one at a time; the remaining ~84 had
+       * not, so the same button was 44px on one screen and 36px on another.
+       *
+       * Raised HERE, once, rather than at each call site — which is what
+       * CLAUDE.md's #10 asks for. The explicit `h-11` overrides are now
+       * redundant but harmless (same value), so they can be removed lazily
+       * rather than in one risky sweep.
+       *
+       * `sm` stays SMALLER than default but no longer below the minimum: it is
+       * used inside dense rows, and 44px is the floor for anything a finger has
+       * to hit.
+       */
       size: {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-10 rounded-md px-8",
-        icon: "h-9 w-9",
+        default: "h-11 px-4 py-2",
+        sm: "h-11 rounded-md px-3 text-xs",
+        lg: "h-12 rounded-md px-8",
+        icon: "size-11",
       },
     },
     defaultVariants: {

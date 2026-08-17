@@ -2125,6 +2125,29 @@ work; and a discounted sale round-tripped exactly — 3 × 275.50 → 10% line �
 `3 × Rs. 276  Rs. 744`. Evidence:
 `docs/responses/2026-08-10-discount-column-dropped-and-verified.md`.
 
+#### `[x]` **10. Touch targets — DONE 2026-08-14, in the primitives**
+
+**Raised once, in the three primitives, exactly as this item asked.** shadcn's defaults were 36 / 32 /
+40 / 36px and the Design System requires **44**; 151 call sites had already been patched with `h-11`
+one at a time while ~84 buttons and ~40 inputs had not, so the same control was 44px on one screen and
+36px on another.
+
+| Primitive | Was | Now |
+|---|---|---|
+| `button.tsx` default · sm · lg · icon | 36 · 32 · 40 · 36 | **44 · 44 · 48 · 44** |
+| `input.tsx` | 36 | **44** |
+| `tabs.tsx` TabsTrigger (no height at all) | ≈28 | **min-h-[44px]**, list `h-auto` |
+
+The existing `h-11` overrides are now redundant but harmless (same value) — remove them lazily, not in
+one risky sweep. `sm` stays visually smaller (narrower padding, smaller text) but no longer below the
+floor: 44px is the minimum for anything a finger must hit.
+
+**Browser-checked on the dense screens** — the catalog's product tables, milk quick entry, and the
+customer profile — for layout damage. None: rows simply breathe more.
+
+<details>
+<summary>Original item</summary>
+
 #### `[ ]` **10. Touch targets — app-wide, in one place**
 
 `shadcn TabsTrigger` measures **28px** and inline back-links **20px** against the Design System's
@@ -2135,7 +2158,7 @@ not one-off mistakes, so they exist wherever those primitives are used.
 
 ⚠️ **CORRECTED 2026-08-11 — the primitive defaults are 36px, not ≥44px.** An earlier version of
 this item said "everything else measured clean — inputs, buttons and cards are all ≥44px". That is
-**false**, read straight from the cva:
+**false**, read straight from the cva (all three have since been raised — see above):
 
 | Primitive | Default | |
 |---|---|---|
@@ -2146,6 +2169,8 @@ this item said "everything else measured clean — inputs, buttons and cards are
 They reach 44px only where a call site overrides with `h-11` — **151 such overrides exist**, while
 **~84 `<Button>` and ~40 `<Input>` usages carry no override** and render at 36px. So the scope is
 the three primitive defaults, not one `TabsTrigger` line.
+
+</details>
 
 #### `[ ]` **11. PWA — manifest, service worker, install prompt**
 

@@ -444,13 +444,22 @@ export async function getCustomerActivity(customerId: string) {
   /**
    * The unified bills. Fetched through Prisma rather than the raw aggregate the
    * balance paths use, because the ledger needs whole rows — and the
-   * migration-A exclusion is FREE here: `beverage` and `bakery` above are
-   * already this customer's complete legacy sets, so their ids ARE the
-   * exclusion list. No extra query, no NOT EXISTS. See NOT_A_MIGRATION_COPY.
+   * migrated-copy exclusion is FREE here: the three arrays above are already
+   * this customer's complete legacy sets, so their ids ARE the exclusion list.
+   * No extra query, no NOT EXISTS. See `notAMigrationCopy()`.
+   *
+   * 🔴 ALL THREE TABLES, INCLUDING MILK. Found in the browser right after S5
+   * copied the real milk sale into `Sale`: with `milk` missing from this set the
+   * profile listed that ONE sale TWICE — once as "Milk" and once as
+   * "Sale · Milk" — while the balance beside it stayed correct, because the
+   * balance path uses the SQL guard and this one did not. Two exclusion lists
+   * that disagree is exactly the failure `notAMigrationCopy()` was centralised
+   * to prevent; this is its JS twin and must list the same tables.
    */
   const legacyIds = new Set([
     ...beverage.map((sale) => sale.id),
     ...bakery.map((sale) => sale.id),
+    ...milk.map((sale) => sale.id),
   ]);
   const unifiedRows = await prisma.sale.findMany({
     where,
