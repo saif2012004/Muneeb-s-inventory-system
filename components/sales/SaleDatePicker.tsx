@@ -25,10 +25,13 @@ export function SaleDatePicker({
   value,
   onChange,
   invalid,
+  id,
 }: {
   value: Date | undefined;
   onChange: (date: Date) => void;
   invalid?: boolean;
+  /** On the TRIGGER — see the note on CustomerCombobox's `id`. */
+  id?: string;
 }) {
   const [open, setOpen] = useState(false);
   const today = karachiToday();
@@ -42,6 +45,7 @@ export function SaleDatePicker({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
+            id={id}
             type="button"
             variant="outline"
             className={cn(

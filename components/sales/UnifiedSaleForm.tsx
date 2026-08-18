@@ -175,6 +175,98 @@ function ChillToggle({
   );
 }
 
+type FieldErrors = ReturnType<
+  typeof useForm<UnifiedSaleFormValues, unknown, UnifiedSaleFormOutput>
+>["formState"]["errors"];
+
+/**
+ * The first failing field, in the order the owner reads the form: customer,
+ * date, then each line top to bottom, then notes.
+ *
+ * Returns the DOM id to scroll to alongside the message, because the message
+ * alone is what the old toast had and it was not enough — see the caller.
+ */
+function firstErrorTarget(
+  errors: FieldErrors
+): { label: string; message: string; elementId?: string } | null {
+  const msg = (m: unknown, fallback: string) =>
+    typeof m === "string" && m.length > 0 ? m : fallback;
+
+  if (errors.customerId)
+    return {
+      label: "Customer",
+      message: msg(errors.customerId.message, "Choose a customer"),
+      elementId: "customer",
+    };
+
+  if (errors.saleDate)
+    return {
+      label: "Date",
+      message: msg(errors.saleDate.message, "Choose a date"),
+      elementId: "sale-date",
+    };
+
+  // An error on the ARRAY itself ("Add at least one item") rather than on a row.
+  if (errors.items?.message)
+    return { label: "Items", message: msg(errors.items.message, "Add an item") };
+
+  const rows = Array.isArray(errors.items) ? errors.items : [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (!row) continue;
+    const item = `Item ${index + 1}`;
+    if (row.productId)
+      return {
+        label: `${item} · product`,
+        message: msg(row.productId.message, "Choose a product"),
+        elementId: `item-${index}-product`,
+      };
+    if (row.quantity)
+      return {
+        label: `${item} · quantity`,
+        message: msg(row.quantity.message, "Enter a quantity"),
+        elementId: `item-${index}-quantity`,
+      };
+    if (row.unitPrice)
+      return {
+        label: `${item} · price`,
+        message: msg(row.unitPrice.message, "Enter a price"),
+        elementId: `item-${index}-price`,
+      };
+    /**
+     * A row can fail on a field this screen does not render — the per-line
+     * discount is hidden here, and `chilled` / `unitName` have no error slot.
+     * Without this branch such a failure would produce a toast pointing at
+     * nothing, which is the exact complaint this whole block exists to answer.
+     */
+    const other = Object.entries(row).find(
+      ([, value]) => value && typeof value === "object" && "message" in value
+    );
+    if (other)
+      return {
+        label: `${item} · ${other[0]}`,
+        message: msg(
+          (other[1] as { message?: unknown }).message,
+          "Not valid"
+        ),
+        elementId: `item-${index}-product`,
+      };
+  }
+
+  if (errors.notes)
+    return {
+      label: "Notes",
+      message: msg(errors.notes.message, "Too long"),
+      elementId: "notes",
+    };
+
+  // Nothing recognised — e.g. the bill-level discountPercent, which this screen
+  // never renders and always sends as "". Say so honestly instead of pointing
+  // the owner at a field that is not on screen.
+  const [key] = Object.keys(errors);
+  return key ? { label: key, message: "Not valid" } : null;
+}
+
 /**
  * THE UNIFIED TILL — one bill, any product from any shop.
  *
@@ -517,8 +609,54 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
         }
       );
     },
-    () => {
-      toast.error("Check the highlighted fields and try again.");
+    /**
+     * INVALID SUBMIT — say WHICH field, and take the owner to it.
+     *
+     * ---------------------------------------------------------------------
+     * WHY THIS IS NOT JUST A TOAST
+     * ---------------------------------------------------------------------
+     * It used to read "Check the highlighted fields and try again." and do
+     * nothing else. On a bill with four lines the form is ~1,300px tall against
+     * an ~860px viewport, so **more than half the error messages are below the
+     * fold** — and the page did not scroll. The owner got told to check
+     * highlighted fields while nothing on screen was highlighted, which is
+     * indistinguishable from the app being broken. Reported from real use,
+     * 2026-08-18.
+     *
+     * `shouldFocusError` (react-hook-form's default) does not cover it: it can
+     * only focus fields it holds a ref for, and the two most likely offenders —
+     * the customer and product pickers — are custom comboboxes built on
+     * buttons, not registered inputs.
+     *
+     * So this walks the errors in the order they appear on screen, names the
+     * first one, and scrolls it into view. Naming it also covers the case a
+     * generic message hides completely: a field whose error has nowhere to
+     * render would otherwise be invisible AND unmentioned.
+     */
+    (errors) => {
+      const target = firstErrorTarget(errors);
+      toast.error(
+        target ? `${target.label} — ${target.message}` : "Check the form and try again."
+      );
+
+      // Bound to a local: TypeScript cannot keep the narrowing across the
+      // callback boundary, and the field is optional on purpose (some errors
+      // have no element to point at).
+      const elementId = target?.elementId;
+      if (!elementId) return;
+      // rAF: the toast and any re-render land first, so we measure the final
+      // layout rather than scrolling to where the field used to be.
+      requestAnimationFrame(() => {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Focus only what can take it — scrolling a <div> wrapper is enough,
+        // and calling focus() on it would steal the ring from nothing.
+        const focusable = el.matches("input, select, textarea, button")
+          ? el
+          : el.querySelector<HTMLElement>("input, select, textarea, button");
+        focusable?.focus({ preventScroll: true });
+      });
     }
   );
 
@@ -635,6 +773,7 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
               </>
             ) : (
               <CustomerCombobox
+                id="customer"
                 customers={customers}
                 isLoading={isLoading}
                 value={form.watch("customerId")}
@@ -655,6 +794,7 @@ export function UnifiedSaleForm({ sale }: { sale?: UnifiedSaleDetail }) {
           <section className="space-y-1.5">
             <Label htmlFor="sale-date">Date</Label>
             <SaleDatePicker
+              id="sale-date"
               value={form.watch("saleDate")}
               invalid={Boolean(form.formState.errors.saleDate)}
               onChange={(date) =>

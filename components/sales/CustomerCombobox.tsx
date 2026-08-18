@@ -54,12 +54,20 @@ export function CustomerCombobox({
   onChange,
   invalid,
   accent = "zinc",
+  id,
 }: {
   customers: Customer[];
   isLoading: boolean;
   value: string;
   onChange: (customerId: string) => void;
   invalid?: boolean;
+  /**
+   * Put on the TRIGGER, so the caller's <Label htmlFor> actually reaches a
+   * focusable control. Without it the label pointed at nothing: clicking it did
+   * nothing, screen readers got no association, and a failed submit had no
+   * element to scroll to.
+   */
+  id?: string;
   /** Module accent, so the picker matches the screen it sits on. */
   accent?: AccentKey;
 }) {
@@ -106,6 +114,7 @@ export function CustomerCombobox({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
+            id={id}
             type="button"
             variant="outline"
             role="combobox"
