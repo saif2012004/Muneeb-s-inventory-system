@@ -429,7 +429,7 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
 | Page | URL |
 |---|---|
 | Dashboard home | `/` |
-| Modules | `/beverages`, `/bakery`, `/milk`, `/customers`, `/catalog`, `/reports` |
+| Screens | `/sales`, `/milk`, `/customers`, `/catalog`, `/reports`, `/settings` |
 | Login | `/login` — **the only unauthenticated page** |
 
 `DEFAULT_LOGIN_REDIRECT` is `"/"`. Route constants live in `/lib/routes.ts`.
@@ -439,26 +439,25 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
   /api                     → Route Handlers (serverless). runtime="nodejs" where Prisma/bcrypt used.
     /sales/route.ts        → UNIFIED sale POST (S3, live 2026-08-13) + GET list (S4.1,
                              2026-08-14). Beverages+bakery+milk on ONE bill; no discounts.
-    /sales/[id]/route.ts   → UNIFIED sale GET one + DELETE (S4.1). ⚠️ The DELETE RESTORES
-                             STOCK — and normalises `Number(item.quantity)` first, because
+    /sales/[id]/route.ts   → GET one + PATCH + DELETE. ⚠️ The DELETE RESTORES STOCK — and
+                             normalises `Number(item.quantity)` first, because
                              SaleItem.quantity is Decimal and computeStockDeltas takes a
-                             number. No PATCH yet (edit is still CHECKLIST #8).
-  /receipt/sale/[id]       → the UNIFIED receipt (S4.2). Sibling of /receipt/[module]/[id],
-                             not a third module value — it reads a different table.
-  /(dashboard)/sales/      → the unified till: list + /sales/new (S4.2). ZINC accent.
+                             number.
+  /receipt/sale/[id]       → THE receipt. `/receipt/[module]/[id]` was deleted in S9.
+  /(dashboard)/sales/      → the till: list + /sales/new + /sales/[id]/edit. ZINC accent,
+                             because a bill spanning shops claims no shop's colour.
   /(auth)/login            → Owner login page → /login
   /(dashboard)             → layout group ONLY, adds nothing to the URL
     /layout.tsx            → Protected layout with nav
     /page.tsx             → Dashboard home (summary + charts) → /
-    /beverages/           → Beverages module
-    /bakery/              → Bakery module
-    /milk/                → Milk shop module (deliveries, purchases, sales, balances)
+    /milk/                → FARMERS only: deliveries, purchases, quick entry, balances.
+                            Milk is SOLD on the till like everything else (S4.3/S9).
     /catalog/             → Category + product manager
     /customers/           → Customer ledger + receivables
     /reports/             → Analytics + CSV export
 /components
   /ui                     → shadcn components (auto-generated, do not hand-edit)
-  /beverages  /bakery  /milk  /customers
+  /sales  /milk  /customers  /catalog  /reports  /receipt
   /shared                 → DataTable, PageHeader, StatCard, MoneyText, EmptyState, etc.
 /lib
   /prisma.ts              → Prisma client singleton
@@ -468,12 +467,13 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
   /serialize.ts           → Decimal → number serializers (money/liters)
   /format.ts              → formatPKR(), formatDate(), Karachi date helpers
   /utils.ts               → misc helpers
-  /sales.ts               → THE money + stock + price-snapshot implementation (per-module)
-  /unified-sales.ts       → unified sale: loadUnifiedSaleProducts, resolveLineModule,
+  /sales.ts               → THE money + stock + price-snapshot + line-reconciliation
+                            implementation. Shared by every sale path (there is one).
+  /unified-sales.ts       → loadUnifiedSaleProducts, resolveLineModule,
                             UNIFIED_SALE_PRODUCT_SELECT, UNIFIED_SALE_DETAIL_SELECT
   /modules.ts             → MODULE_CATEGORIES (beverages | bakery | milk) → Category
   /milk.ts                → FARMER side only: deliveries, purchases, balances, ledger
-  /milk-sales.ts          → milk SHOP sales (split out in S2, 2026-08-12)
+                            (`lib/milk-sales.ts` went with the MilkSale table in S9)
   /milk-stock.ts          → the DELIVERY-TO-STOCK BRIDGE
   /receivables.ts         → THE customer balance calculation
 /prisma
@@ -537,9 +537,7 @@ model Product {
   units           ProductUnit[]
 
   // REQUIRED back-relations (do not remove, migration fails without them)
-  beverageSaleItems BeverageSaleItem[]
-  bakerySaleItems   BakerySaleItem[]
-  saleItems         SaleItem[]        // unified Sale (Migration A)
+  saleItems         SaleItem[]        // the only one since S9
 }
 
 // A SELLING UNIT (Migration F, 2026-08-18). `baseFactor` is how many base units
@@ -608,9 +606,7 @@ model Customer {
   phone         String?
   type          String            // "hotel" | "individual" | "shop"
   isActive      Boolean           @default(true)
-  beverageSales BeverageSale[]
-  bakerySales   BakerySale[]
-  milkSales     MilkSale[]
+  sales         Sale[]
   payments      CustomerPayment[]
   createdAt     DateTime          @default(now())
 }
@@ -629,61 +625,11 @@ model CustomerPayment {
 }
 ```
 
-### Beverages
+### ~~Beverages / Bakery~~ — dropped by Migration B (S9)
 
-```prisma
-model BeverageSale {
-  id          String             @id @default(cuid())
-  customerId  String
-  customer    Customer           @relation(fields: [customerId], references: [id])
-  saleDate    DateTime           @default(now())
-  totalAmount Decimal            @db.Decimal(10, 2)
-  notes       String?
-  items       BeverageSaleItem[]
-  createdAt   DateTime           @default(now())
-
-  @@index([customerId, saleDate])
-}
-
-model BeverageSaleItem {
-  id        String       @id @default(cuid())
-  saleId    String
-  sale      BeverageSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product      @relation(fields: [productId], references: [id])
-  quantity  Int
-  unitPrice Decimal      @db.Decimal(10, 2)   // snapshot at time of sale
-  lineTotal Decimal      @db.Decimal(10, 2)
-}
-```
-
-### Bakery
-
-```prisma
-model BakerySale {
-  id          String           @id @default(cuid())
-  customerId  String
-  customer    Customer         @relation(fields: [customerId], references: [id])
-  saleDate    DateTime         @default(now())
-  totalAmount Decimal          @db.Decimal(10, 2)
-  notes       String?
-  items       BakerySaleItem[]
-  createdAt   DateTime         @default(now())
-
-  @@index([customerId, saleDate])
-}
-
-model BakerySaleItem {
-  id        String     @id @default(cuid())
-  saleId    String
-  sale      BakerySale @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product    @relation(fields: [productId], references: [id])
-  quantity  Int
-  unitPrice Decimal    @db.Decimal(10, 2)   // snapshot at time of sale
-  lineTotal Decimal    @db.Decimal(10, 2)
-}
-```
+`BeverageSale`, `BeverageSaleItem`, `BakerySale` and `BakerySaleItem` were here. A bill of either
+kind is now a `Sale` whose lines carry `moduleKey`, which is the only shape that can represent what
+the owner actually sells: one customer, one bill, items from more than one shop.
 
 ### Milk Shop
 
@@ -728,20 +674,12 @@ model FarmerPurchase {
   @@index([farmerId, purchaseDate])
 }
 
-// Milk SOLD to hotels/shops/individuals (owner's outbound milk sales)
-model MilkSale {
-  id           String   @id @default(cuid())
-  customerId   String
-  customer     Customer @relation(fields: [customerId], references: [id])
-  saleDate     DateTime @default(now())
-  liters       Decimal  @db.Decimal(8, 2)
-  ratePerLiter Decimal  @db.Decimal(8, 2)
-  totalAmount  Decimal  @db.Decimal(10, 2)   // liters * ratePerLiter
-  notes        String?
-  createdAt    DateTime @default(now())
-
-  @@index([customerId, saleDate])
-}
+// ⚠️ MilkSale WAS HERE — dropped by Migration B (S9).
+//
+// Milk SOLD is a Sale with a milk line: prod_milk, quantity in litres. The two
+// models above are milk BOUGHT from farmers — no customer, no product, and
+// nothing to do with the till. Keep them apart; the sign convention alone
+// (positive means the OWNER owes) is the module's sharpest trap.
 ```
 
 ### User (auth)
@@ -758,73 +696,70 @@ model User {
 
 ---
 
-## 🧭 WHICH SALE TABLES ARE LIVE — RE-VERIFIED 2026-08-11, re-check before believing otherwise
+## 🧭 ONE SALE TABLE: `Sale` / `SaleItem` — S9, 2026-08-18
 
-> **This section has been correct all along; the SESSION BRIEFS drifted from it, not the reverse.**
-> Across seven consecutive briefs an upstream summary asserted the opposite — "unified Sale is the
-> only sale model", "Migration B done", "the guard was repointed" — none of which was true in this
-> repo. A full ground-truth audit on 2026-08-11 re-confirmed every claim below.
-> **If a session brief and this section disagree, run the grep. The grep wins.**
+**Every bill in the app is a `Sale` with `SaleItem` lines.** There is one till (`/sales/new`), one
+list (`/sales`), one receipt (`/receipt/sale/[id]`), and one place money is read from.
 
-> **⚠️ UPDATE 2026-08-14 — PARTIAL SWITCH-OVER.** The unified path is **LIVE END TO END**:
-> `POST /api/sales` (S3, `90e8609`), `GET`/`DELETE` (S4.1), and the SCREEN at `/sales` + `/sales/new`
-> with its own receipt at `/receipt/sale/[id]` (S4.2). **`lib/receivables.ts` now counts unified
-> sales**, so a bill rung on the new till reaches the customer's outstanding balance.
->
-> **REPORTS WERE REPOINTED IN S6 (2026-08-14).** Revenue, counts, trend, top products and the CSV
-> exports all read **old tables ∪ unified lines**, so a till bill appears everywhere. Per-module
-> revenue is **`Σ netLineTotal` grouped by `moduleKey`** — never a sale's `totalAmount`, which would
-> attribute a mixed bill entirely to one shop. The old per-module create routes and screens are still
-> live and their history is still counted; both paths coexist **BY DESIGN** until S9.
->
-> **The grep below now returns matches — that is EXPECTED, not the dormant state.** Once any
-> unified sale is created, Migration A's row is no longer the only `Sale` row.
-
-**The app runs on `BeverageSale` / `BakerySale`. `Sale` / `SaleItem` exist but NOTHING reads or
-writes them.** The unified rework is HALF shipped: the data was migrated (migration A), the
-application was never switched over.
-
-This has now been misread in both directions across sessions, so here is the 10-second check.
-**Run it before you assert either state:**
+> **This section spent months warning that the OPPOSITE was true** — that the app ran on
+> `BeverageSale`/`BakerySale` while `Sale` sat empty, and that session briefs kept claiming the
+> switch-over had happened when it had not. That is over: it has now genuinely happened. The habit
+> the old warning taught is still the right one, so it is restated in the new direction:
+> **if something tells you a per-module sale table is still live, run the grep. The grep wins.**
 
 ```bash
-grep -rn "prisma\.sale\.\|prisma\.saleItem\." app lib components --include=*.ts --include=*.tsx
+# Must return NOTHING. A match means someone reintroduced a per-module sale path.
+grep -rn "beverageSale\|bakerySale\|milkSale" app lib components --include=*.ts --include=*.tsx
 ```
 
-**Zero matches = the unified tables are still dormant.** One or more = the switch-over has happened
-and this section is out of date; update it in the same commit (see the process rule at the top).
+The stronger check is that **the Prisma client no longer has those models at all** — the schema
+dropped them in S9, so a call to `prisma.bakerySale.*` is a type error, not a runtime surprise.
 
-| Thing | Live today | Notes |
-|---|---|---|
-| Create a sale | `tx.beverageSale.create` / `tx.bakerySale.create` | per module; a mixed-category sale is **rejected** by `loadSaleProducts` |
-| List / read / update | `prisma.{beverage,bakery}Sale.*` | `PATCH` exists and is server-verified but has **no UI** |
-| Sale form | `NewSaleForm` at `/beverages/new-sale` and `/bakery/new-sale` | posts to `SaleModule.apiBase` |
-| **`/sales`** (the SCREEN) | **LIVE since S4.2** | `app/(dashboard)/sales/` — list + `/sales/new` till. Zinc accent: a cross-module bill claims no module colour |
-| Reports revenue | `SUM("totalAmount") FROM "BeverageSale" / "BakerySale"` | sale-level, NOT `Σ netLineTotal` |
-| Reports top products | `prisma.{beverage,bakery}SaleItem.groupBy` on `lineTotal` | per-module item tables |
-| Receipt | `lib/receipt.ts` → the same two tables | correct: it prints what the app can actually create |
+| Thing | Where |
+|---|---|
+| Create a sale | `POST /api/sales` → `tx.sale.create`, any mix of shops on one bill |
+| List / read / edit / delete | `/api/sales`, `/api/sales/[id]` |
+| Sale form | `components/sales/UnifiedSaleForm.tsx`, at `/sales/new` and `/sales/[id]/edit` |
+| Per-shop view | the **Shop filter** on `/sales` — `items: { some: { moduleKey } }` |
+| Reports revenue | `Σ netLineTotal` grouped by `SaleItem.moduleKey` |
+| Receipt | `loadUnifiedReceipt` in `lib/receipt.ts` |
 
-### ⚠️ `SALE_DETAIL_SELECT` targets the OLD tables, despite the generic name
+### What S9 deleted, so nobody goes looking for it
 
-It lives in `lib/sales.ts` and is written generically **because `BeverageSale` and `BakerySale` have
-identical shapes** — that is Phase 4's code-sharing, not a sign that it points at `Sale`. Every one
-of its call sites is preceded by `prisma.beverageSale.*` or `prisma.bakerySale.*`; **none uses
-`prisma.sale`.** The name has caused a misread before. Do not infer the target from it — grep the
-call sites.
+`/beverages`, `/bakery`, `/milk/sales` and their `new-sale` screens · `/api/{beverages,bakery}/sales`
+· `/api/milk/sales` · `/receipt/[module]/[id]` · `NewSaleForm`, `SalesList`, `SaleLineItems`,
+`MilkSaleDialog`, `MilkSalesList` · `lib/sale-modules.ts` (its two accent-class maps moved to
+`lib/nav.ts`, which is where `AccentKey` already lived) · `lib/validations/sales.ts` (the list query
+moved to `lib/validations/unified-sales.ts` and gained `module`) · `lib/hooks/use-sales.ts` ·
+`lib/milk-sales.ts` · the milk-sale hooks in `lib/hooks/use-milk.ts`, which is now the farmer side
+only · the `beverages_sales` / `bakery_sales` / `milk_sales` CSV exports.
 
-### Why the old tables still exist
+### 🔴 `notAMigrationCopy()` IS GONE. Do not reinstate it.
 
-**They are the pre-Migration-B rollback, and that is correct.** Migration B (dropping
-`BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem`) is **not written and not run** —
-no migration in `prisma/migrations/` contains `DROP TABLE`. It stays that way until the switch-over
-is built AND browser-verified, because today those four tables hold the live data: dropping them now
-would break every sale screen and every report immediately.
+Every aggregate over `Sale` used to carry a `NOT EXISTS` against the three old sale tables, because
+Migration A and S5 copied the real bills into `Sale` **keeping their ids** — so each existed twice
+and any sum reading both counted it twice. With one copy left it matches nothing.
 
-`Sale` currently holds exactly one row — migration A's copy of Saif's bakery sale, carrying the
-original's id (`cmsjh3kly0002uve8ajkvs2ji`) and its pre-migration `createdAt`. A sale created through
-a live unified flow would have a fresh id and a `createdAt` after 2026-08-09 15:07. None exists.
+**If a figure ever looks doubled again, the cause is a genuine duplicate row**, not a missing filter.
 
-Tracked as CHECKLIST #4 (switch-over) and #5 (Migration B).
+The lesson it left behind is kept as **Gotcha 3b**: it had to be a FUNCTION, not a top-level
+`const`, because a top-level `Prisma.sql` is evaluated wherever the module is bundled — including the
+browser, where it threw `sqltag is unable to run in this browser environment` and killed `/reports`
+on hydration while every build and test stayed green.
+
+### Migration B — written, and applied only against a verified fresh backup
+
+`prisma/migrations/20260818210000_drop_per_module_sale_tables/` drops
+`BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem` **and `MilkSale`** — 7
+`DROP CONSTRAINT` then 5 `DROP TABLE`, no `CASCADE`, so an unknown dependency fails loudly instead of
+being silently taken along. Generated by the READ-ONLY `migrate diff --from-schema-datasource`.
+
+**It destroys no data:** every bill those tables held is already in `Sale` under the same id. The
+pre-flight is in the migration's own header — re-run the counts, and check that no old row is missing
+from `Sale`, before applying it anywhere.
+
+`MilkSale` was outside Migration B's original scope, which predated the milk cutover; it is included
+with the owner's explicit approval (2026-08-18).
 
 ---
 
@@ -842,7 +777,7 @@ netBalanceOwed = totalMilkValue - totalPurchases
 
 ### Customer receivables (money owed TO the owner)
 ```
-totalBilled      = SUM(beverageSales.totalAmount + bakerySales.totalAmount + milkSales.totalAmount) for customer
+totalBilled      = SUM(sales.totalAmount) for customer          -- one table since S9
 totalPaid        = SUM(CustomerPayment.amount) for customer
 outstanding      = totalBilled - totalPaid
 ```
@@ -973,13 +908,13 @@ directions are now covered:**
 | A farmer delivery is recorded / edited / deleted | **+ / delta / −** the delivery's `totalLiters` — the bridge, `lib/milk-stock.ts` |
 | A milk line on the till (`POST /api/sales`) | **−** the litres sold |
 | A unified sale DELETED | **+** the litres restored (S4.1) |
-| ~~A sale on `/milk/sales`~~ | **retired 2026-08-14** — that screen can no longer create a sale |
+| ~~A sale on `/milk/sales`~~ | **deleted 2026-08-18 (S9)** — screen, route and table all gone |
 
-~~**The screen the owner uses does not decrement milk stock.**~~ **Closed by S4.3.** Milk selling
-moved to the unified till; `/milk/sales` is now a HISTORY screen (list, edit, delete, export) that
-keeps the sales recorded before the move, including the owner's real Rs. 6,000 one. `POST
-/api/milk/sales` still exists but nothing calls it — **do not wire a new screen to it, and do not add
-a stock decrement there**; it retires with the other per-module paths at S9.
+~~**The screen the owner uses does not decrement milk stock.**~~ **Closed by S4.3, and finished by
+S9.** Milk selling moved to the unified till, and the old screen, `POST /api/milk/sales` and the
+`MilkSale` table went with the rest of the per-module path. **Every litre in and out now moves
+through exactly two places** — the delivery bridge and a till line — which is what makes the figure
+checkable at all.
 
 **⚠️ ONE CAVEAT, AND IT IS ABOUT THE OPENING NUMBER, NOT THE ARITHMETIC.** `prod_milk.stock` started
 at 0 and the real 250 L delivery predates the bridge, so it was never added. Every movement SINCE the
@@ -1601,7 +1536,7 @@ sequence, and this is where it actually stands. **Full stage-by-stage detail liv
 | **S6** | reporting repoint to `Σ netLineTotal` by `moduleKey` + **per-product visibility** (#20) | ✅ 2026-08-14 · **12/12 + 8/8**, table shipped |
 | **S7** | catalog features: cooling charge (#17), billing-time price override (#18) | ⬜ Todo |
 | **S8** | multi-unit products — eggs dozen/tray/peti, beverages bottle/pet, one stock pool (#19) | ✅ 2026-08-18 · Migration F · **13/13 + browser** |
-| **S9** | remove the old per-module paths, then **Migration B** (drop the 4 old tables) — CHECKLIST #5 | ⬜ Todo |
+| **S9** | remove the old per-module paths, then **Migration B** (drops 5 tables) — CHECKLIST #5 | ✅ code 2026-08-18 · migration written, awaiting a fresh backup |
 
 **S4 is DONE (S4.1–S4.3, 2026-08-14).** Both of the things it carried are closed: milk stock is
 authoritative (the cutover — see the "🥛 Milk stock" section for the one caveat about the opening
@@ -1791,28 +1726,15 @@ would start diluting the two that matter.)
   **`prisma/seed.ts`**, which still wrote the column and would have broken the next seed run after
   a green migration. Lesson worth keeping: **grep for writers as well as readers before dropping a
   column** — the seed is not in any component tree and does not show up in a UI-shaped search.
-- **⚠️ THE BEVERAGES/BAKERY SALE `PATCH` IS FULLY IMPLEMENTED AND HAS NO UI. IT IS NOT DEAD CODE.**
-  This is the single easiest thing in the repo to mistake for cruft and delete. Do not.
-  - **What exists:** `PATCH /api/{beverages,bakery}/sales/[id]` is complete and server-verified.
-    It reconciles line edits through `reconcileSaleLines`, carries the **discount** snapshot
-    through, and reconciles **stock** by delta — quantity up/down adjusts by the difference, a
-    removed line restores its full quantity, a new line decrements, a product swap restores the
-    old product and takes the new, and two lines of the same product net to one adjustment. All
-    inside one transaction.
-  - **What does not exist:** any way for the owner to reach it. There is no `useUpdateSale` hook
-    and the beverages/bakery sale lists offer Delete only. (Milk sales *do* have an edit dialog —
-    the two modules that share `reconcileSaleLines` are the ones without.)
-  - **Verified how:** the edit paths were exercised against the API over real HTTP in an
-    authenticated browser session, with before/after stock numbers, on 2026-08-09. Server logic is
-    proven; the screen is what is missing. See
-    `docs/responses/2026-08-09-stock-tracking-shipped.md` §3–4.
-  - **Where the UI lands: with the UNIFIED CROSS-CATEGORY SALE, not before.** Deliberately not
-    built standalone — that rework rebuilds the sale form anyway, and an edit screen written
-    against the current per-module structure would be built to be thrown away. The route being
-    already stock- and discount-aware is what makes deferring it safe.
-  - Consequence worth stating: **the hardest behaviour in the stock feature (12 -> 8 freeing 4) is
-    currently correct and unreachable.** If someone reports "editing a sale doesn't work", the
-    answer is that there is no edit screen yet — not that the reconciliation is broken.
+- **~~THE BEVERAGES/BAKERY SALE `PATCH` IS FULLY IMPLEMENTED AND HAS NO UI~~ — RESOLVED, and worth
+  keeping as a lesson.** For weeks this note existed to stop someone deleting a complete,
+  server-verified `PATCH /api/{beverages,bakery}/sales/[id]` that no screen could reach. The right
+  call was made twice over: it was NOT deleted as cruft, and it was NOT given a per-module edit
+  screen — that screen would have been built against a structure the unified rework was about to
+  replace. **S9 deleted the routes along with everything else per-module**, and the behaviour they
+  proved (stock reconciled BY DELTA: 12 → 8 frees 4) lives on in `reconcileSaleLines` /
+  `computeStockDeltas`, reached through the unified edit screen. Evidence for the original
+  verification: `docs/responses/2026-08-09-stock-tracking-shipped.md` §3–4.
 - **The one deliberate data reset before go-live → PRE-HANDOFF CHECKLIST item 2** (a blocker).
   The habit that supports it stays here: **every verification pass `ZZ_TEST_`-scopes what it
   creates and removes only that**, precisely so the reset can be one decision at the end rather
@@ -1999,9 +1921,13 @@ Not blockers to the app *working* (it runs entirely on the old tables), but it m
 or deliberately abandoned** before handoff. Leaving it half-done hands over two parallel sale
 schemas, one of them empty.
 
-#### `[~]` **4. Unified `Sale` build** — API, `/sales` form + edit UI, redirects, line-level reports
+#### `[x]` **4. Unified `Sale` build — COMPLETE 2026-08-18 (S9)**
 
-**PARTLY SHIPPED — updated 2026-08-13.** ~~NOT STARTED.~~ The API half is done and live.
+Every part of it shipped: the API (S3, S4.1), the till and receipt (S4.2), the milk cutover (S4.3),
+the data migration (S5), reporting (S6), the edit UI (#8), and finally S9, which deleted the
+per-module path it was replacing. **Migration B is written but not applied** — see #5.
+
+The record below is kept as-is; it is the history of how the stage was worked.
 
 **Shipped:**
 
@@ -2019,15 +1945,15 @@ schemas, one of them empty.
 1. ~~The unified sale SCREEN~~ ✅ **SHIPPED in S4.2** — `/sales`, `/sales/new`,
    `/receipt/sale/[id]`, and the receivables bridge. **Reports and the CSV exports followed in S6**,
    so a till bill now appears in every figure.
-2. ~~The milk cutover~~ ✅ **SHIPPED in S4.3.** Milk sells on the till; `/milk/sales` is a history
-   screen that can no longer create one; `POST /api/milk/sales` is unreachable and retires at S9.
+2. ~~The milk cutover~~ ✅ **SHIPPED in S4.3**, and finished in S9 — `/milk/sales`, `POST
+   /api/milk/sales` and the `MilkSale` table are all gone.
    **Milk stock is authoritative** — see the "🥛 Milk stock" section for the opening-number caveat.
 3. ~~A unified sale DELETE that restores stock~~ ✅ **SHIPPED in S4.1.**
    `DELETE /api/sales/[id]` restores every line's quantity through the same
    `computeStockDeltas`/`applyStockDeltas` pair the per-module routes use, in one transaction.
    **The unified EDIT (PATCH) is still open** and lands with the screen — CHECKLIST #8.
-4. ~~Reports rewritten to `Σ netLineTotal` by `moduleKey`~~ ✅ **SHIPPED in S6.** What remains here
-   is only the old routes redirecting, which is S9.
+4. ~~Reports rewritten to `Σ netLineTotal` by `moduleKey`~~ ✅ **SHIPPED in S6**, and S9 removed the
+   old routes entirely rather than redirecting them — there is nothing left to redirect to.
 
 **Note on the original scope line:** it said `netLineTotal` would be "apportioned pro-rata with the
 residue on the largest line". **That is no longer needed.** S3 ships with NO discounts, so
@@ -2074,40 +2000,49 @@ stock at the `loadSaleProducts` boundary, and `failStockBlocked` now runs its pa
 relaxed** — the unified endpoint got its own decimal-capable `unifiedSaleCreateSchema` instead, so
 `2.5` is still an error on the per-module routes.
 
-#### `[ ]` **5. Migration B** — drop `BeverageSale`, `BeverageSaleItem`, `BakerySale`, `BakerySaleItem`
+#### `[~]` **5. Migration B — WRITTEN 2026-08-18, NOT APPLIED. Waiting on a fresh verified backup.**
 
-**NOT WRITTEN, NOT RUN.** The point of no return. **Gated on #4 being built AND browser-verified**
-— the old tables are the only copy left to reconcile against, and the one real sale currently lives
-in one of them. See the data-count warning under #2 before dropping anything.
+`prisma/migrations/20260818210000_drop_per_module_sale_tables/` — 7 `DROP CONSTRAINT` then 5
+`DROP TABLE`, no `CASCADE`. It drops **`MilkSale` as well as the four originally scoped**, with the
+owner's approval (2026-08-18): milk was cut over to the till in S4.3, and keeping the table would
+have meant one sale living in two places forever plus a de-duplication filter that could never be
+removed.
 
-#### `[~]` **6. `lib/receivables.ts` — now sums the UNIFIED `Sale` TOO (S4.2), old tables still there**
+**The code half is DONE and shipped** (commit `60aa4d0`). Nothing reads those tables — the Prisma
+client no longer even has the models, so a reference is a type error. The tables themselves are
+still there, which is exactly the rollback position to be in.
 
-> **UPDATED 2026-08-14.** Receivables counts `BeverageSale` + `BakerySale` + `MilkSale` **+ `Sale`**,
-> so a unified bill reaches the customer's balance. **Migration A's copy is excluded by id** —
-> `NOT_A_MIGRATION_COPY` in `lib/receivables.ts`. Without it Saif reads 16,000 instead of 11,000,
-> because the `Sale` row carries the SAME id as the `BakerySale` row it was copied from. The filter
-> is self-healing (1 row today, 0 after S5) — do not remove it before S5.
->
-> **`lib/reports.ts` moved in S6** — every figure is now old tables ∪ unified lines, sharing this
-> file's dedupe rule (`NOT_A_MIGRATION_COPY`, which lives in `lib/unified-sales.ts` so both files use
-> ONE definition).
->
-> The original note below still describes the old-table dependency Migration B has to deal with.
+**What it is gated on, and it is not negotiable:** a **fresh verified backup**. `backup3.sql`
+predates Migration F and would roll back `ProductUnit`, the 47 new products and every selling unit.
+Verified means opened and checked by CONTENTS — a known row is in it, it ends with
+`-- PostgreSQL database dump complete`, and it holds `COPY` data blocks. See DATABASE SAFETY §4.
 
-**"Dormant" understates it — corrected 2026-08-11.** Receivables was removed from the **UI** in
-batch 2, not from the **code**. The module has **16 Prisma calls** (8 of them against the old sale
-tables) and is imported by **8 route files**: `/api/customers`, `/api/customers/[id]`,
-`/api/customers/[id]/balance`, `/api/customers/[id]/payments`,
-`/api/customers/[id]/payments/[paymentId]`, `/api/milk/sales`, `/api/milk/sales/[id]`,
-`/api/reports/export`. It runs on every customer and milk-sale request.
+**It destroys no data.** Every bill in those tables is already in `Sale` under the same id — checked
+by a read-only pre-flight that is written into the migration's own header. Re-run it before applying:
+if a row exists there that is NOT in `Sale`, stop.
 
-What *is* dormant is its presentation: `CustomerProfile` and `CustomersHub` no longer render
-billed/paid/outstanding, and `PaymentDialog` is defined but **never rendered** — as is
-`useDeactivateCustomer`. So the balances are computed and returned, and nothing displays them.
+#### `[x]` **6. `lib/receivables.ts` — reads `Sale` ALONE. Closed 2026-08-18 (S9).**
 
-**Migration B would leave 8 live routes referencing dropped tables.** Repoint at `Sale` or delete
-it, as part of #5. Deleting is only safe once the `CustomerPayment` table and the payments routes
-go with it — decide that deliberately rather than discovering it at drop time.
+Receivables was the last thing still summing four sale tables. It now aggregates `Sale` and nothing
+else, and the module got smaller in every direction:
+
+| | Before S9 | Now |
+|---|---|---|
+| `getCustomerBalance` | 5 queries + a raw statement | **2** |
+| `getCustomerBalances` | 5 | **2** |
+| `getTotalOutstanding` | 5 | **2** |
+| `getCustomerActivity` | 4 + a JS de-duplication pass | **2** |
+
+The de-duplication is gone with them. It existed because a bill could exist in an old table AND in
+`Sale` under the same id, and it had to be applied in TWO places — a SQL guard on the balance paths
+and a JS twin on the activity path. Those two disagreeing is not hypothetical: right after S5 the
+customer profile listed the same milk sale twice while the balance beside it stayed correct.
+
+**Verified unchanged across the rewrite:** Saif billed 11,000 / outstanding 11,000, and his profile
+shows exactly 2 purchases.
+
+The old note's warning — that Migration B would leave 8 routes referencing dropped tables — is
+answered: they were repointed first, which is why the migration can be applied without touching code.
 
 #### `[x]` **7. Harden the client `unitPrice` override on UPDATE — CLOSED 2026-08-11**
 
@@ -2140,8 +2075,10 @@ swap re-prices from the database AND re-resolves `moduleKey` (a swap can cross s
 so the next save would have replaced the edited sale's lines from a screen that looked like a fresh
 one. Caught in browser testing; it is "Back to sales" when editing.
 
-**The per-module (beverages/bakery) sale edit UI was never built and now never will be** — those
-screens retire at S9. Their `PATCH` routes remain server-verified and unused.
+**The per-module (beverages/bakery) sale edit UI was never built and never will be.** Those screens
+and their server-verified `PATCH` routes were deleted in S9 without ever having had one — which was
+the right call: an edit screen written against the per-module structure would have been built to be
+thrown away, and the unified edit screen replaced both.
 
 <details>
 <summary>Original item</summary>
@@ -2244,9 +2181,10 @@ screen. A native input takes the DEVICE's locale; no formatter of ours can chang
 `formatPickedDate` the sale form uses, with a per-field clear button. Values on the wire stay
 `yyyy-MM-dd`, so Karachi-day filtering is untouched. Browser-verified.
 
-**Still raw `<input type="date">`: the per-module lists** (`/beverages`, `/bakery`) and the milk
-screens. Deliberately left — those retire at S9, and polishing a screen scheduled for deletion is
-work thrown away. **If S9 slips, fix them by swapping in `DateRangeFilter`.**
+**`/beverages` and `/bakery` were the other offenders and no longer exist** (S9 deleted them rather
+than fixing them, which was the plan). **Still raw `<input type="date">`: the milk screens** — quick
+entry and the farmer profile. Fix them by swapping in `DateRangeFilter`, the same component `/sales`
+uses.
 
 #### `[ ]` **13. On-device mobile check — a real phone**
 
