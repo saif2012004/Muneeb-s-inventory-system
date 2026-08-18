@@ -179,9 +179,12 @@ export function DashboardHome() {
 
       {/* Quick actions ------------------------------------------------- */}
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
-        <QuickLink href="/beverages/new-sale" label="New beverage sale" />
-        <QuickLink href="/bakery/new-sale" label="New bakery sale" />
+        {/* Two of these were "New beverage sale" and "New bakery sale" until
+            S9. There is one till now, and it sells from every shop, so pointing
+            at it twice under two names would only suggest otherwise. */}
+        <QuickLink href="/sales/new" label="New sale" />
         <QuickLink href="/milk/quick-entry" label="Milk quick entry" />
+        <QuickLink href="/customers" label="Who owes me" />
       </div>
     </>
   );

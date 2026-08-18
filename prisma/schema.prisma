@@ -31,15 +31,15 @@ model SubCategory {
 }
 
 model Product {
-  id              String      @id @default(cuid())
-  name            String // e.g. "Pepsi 1.5L", "Premium Cake Rusk"
-  subCategoryId   String
-  subCategory     SubCategory @relation(fields: [subCategoryId], references: [id])
-  price           Decimal     @db.Decimal(10, 2)
-  size            String? // "half_litre" | "1L" | "1.5L" | "2.25L" | "large" | "small" | null
-  qualityTier     String? // "premium" | "simple" | null
-  shape           String? // "circle" | "rectangular_round" | null (russ)
-  unit            String? // "cotton" (eggs) | "piece" | "bottle" | null
+  id            String      @id @default(cuid())
+  name          String // e.g. "Pepsi 1.5L", "Premium Cake Rusk"
+  subCategoryId String
+  subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
+  price         Decimal     @db.Decimal(10, 2)
+  size          String? // "half_litre" | "1L" | "1.5L" | "2.25L" | "large" | "small" | null
+  qualityTier   String? // "premium" | "simple" | null
+  shape         String? // "circle" | "rectangular_round" | null (russ)
+  unit          String? // "cotton" (eggs) | "piece" | "bottle" | null
   /// Per-unit COOLING CHARGE, set by the owner in the catalog (Migration E).
   ///
   /// NULL means this product is never chilled — bakery, milk — and the till
@@ -52,7 +52,7 @@ model Product {
   ///
   /// The BILL never sets the amount — it carries a toggle and the server reads
   /// this column. One place the number lives.
-  coolingCharge   Decimal?    @db.Decimal(10, 2)
+  coolingCharge Decimal?    @db.Decimal(10, 2)
   /// Units on hand. TEMPORARY seed value of 100 — the owner sets real numbers
   /// via the catalog stock editor.
   ///
@@ -67,21 +67,20 @@ model Product {
   /// summed, and the authoritative arithmetic happens in Postgres via
   /// `applyStockDeltas`' conditional increment. Do not widen it to Decimal
   /// through the app layer without reading that function first.
-  stock           Decimal     @default(100) @db.Decimal(10, 2)
-  isActive        Boolean     @default(true)
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  stock         Decimal     @default(100) @db.Decimal(10, 2)
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   /// The SELLING UNITS this product can be sold in (Migration F, S8).
   ///
   /// Empty = sold in whatever `stock` counts, one at a time — which is every
   /// product today. Eggs get dozen/tray/peti; a beverage size gets bottle/pet.
-  units             ProductUnit[]
+  units ProductUnit[]
 
-  // REQUIRED back-relations (do not remove, migration fails without them)
-  beverageSaleItems BeverageSaleItem[]
-  bakerySaleItems   BakerySaleItem[]
-  saleItems         SaleItem[]
+  // REQUIRED back-relation (do not remove, migration fails without it).
+  // There were three until Migration B; the per-module item tables are gone.
+  saleItems SaleItem[]
 }
 
 // ---------------------------------------------------------------------------
@@ -101,9 +100,9 @@ model Product {
 /// "Discounts, russ, eggs" in CLAUDE.md) and it fails the same way: rows that
 /// drift in price, name and active state while claiming to be one thing.
 model ProductUnit {
-  id         String  @id @default(cuid())
+  id         String   @id @default(cuid())
   productId  String
-  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   /// What the owner calls it: "dozen" | "tray" | "peti" | "bottle" | "pet".
   ///
   /// A product may hold TWO pets with different counts — Gourmet 1.5L ships both
@@ -112,12 +111,12 @@ model ProductUnit {
   name       String
   /// How many BASE units one of these contains. 12 · 30 · 360 · 24 · 6 · 4.
   /// DECIMAL so a future half-unit is expressible without another migration.
-  baseFactor Decimal @db.Decimal(10, 2)
+  baseFactor Decimal  @db.Decimal(10, 2)
   /// The price of ONE of these. A peti is NOT 30 x the dozen price — that is why
   /// each unit carries its own price rather than deriving from the product's.
-  price      Decimal @db.Decimal(10, 2)
+  price      Decimal  @db.Decimal(10, 2)
   /// Pre-selected on the till. At most one per product.
-  isDefault  Boolean @default(false)
+  isDefault  Boolean  @default(false)
   createdAt  DateTime @default(now())
 
   @@unique([productId, name])
@@ -128,17 +127,14 @@ model ProductUnit {
 // ---------------------------------------------------------------------------
 
 model Customer {
-  id            String            @id @default(cuid())
-  name          String
-  phone         String?
-  type          String // "hotel" | "individual" | "shop"
-  isActive      Boolean           @default(true)
-  beverageSales BeverageSale[]
-  bakerySales   BakerySale[]
-  sales         Sale[]
-  milkSales     MilkSale[]
-  payments      CustomerPayment[]
-  createdAt     DateTime          @default(now())
+  id        String            @id @default(cuid())
+  name      String
+  phone     String?
+  type      String // "hotel" | "individual" | "shop"
+  isActive  Boolean           @default(true)
+  sales     Sale[]
+  payments  CustomerPayment[]
+  createdAt DateTime          @default(now())
 }
 
 // Tracks money the customer has PAID. Outstanding balance is computed:
@@ -155,64 +151,17 @@ model CustomerPayment {
 }
 
 // ---------------------------------------------------------------------------
-// Beverages
+// ⚠️ BeverageSale / BeverageSaleItem / BakerySale / BakerySaleItem WERE HERE.
+//
+// Dropped by Migration B (S9). Every bill they held had already been copied
+// into `Sale` / `SaleItem` keeping its id, so nothing was lost — that copy is
+// what made the drop safe, and it is why the app carried a de-duplication
+// filter for as long as both existed.
+//
+// Do not recreate them. A per-module sale table is the model the unified rework
+// existed to replace: it cannot represent one bill that draws from two shops,
+// which is what the owner actually sells.
 // ---------------------------------------------------------------------------
-
-model BeverageSale {
-  id          String             @id @default(cuid())
-  customerId  String
-  customer    Customer           @relation(fields: [customerId], references: [id])
-  saleDate    DateTime           @default(now())
-  discountPercent Decimal          @default(0) @db.Decimal(5, 2)
-  totalAmount Decimal            @db.Decimal(10, 2)
-  notes       String?
-  items       BeverageSaleItem[]
-  createdAt   DateTime           @default(now())
-
-  @@index([customerId, saleDate])
-}
-
-model BeverageSaleItem {
-  id        String       @id @default(cuid())
-  saleId    String
-  sale      BeverageSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product      @relation(fields: [productId], references: [id])
-  quantity  Int
-  unitPrice Decimal      @db.Decimal(10, 2) // snapshot at time of sale
-  discountPercent Decimal @default(0) @db.Decimal(5, 2)
-  lineTotal Decimal      @db.Decimal(10, 2)
-}
-
-// ---------------------------------------------------------------------------
-// Bakery
-// ---------------------------------------------------------------------------
-
-model BakerySale {
-  id          String           @id @default(cuid())
-  customerId  String
-  customer    Customer         @relation(fields: [customerId], references: [id])
-  saleDate    DateTime         @default(now())
-  discountPercent Decimal        @default(0) @db.Decimal(5, 2)
-  totalAmount Decimal          @db.Decimal(10, 2)
-  notes       String?
-  items       BakerySaleItem[]
-  createdAt   DateTime         @default(now())
-
-  @@index([customerId, saleDate])
-}
-
-model BakerySaleItem {
-  id        String     @id @default(cuid())
-  saleId    String
-  sale      BakerySale @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product    @relation(fields: [productId], references: [id])
-  quantity  Int
-  unitPrice Decimal    @db.Decimal(10, 2) // snapshot at time of sale
-  discountPercent Decimal @default(0) @db.Decimal(5, 2)
-  lineTotal Decimal    @db.Decimal(10, 2)
-}
 
 // ---------------------------------------------------------------------------
 // Sales — ONE table for beverages AND bakery
@@ -308,7 +257,6 @@ model SaleItem {
   @@index([moduleKey])
 }
 
-
 // ---------------------------------------------------------------------------
 // Milk Shop
 // ---------------------------------------------------------------------------
@@ -353,20 +301,16 @@ model FarmerPurchase {
   @@index([farmerId, purchaseDate])
 }
 
-// Milk SOLD to hotels/shops/individuals (owner's outbound milk sales)
-model MilkSale {
-  id           String   @id @default(cuid())
-  customerId   String
-  customer     Customer @relation(fields: [customerId], references: [id])
-  saleDate     DateTime @default(now())
-  liters       Decimal  @db.Decimal(8, 2)
-  ratePerLiter Decimal  @db.Decimal(8, 2)
-  totalAmount  Decimal  @db.Decimal(10, 2) // liters * ratePerLiter
-  notes        String?
-  createdAt    DateTime @default(now())
-
-  @@index([customerId, saleDate])
-}
+// ⚠️ MilkSale WAS HERE. Dropped by Migration B (S9), with the owner's approval.
+//
+// Milk SOLD is a `Sale` with a milk line — `prod_milk`, quantity in litres —
+// which is what the S4.3 cutover made true and what every figure has read since.
+// Keeping the old table would have meant the same sale living in two places
+// forever and a de-duplication filter that could never be removed.
+//
+// The FARMER side is untouched and is a different thing entirely: MilkDelivery
+// and FarmerPurchase are milk BOUGHT, they have no customer and no product, and
+// they are above.
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -388,7 +332,7 @@ model Settings {
   /// NOT NULL: a receipt always has a name line, so there is always something to
   /// print and no call site needs a fallback. Seeded with a jarring placeholder
   /// rather than a plausible one — see configuredAt.
-  shopName String
+  shopName    String
   /// Nullable, because "the shop has no phone" is a legitimate final state and
   /// the receipt should omit the line rather than print an empty one.
   shopPhone   String?

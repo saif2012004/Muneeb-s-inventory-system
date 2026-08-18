@@ -6,9 +6,17 @@
  * ---------------------------------------------------------------------------
  * THE RULE
  * ---------------------------------------------------------------------------
- * Sale history is sacred. A BeverageSaleItem / BakerySaleItem holds a snapshot
- * of the price at the time of sale (Gotcha 5), and a past sale must stay
- * readable forever. So nothing that a sale line points at is ever hard-deleted.
+ * Sale history is sacred. A `SaleItem` holds a snapshot of the price at the time
+ * of sale (Gotcha 5), and a past sale must stay readable forever. So nothing
+ * that a sale line points at is ever hard-deleted.
+ *
+ * ⚠️ FIXED IN S9: this file used to check ONLY the old per-module item tables,
+ * which stopped being the whole truth the moment the unified till went live in
+ * S4.2. A product sold only on the till therefore read as having no history, and
+ * deleting it was attempted as a HARD delete — which the `SaleItem.productId`
+ * foreign key then rejected, turning a case that should have been a friendly
+ * "deactivate it instead" into a 500. It now reads `SaleItem`, which since
+ * Migration B is where every sale line lives.
  *
  *   Product          -> soft-delete (isActive = false) if it has sale history,
  *                       hard-delete only when it is clean.
@@ -34,8 +42,8 @@ import { prisma } from "@/lib/prisma";
 export type BlockingProduct = { id: string; name: string; saleCount: number };
 
 /**
- * Which of these products appear on a beverage or bakery sale line, and on how
- * many. Returns [] for an empty input without querying.
+ * Which of these products appear on a sale line, and on how many. Returns []
+ * for an empty input without querying.
  */
 export async function findProductsWithSaleHistory(
   productIds: string[]
@@ -44,27 +52,15 @@ export async function findProductsWithSaleHistory(
 
   // groupBy rather than findMany+distinct: we need the per-product line count,
   // not just which ids appear.
-  const [beverageGroups, bakeryGroups] = await Promise.all([
-    prisma.beverageSaleItem.groupBy({
-      by: ["productId"],
-      where: { productId: { in: productIds } },
-      _count: { _all: true },
-    }),
-    prisma.bakerySaleItem.groupBy({
-      by: ["productId"],
-      where: { productId: { in: productIds } },
-      _count: { _all: true },
-    }),
-  ]);
+  const groups = await prisma.saleItem.groupBy({
+    by: ["productId"],
+    where: { productId: { in: productIds } },
+    _count: { _all: true },
+  });
 
-  // A product can only belong to one module in practice, but summing both is
-  // correct regardless and costs nothing.
   const countsById = new Map<string, number>();
-  for (const group of [...beverageGroups, ...bakeryGroups]) {
-    countsById.set(
-      group.productId,
-      (countsById.get(group.productId) ?? 0) + group._count._all
-    );
+  for (const group of groups) {
+    countsById.set(group.productId, group._count._all);
   }
   if (countsById.size === 0) return [];
 
@@ -82,11 +78,7 @@ export async function findProductsWithSaleHistory(
 
 /** True when this single product appears on any sale line. */
 export async function productHasSaleHistory(productId: string): Promise<boolean> {
-  const [beverageCount, bakeryCount] = await Promise.all([
-    prisma.beverageSaleItem.count({ where: { productId } }),
-    prisma.bakerySaleItem.count({ where: { productId } }),
-  ]);
-  return beverageCount + bakeryCount > 0;
+  return (await prisma.saleItem.count({ where: { productId } })) > 0;
 }
 
 /**

@@ -74,12 +74,14 @@ export const MODULE_LABEL: Record<string, string> = {
 /**
  * Where a purchase row links, or null for one with no detail screen.
  *
- * A map rather than `/${module}`: milk has no sale detail page, and "unified"
- * would otherwise build `/unified`, which does not exist.
+ * Every bill is a unified one since S9, so in practice only `unified` is ever
+ * looked up. The other keys are kept mapping to null rather than deleted: this
+ * is a `Record<string, ...>` read with a snapshotted `moduleKey`, and a missing
+ * key would return undefined where the caller expects "no link".
  */
 export const MODULE_HREF: Record<string, string | null> = {
-  beverages: "/beverages",
-  bakery: "/bakery",
+  beverages: null,
+  bakery: null,
   milk: null,
   unified: "/sales",
 };

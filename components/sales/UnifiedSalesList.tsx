@@ -75,6 +75,12 @@ export function UnifiedSalesList() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [customerId, setCustomerId] = useState("");
+  /**
+   * THE SHOP FILTER (S9), which is what replaced /beverages and /bakery. Those
+   * screens were the only way to see one shop's bills, so deleting them without
+   * this would have taken a real capability away rather than tidying one up.
+   */
+  const [module, setModule] = useState<"" | "beverages" | "bakery" | "milk">("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<UnifiedSaleListRow | null>(null);
 
@@ -95,12 +101,13 @@ export function UnifiedSalesList() {
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
       customerId: customerId || undefined,
+      module: module || undefined,
     },
     { enabled: !invalidRange }
   );
   const deleteSale = useDeleteUnifiedSale();
 
-  const hasFilters = Boolean(dateFrom || dateTo || customerId);
+  const hasFilters = Boolean(dateFrom || dateTo || customerId || module);
 
   function updateFilter(apply: () => void) {
     apply();
@@ -113,6 +120,7 @@ export function UnifiedSalesList() {
       setDateFrom("");
       setDateTo("");
       setCustomerId("");
+      setModule("");
     });
   }
 
@@ -175,7 +183,10 @@ export function UnifiedSalesList() {
 
       {/* Filters ------------------------------------------------------ */}
       <div className="mb-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 sm:grid-cols-3">
+        {/* FOUR controls since S9 (From · To · Shop · Customer), so the grid
+            goes 1 → 2 → 4 rather than staying at 3, which would have left Shop
+            stranded alone on a second row at tablet width. */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {/* DD/MM/YYYY, not the device's locale (CHECKLIST #12). A native
               date input renders mm/dd/yyyy here, which reads American against
               every other date the app prints. */}
@@ -190,6 +201,27 @@ export function UnifiedSalesList() {
               })
             }
           />
+
+          <div className="space-y-1.5">
+            <Label htmlFor="filter-module">Shop</Label>
+            <select
+              id="filter-module"
+              value={module}
+              onChange={(event) =>
+                updateFilter(() =>
+                  setModule(
+                    event.target.value as "" | "beverages" | "bakery" | "milk"
+                  )
+                )
+              }
+              className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900"
+            >
+              <option value="">All shops</option>
+              <option value="beverages">Beverages</option>
+              <option value="bakery">Bakery</option>
+              <option value="milk">Milk</option>
+            </select>
+          </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="filter-customer">Customer</Label>

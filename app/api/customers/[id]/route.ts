@@ -65,40 +65,15 @@ export async function GET(
     // getCustomerActivity.
     const activity = await getCustomerActivity(params.id);
 
-    // Purchases from all three modules, merged newest-first and tagged with the
-    // module so the UI can colour each row without guessing from its shape.
+    // Every bill this customer has. One shape since S9 — before it, this
+    // merged four differently-shaped lists (one per sale table) and tagged each
+    // with its module so the UI could colour the row.
+    //
+    // `module` stays on the response and stays "unified": a bill may draw from
+    // all three shops, so there is no single module to name it by, and `detail`
+    // lists the ones it actually touched.
     const purchases = [
-      ...activity.beverage.map((sale) => ({
-        id: sale.id,
-        module: "beverages" as const,
-        saleDate: sale.saleDate,
-        totalAmount: sale.totalAmount,
-        notes: sale.notes,
-        itemCount: sale._count.items,
-        detail: null as string | null,
-      })),
-      ...activity.bakery.map((sale) => ({
-        id: sale.id,
-        module: "bakery" as const,
-        saleDate: sale.saleDate,
-        totalAmount: sale.totalAmount,
-        notes: sale.notes,
-        itemCount: sale._count.items,
-        detail: null as string | null,
-      })),
-      ...activity.milk.map((sale) => ({
-        id: sale.id,
-        module: "milk" as const,
-        saleDate: sale.saleDate,
-        totalAmount: sale.totalAmount,
-        notes: sale.notes,
-        itemCount: null,
-        detail: `${sale.liters.toString()} L × ${sale.ratePerLiter.toString()}`,
-      })),
-      // The UNIFIED bill (S4.2). Tagged "unified" rather than one of the three:
-      // it may hold lines from all of them, and picking one would mislabel it.
-      // `detail` names the shops it actually drew from.
-      ...activity.unified.map((sale) => ({
+      ...activity.sales.map((sale) => ({
         id: sale.id,
         module: "unified" as const,
         saleDate: sale.saleDate,

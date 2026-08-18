@@ -408,24 +408,9 @@ export function ReportsDashboard() {
         </p>
 
         <div className="flex flex-wrap gap-2">
-          <ExportCsvButton
-            type="beverages_sales"
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            label="Beverages sales"
-          />
-          <ExportCsvButton
-            type="bakery_sales"
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            label="Bakery sales"
-          />
-          <ExportCsvButton
-            type="milk_sales"
-            dateFrom={dateFrom}
-            dateTo={dateTo}
-            label="Milk sales"
-          />
+          {/* The three per-module sale exports were removed in S9 with their
+              tables. `sales` below covers every bill they used to, and names
+              the shops each one drew from. */}
           <ExportCsvButton
             type="milk_deliveries"
             dateFrom={dateFrom}

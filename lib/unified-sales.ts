@@ -239,62 +239,26 @@ export const UNIFIED_SALE_DETAIL_SELECT = {
 } as const;
 
 /**
- * 🔴 THE MIGRATED-COPY DEDUPE, IN ONE PLACE. Every aggregate over `Sale` needs it.
+ * ⚠️ `notAMigrationCopy()` LIVED HERE AND WAS DELETED IN S9. Do not reinstate it.
  *
- * A sale that exists in BOTH an old per-module table and `Sale` is ONE sale that
- * has been copied, not two sales. Migration A did this for the pre-existing
- * per-module sales, KEEPING each one's original id — so `Sale` holds a row
- * (`cmsjh3kly0002uve8ajkvs2ji`) whose twin is still live in `BakerySale`. Any
- * total that sums `Sale` ON TOP OF the old tables counts that Rs. 5,000 twice:
- * the customer's balance, the period's revenue, a product's units sold.
+ * It was a SQL fragment — `NOT EXISTS (SELECT 1 FROM "BeverageSale" …)` for each
+ * of the three old sale tables — that every aggregate over `Sale` had to carry.
+ * Migration A and S5 copied the real sales into `Sale` KEEPING THEIR IDS, so for
+ * a while each of those bills existed twice and any sum that read both tables
+ * counted it twice. Excluding by id was exact rather than heuristic, and
+ * self-healing: it matched exactly the rows duplicated at that moment, and zero
+ * once the old tables were dropped.
  *
- * Matching by id is exact rather than heuristic — a genuinely new unified sale
- * gets a fresh cuid and cannot collide — and it is SELF-HEALING: it excludes
- * exactly the rows that are duplicated right now, and 0 once S9 drops the old
- * tables. There is nothing to remember to undo.
+ * They are dropped, so it matches nothing and is gone. If a figure ever looks
+ * doubled again, the cause is a genuine duplicate row, not a missing filter —
+ * do not paper over it with a NOT EXISTS against a table that no longer exists.
  *
- * ⚠️ `MilkSale` IS IN THE LIST DELIBERATELY, AHEAD OF ITS COPY EXISTING.
- * S5 will copy the real milk sale into `Sale` the same way — same id — and the
- * moment it lands, every balance and every revenue figure would count its
- * Rs. 6,000 twice unless this already excluded it. The guard is a NO-OP until
- * then (no `Sale` row shares an id with a `MilkSale` row today), which is
- * exactly why it ships FIRST: the data step must never be the thing that makes
- * the numbers wrong for however long the code takes to follow.
- *
- * ⚠️ THE SQL ASSUMES THE `Sale` TABLE IS ALIASED `s`. Every caller aliases it
- * that way; if you write a query that does not, alias it rather than editing
- * this — one definition is the point. Lives here rather than in
- * `lib/receivables.ts` or `lib/reports.ts` because BOTH need it and a rule with
- * two copies is a rule that will disagree with itself.
+ * One thing it taught is kept as a rule in CLAUDE.md (Gotcha 3b): it had to be a
+ * FUNCTION rather than a top-level `const`, because a top-level `Prisma.sql` is
+ * evaluated wherever the module is bundled — including the browser, where it
+ * threw "sqltag is unable to run in this browser environment" and killed
+ * /reports on hydration while every build and test stayed green.
  */
-/**
- * 🔴 A FUNCTION, NOT A CONST — and that is load-bearing, not style.
- *
- * As a top-level `const` this called `Prisma.sql` AT MODULE EVALUATION. Module
- * evaluation happens wherever the module is bundled, and `lib/reports.ts`
- * imports this while ALSO exporting constants that client components read
- * (`REPORT_PERIODS`, the period labels). That dragged the fragment into the
- * browser bundle, where `Prisma.sql` cannot run:
- *
- *     Unhandled Runtime Error
- *     sqltag is unable to run in this browser environment
- *
- * — and the whole `/reports` page died on hydration. Tree-shaking cannot save a
- * top-level call with a side effect; deferring it into a function can, because
- * nothing executes unless a server path calls it.
- *
- * Found by OPENING THE PAGE. `tsc`, `next lint`, `npm run build` and every API
- * test passed with the page broken, because the server render succeeded and only
- * hydration threw. This is the "verify in a real browser" rule in CLAUDE.md
- * earning its place again.
- */
-export function notAMigrationCopy(): Prisma.Sql {
-  return Prisma.sql`
-    NOT EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
-    AND NOT EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
-    AND NOT EXISTS (SELECT 1 FROM "MilkSale" m WHERE m.id = s.id)
-  `;
-}
 
 // ---------------------------------------------------------------------------
 // Listing (S4)

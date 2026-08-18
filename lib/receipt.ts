@@ -20,20 +20,12 @@
  * printed bill and the screen must agree to the rupee.
  *
  * ---------------------------------------------------------------------------
- * WHICH TABLE THIS READS, AND WHY IT IS NOT `Sale`
+ * ONE SOURCE: `Sale` / `SaleItem`
  * ---------------------------------------------------------------------------
- * It reads `BeverageSale` / `BakerySale` — the tables the app actually runs on.
- * The unified `Sale`/`SaleItem` pair exists (migration A) but NOTHING reads or
- * writes it yet, there is no way to create one, and no screen lists them
- * (CHECKLIST #4). A receipt pointed at that table would have no reachable sale
- * to print.
- *
- * `loadReceipt` is therefore the ONLY thing that will need to change when the
- * unified sale ships: everything downstream consumes `ReceiptData`, which is
- * already shaped like a unified sale. `netLineTotal` — a line's share after the
- * whole-bill discount — has no column on the per-module tables, so it is absent
- * here rather than invented; when `SaleItem` becomes live, add it to the line
- * type and print it beside `lineTotal`.
+ * There were two loaders until S9 — one per old module table, one unified — both
+ * producing the same `ReceiptData` for the same renderer. That shape was chosen
+ * ahead of time to be the unified sale's, which is why retiring the per-module
+ * half touched nothing downstream.
  *
  * QUERY BUDGET: 2 round trips (~2.2s at the current region split, CHECKLIST #14)
  * — the sale, then the settings row. Awaited in SERIES, never Promise.all: the
@@ -42,24 +34,20 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { SALE_DETAIL_SELECT } from "@/lib/sales";
 import { UNIFIED_SALE_DETAIL_SELECT } from "@/lib/unified-sales";
 import { getSettings } from "@/lib/settings";
 import type { Settings } from "@/lib/settings-display";
 import { serializeMoney } from "@/lib/serialize";
 
-/** Which module's sale table to read. Mirrors the `/api/{module}/sales` split. */
-export type ReceiptModuleKey = "beverages" | "bakery";
-
-export function isReceiptModuleKey(value: string): value is ReceiptModuleKey {
-  return value === "beverages" || value === "bakery";
-}
-
 /**
- * What a receipt was printed FROM. `"sale"` is the unified bill (S4.2), which
- * lives in its own table and can hold lines from all three shops at once.
+ * What a receipt was printed FROM. Only `"sale"` since S9 — one bill table, and
+ * a bill can hold lines from all three shops at once.
+ *
+ * Kept as a union of one rather than deleted: `ReceiptData.moduleKey` is read by
+ * the renderer and by the print page, and collapsing it to a bare string would
+ * lose the guarantee that only a known value reaches them.
  */
-export type ReceiptSourceKey = ReceiptModuleKey | "sale";
+export type ReceiptSourceKey = "sale";
 
 export type ReceiptLine = {
   id: string;
@@ -99,11 +87,6 @@ export type ReceiptData = {
   settings: Settings;
 };
 
-const MODULE_LABEL: Record<ReceiptModuleKey, string> = {
-  beverages: "Beverages",
-  bakery: "Bakery",
-};
-
 /** The size/tier/shape suffix, composed exactly as the sale detail composes it. */
 function composeDetail(product: {
   size: string | null;
@@ -119,68 +102,6 @@ function composeDetail(product: {
         .join(" ")
     );
   return parts.length > 0 ? parts.join(" · ") : null;
-}
-
-/**
- * Load one sale, ready to print. `null` when the sale does not exist.
- *
- * NOTE ON THE HEADER: settings values are returned verbatim, placeholders and
- * all. An unconfigured shop must print `SET SHOP NAME IN SETTINGS` on the roll —
- * hiding it or substituting something friendly would produce a receipt that
- * looks finished and is wrong, which is the whole reason the placeholders shout
- * (CHECKLIST #2b).
- */
-export async function loadReceipt(
-  moduleKey: ReceiptModuleKey,
-  saleId: string
-): Promise<ReceiptData | null> {
-  const sale =
-    moduleKey === "beverages"
-      ? await prisma.beverageSale.findUnique({
-          where: { id: saleId },
-          select: SALE_DETAIL_SELECT,
-        })
-      : await prisma.bakerySale.findUnique({
-          where: { id: saleId },
-          select: SALE_DETAIL_SELECT,
-        });
-
-  if (!sale) return null;
-
-  // Sum in Decimal, then serialize once — never add money as JS numbers.
-  const subtotal = sale.items.reduce(
-    (total, item) => total.add(item.lineTotal),
-    new Prisma.Decimal(0)
-  );
-
-  // Second round trip. In series, deliberately (connection_limit=1).
-  const settings = await getSettings();
-
-  // Field-by-field rather than the deep `serialize()`: that helper leaves Date
-  // objects as Dates by design, and this crosses into a client boundary where
-  // the date has to be an ISO string.
-  return {
-    moduleKey,
-    moduleLabel: MODULE_LABEL[moduleKey],
-    saleId: sale.id,
-    saleDate: sale.saleDate.toISOString(),
-    customerName: sale.customer.name,
-    lines: sale.items.map((item) => ({
-      id: item.id,
-      name: item.product.name,
-      detail: composeDetail(item.product),
-      unit: item.product.unit,
-      quantity: item.quantity,
-      unitPrice: serializeMoney(item.unitPrice),
-      discountPercent: serializeMoney(item.discountPercent),
-      lineTotal: serializeMoney(item.lineTotal),
-    })),
-    subtotal: serializeMoney(subtotal),
-    discountPercent: serializeMoney(sale.discountPercent),
-    totalAmount: serializeMoney(sale.totalAmount),
-    notes: sale.notes,
-    settings,
-  };
 }
 
 /**

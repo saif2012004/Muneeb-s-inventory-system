@@ -31,8 +31,9 @@ import {
   loadUnifiedSaleProducts,
   toUnifiedSaleListRow,
 } from "@/lib/unified-sales";
-import { saleListQuerySchema } from "@/lib/validations/sales";
+
 import { unifiedSaleCreateSchema } from "@/lib/validations/unified-sales";
+import { unifiedSaleListQuerySchema } from "@/lib/validations/unified-sales";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,7 +44,7 @@ export const dynamic = "force-dynamic";
  * Query params (all optional): customerId · dateFrom · dateTo · page · limit.
  *
  * Deferred from S3 and built in S4 because the unified SCREEN needs it. It
- * reuses the per-module list plumbing WHOLESALE — `saleListQuerySchema`,
+ * reuses the per-module list plumbing WHOLESALE — `unifiedSaleListQuerySchema`,
  * `buildSaleDateWindow`, `SALE_LIST_SELECT` (via `UNIFIED_SALE_LIST_SELECT`),
  * `SALE_LIST_ORDER` and `toSaleListRow` — rather than restating filtering or
  * pagination for a second table. Karachi day filtering therefore behaves
@@ -62,16 +63,17 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   try {
     const { searchParams } = new URL(request.url);
-    const parsed = saleListQuerySchema.safeParse({
+    const parsed = unifiedSaleListQuerySchema.safeParse({
       customerId: searchParams.get("customerId") ?? undefined,
       dateFrom: searchParams.get("dateFrom") ?? undefined,
       dateTo: searchParams.get("dateTo") ?? undefined,
+      module: searchParams.get("module") ?? undefined,
       page: searchParams.get("page") ?? undefined,
       limit: searchParams.get("limit") ?? undefined,
     });
     if (!parsed.success) return fail(firstIssue(parsed.error), 400);
 
-    const { customerId, dateFrom, dateTo, page, limit } = parsed.data;
+    const { customerId, dateFrom, dateTo, module, page, limit } = parsed.data;
 
     const window = buildSaleDateWindow(dateFrom, dateTo);
     if (isSaleProblem(window)) return fail(window.message, window.status);
@@ -79,6 +81,17 @@ export async function GET(request: Request): Promise<NextResponse> {
     const where: Prisma.SaleWhereInput = {
       ...(customerId ? { customerId } : {}),
       ...(window ? { saleDate: window } : {}),
+      /**
+       * THE SHOP FILTER (S9) — `some`, not `every`.
+       *
+       * It replaces the deleted /beverages and /bakery screens, which were the
+       * only way to see one shop's bills. A bill matches when AT LEAST ONE line
+       * belongs to the shop: a mixed bill genuinely is a beverages sale and a
+       * milk sale at once, and `every` would hide it from both lists — quietly
+       * understating what each shop sold, which is the same mistake as summing
+       * `totalAmount` per module instead of `netLineTotal`.
+       */
+      ...(module ? { items: { some: { moduleKey: module } } } : {}),
     };
 
     // One transaction so the page and the total cannot disagree about how many

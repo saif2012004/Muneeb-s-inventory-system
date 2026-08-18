@@ -41,22 +41,24 @@ const MODULE_WORDS: Record<string, string> = {
  *     every column after it.
  */
 
+/**
+ * ⚠️ THREE EXPORT TYPES WERE REMOVED IN S9: `beverages_sales`, `bakery_sales`
+ * and `milk_sales`. Their tables no longer exist, and every bill they used to
+ * dump — including the two real ones — is in `sales`, which reports the same
+ * columns plus the shops each bill drew from.
+ *
+ * An unknown `type` already returns a 400 listing the valid ones, so a stale
+ * bookmark or a saved URL gets a readable message rather than an empty file.
+ */
 const EXPORT_TYPES = [
-  "beverages_sales",
-  "bakery_sales",
   "milk_deliveries",
   "milk_purchases",
-  "milk_sales",
   "farmer_balances",
   "customer_balances",
   /**
-   * S6. `sales` is the UNIFIED bill — one row per bill, with the shops it drew
-   * from. `product_sales` is the owner's #20: every product's units and revenue,
-   * with **milk as its own line** because the rows carry `moduleKey`.
-   *
-   * The per-module sale exports above are deliberately kept: they still hold
-   * real history until S5 folds it in, and an export that silently stopped
-   * covering it would be worse than two files.
+   * `sales` is the bill — one row per bill, with the shops it drew from.
+   * `product_sales` is the owner's #20: every product's units and revenue, with
+   * **milk as its own line** because the rows carry `moduleKey`.
    */
   "sales",
   "product_sales",
@@ -146,56 +148,6 @@ async function buildExport(
   window: { gte: Date; lt: Date } | undefined
 ): Promise<{ headers: string[]; rows: CsvValue[][] }> {
   switch (type) {
-    case "beverages_sales": {
-      const sales = await prisma.beverageSale.findMany({
-        where: window ? { saleDate: window } : {},
-        select: {
-          saleDate: true,
-          totalAmount: true,
-          notes: true,
-          customer: { select: { name: true, type: true } },
-          _count: { select: { items: true } },
-        },
-        orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
-      });
-      return {
-        headers: ["Date", "Customer", "Customer Type", "Items", "Total", "Notes"],
-        rows: sales.map((s) => [
-          formatDate(s.saleDate),
-          s.customer.name,
-          s.customer.type,
-          s._count.items,
-          num(s.totalAmount),
-          s.notes,
-        ]),
-      };
-    }
-
-    case "bakery_sales": {
-      const sales = await prisma.bakerySale.findMany({
-        where: window ? { saleDate: window } : {},
-        select: {
-          saleDate: true,
-          totalAmount: true,
-          notes: true,
-          customer: { select: { name: true, type: true } },
-          _count: { select: { items: true } },
-        },
-        orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
-      });
-      return {
-        headers: ["Date", "Customer", "Customer Type", "Items", "Total", "Notes"],
-        rows: sales.map((s) => [
-          formatDate(s.saleDate),
-          s.customer.name,
-          s.customer.type,
-          s._count.items,
-          num(s.totalAmount),
-          s.notes,
-        ]),
-      };
-    }
-
     case "milk_deliveries": {
       const deliveries = await prisma.milkDelivery.findMany({
         where: window ? { deliveryDate: window } : {},
@@ -281,35 +233,22 @@ async function buildExport(
         orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
       });
 
-      // A migrated copy carries the id of the old row it came from, and that row
-      // is already exported by its own per-module type. Excluding it here is the
-      // same rule lib/receivables.ts and lib/reports.ts apply through
-      // NOT_A_MIGRATION_COPY — otherwise two files together report one sale
-      // twice. `MilkSale` is included ahead of S5 copying it, for the reason
-      // given on that constant.
-      const legacy = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT s.id FROM "Sale" s
-        WHERE EXISTS (SELECT 1 FROM "BeverageSale" b WHERE b.id = s.id)
-           OR EXISTS (SELECT 1 FROM "BakerySale" k WHERE k.id = s.id)
-           OR EXISTS (SELECT 1 FROM "MilkSale" m WHERE m.id = s.id)
-      `;
-      const legacyIds = new Set(legacy.map((row) => row.id));
-
+      // The extra query that used to run here excluded bills that were copies of
+      // an old per-module row, so that two export types could not report the
+      // same sale twice. Both the copies and the other types went in S9.
       return {
         headers: ["Date", "Customer", "Customer Type", "Shops", "Items", "Total", "Notes"],
-        rows: sales
-          .filter((s) => !legacyIds.has(s.id))
-          .map((s) => [
-            formatDate(s.saleDate),
-            s.customer.name,
-            s.customer.type,
-            unifiedSaleModules(s.items)
-              .map((key) => MODULE_WORDS[key] ?? key)
-              .join(" · "),
-            s._count.items,
-            num(s.totalAmount),
-            s.notes,
-          ]),
+        rows: sales.map((s) => [
+          formatDate(s.saleDate),
+          s.customer.name,
+          s.customer.type,
+          unifiedSaleModules(s.items)
+            .map((key) => MODULE_WORDS[key] ?? key)
+            .join(" · "),
+          s._count.items,
+          num(s.totalAmount),
+          s.notes,
+        ]),
       };
     }
 
@@ -337,41 +276,6 @@ async function buildExport(
           row.unit,
           row.quantity,
           row.revenue,
-        ]),
-      };
-    }
-
-    case "milk_sales": {
-      const sales = await prisma.milkSale.findMany({
-        where: window ? { saleDate: window } : {},
-        select: {
-          saleDate: true,
-          liters: true,
-          ratePerLiter: true,
-          totalAmount: true,
-          notes: true,
-          customer: { select: { name: true, type: true } },
-        },
-        orderBy: [{ saleDate: "desc" }, { createdAt: "desc" }],
-      });
-      return {
-        headers: [
-          "Date",
-          "Customer",
-          "Customer Type",
-          "Liters",
-          "Rate Per Liter",
-          "Total",
-          "Notes",
-        ],
-        rows: sales.map((s) => [
-          formatDate(s.saleDate),
-          s.customer.name,
-          s.customer.type,
-          num(s.liters),
-          num(s.ratePerLiter),
-          num(s.totalAmount),
-          s.notes,
         ]),
       };
     }

@@ -36,7 +36,19 @@ import { api } from "@/lib/api-client";
 import { catalogKeys } from "@/lib/hooks/use-catalog";
 import { customerKeys } from "@/lib/hooks/use-customers";
 import { invalidateReports } from "@/lib/hooks/use-reports";
-import type { SaleCustomer } from "@/lib/hooks/use-sales";
+import type { CustomerType } from "@/lib/validations/customers";
+
+/**
+ * The customer as a sale response carries it. Moved here in S9 from
+ * `lib/hooks/use-sales.ts`, which went with the per-module screens — this was
+ * the only thing left in that file the unified path used.
+ */
+export type SaleCustomer = {
+  id: string;
+  name: string;
+  phone?: string | null;
+  type: CustomerType;
+};
 
 // ---------------------------------------------------------------------------
 // Response shapes (mirror the `select` blocks in the route handlers)
@@ -152,6 +164,11 @@ export type UnifiedSaleUpdateInput = {
 
 export type UnifiedSaleListFilters = {
   customerId?: string;
+  /**
+   * ONE SHOP'S BILLS (S9). A sale matches when at least one of its lines is
+   * that shop's — a mixed bill belongs to every shop it drew from.
+   */
+  module?: "beverages" | "bakery" | "milk";
   dateFrom?: string;
   dateTo?: string;
   page: number;
@@ -193,6 +210,7 @@ function invalidateAfterUnifiedSale(queryClient: QueryClient) {
 function buildQuery(filters: UnifiedSaleListFilters): string {
   const params = new URLSearchParams();
   if (filters.customerId) params.set("customerId", filters.customerId);
+  if (filters.module) params.set("module", filters.module);
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
   params.set("page", String(filters.page));

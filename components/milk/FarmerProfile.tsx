@@ -51,7 +51,7 @@ import {
   farmerBalanceTone,
   formatSessionLiters,
 } from "@/lib/milk-display";
-import { MODULE_BUTTON_CLASS } from "@/lib/sale-modules";
+import { MODULE_BUTTON_CLASS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 /**

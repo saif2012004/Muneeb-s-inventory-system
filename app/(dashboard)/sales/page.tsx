@@ -5,9 +5,9 @@ import { UnifiedSalesList } from "@/components/sales/UnifiedSalesList";
 /**
  * URL: /sales — every bill, across all three shops.
  *
- * The per-module lists (`/beverages`, `/bakery`, `/milk/sales`) are unchanged
- * and still live: they read the OLD tables, this reads `Sale`/`SaleItem`. Both
- * coexist by design until S9 removes the old paths.
+ * THE ONLY SALES SCREEN since S9. `/beverages`, `/bakery` and `/milk/sales`
+ * were deleted with the tables they read; the "Shop" filter here is what
+ * replaced them, and it matches a bill if ANY of its lines belong to that shop.
  */
 export const metadata: Metadata = {
   title: "Sales",

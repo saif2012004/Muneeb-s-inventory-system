@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MODULE_BUTTON_CLASS } from "@/lib/sale-modules";
+import { MODULE_BUTTON_CLASS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 /**

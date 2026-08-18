@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { notAMigrationCopy } from "@/lib/unified-sales";
 
 /**
  * THE RECEIVABLES CALCULATION. One implementation, like reconcileSaleLines.
@@ -66,49 +65,6 @@ const ZERO = new Prisma.Decimal(0);
  * request.
  */
 
-/** One row of the unified-sale aggregate. `total` is text — see below. */
-type UnifiedBilledRow = { customerId: string; total: string; last: Date | null };
-
-/**
- * `sum(...)::text`, deliberately. A bare numeric comes back from a raw query as
- * whatever the driver decides; casting to text and rebuilding a `Prisma.Decimal`
- * from the string keeps money exact and keeps every branch of this file on the
- * same type (Gotcha 2 — no float ever touches a rupee).
- */
-function unifiedBilledFor(customerId: string): Promise<UnifiedBilledRow[]> {
-  return prisma.$queryRaw<UnifiedBilledRow[]>`
-    SELECT s."customerId"                            AS "customerId",
-           coalesce(sum(s."totalAmount"), 0)::text   AS total,
-           max(s."saleDate")                         AS last
-    FROM "Sale" s
-    WHERE s."customerId" = ${customerId}
-      AND ${notAMigrationCopy()}
-    GROUP BY s."customerId"
-  `;
-}
-
-/** The same aggregate for many customers (or all, when `ids` is null). */
-function unifiedBilledGrouped(ids: string[] | null): Promise<UnifiedBilledRow[]> {
-  return ids === null
-    ? prisma.$queryRaw<UnifiedBilledRow[]>`
-        SELECT s."customerId"                          AS "customerId",
-               coalesce(sum(s."totalAmount"), 0)::text AS total,
-               max(s."saleDate")                       AS last
-        FROM "Sale" s
-        WHERE ${notAMigrationCopy()}
-        GROUP BY s."customerId"
-      `
-    : prisma.$queryRaw<UnifiedBilledRow[]>`
-        SELECT s."customerId"                          AS "customerId",
-               coalesce(sum(s."totalAmount"), 0)::text AS total,
-               max(s."saleDate")                       AS last
-        FROM "Sale" s
-        WHERE s."customerId" = ANY(${ids}::text[])
-          AND ${notAMigrationCopy()}
-        GROUP BY s."customerId"
-      `;
-}
-
 /** Raw Decimal balance. Serialize before it leaves a route handler. */
 export type CustomerBalance = {
   totalBilled: Prisma.Decimal;
@@ -153,8 +109,13 @@ function laterOf(a: Date | null, b: Date | null): Date | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Balance for a single customer. Four aggregates, awaited IN SERIES — no sale
+ * Balance for a single customer. TWO aggregates, awaited in series — no sale
  * rows are transferred.
+ *
+ * It was five queries plus a raw statement until S9, because billed money was
+ * spread over four sale tables and the unified one needed a NOT EXISTS to skip
+ * rows that were copies of the others. `Sale` is now the only place a bill
+ * exists, so the whole apparatus reduces to one aggregate.
  *
  * Sequential for the connection-pool reason documented on
  * {@link getCustomerActivity}: with `connection_limit=1` a Promise.all does not
@@ -164,41 +125,26 @@ export async function getCustomerBalance(
   customerId: string
 ): Promise<CustomerBalance> {
   const where = { customerId };
-  const money = { _sum: { totalAmount: true }, _max: { saleDate: true } } as const;
 
-  const beverage = await prisma.beverageSale.aggregate({ where, ...money });
-  const bakery = await prisma.bakerySale.aggregate({ where, ...money });
-  const milk = await prisma.milkSale.aggregate({ where, ...money });
-  // The unified bill. One statement, and it excludes migration A's copy —
-  // see NOT_A_MIGRATION_COPY.
-  const unified = await unifiedBilledFor(customerId);
+  const sales = await prisma.sale.aggregate({
+    where,
+    _sum: { totalAmount: true },
+    _max: { saleDate: true },
+  });
   const payments = await prisma.customerPayment.aggregate({
     where,
     _sum: { amount: true },
     _max: { paymentDate: true },
   });
 
-  const unifiedTotal = unified[0] ? new Prisma.Decimal(unified[0].total) : ZERO;
-  const unifiedLast = unified[0]?.last ?? null;
-
-  const totalBilled = sumOrZero(beverage._sum.totalAmount)
-    .add(sumOrZero(bakery._sum.totalAmount))
-    .add(sumOrZero(milk._sum.totalAmount))
-    .add(unifiedTotal);
-
+  const totalBilled = sumOrZero(sales._sum.totalAmount);
   const totalPaid = sumOrZero(payments._sum.amount);
 
   return {
     totalBilled,
     totalPaid,
     outstanding: totalBilled.sub(totalPaid),
-    lastSaleDate: laterOf(
-      laterOf(
-        laterOf(beverage._max.saleDate, bakery._max.saleDate),
-        milk._max.saleDate
-      ),
-      unifiedLast
-    ),
+    lastSaleDate: sales._max.saleDate,
     lastPaymentDate: payments._max.paymentDate,
   };
 }
@@ -208,7 +154,7 @@ export async function getCustomerBalance(
 // ---------------------------------------------------------------------------
 
 /**
- * Balances for many customers in a FIXED four queries, regardless of how many
+ * Balances for many customers in a FIXED two queries, regardless of how many
  * customers there are — the alternative (a balance query per customer) is the
  * N+1 this exists to avoid.
  *
@@ -237,31 +183,14 @@ export async function getCustomerBalances(
 
   const where = { customerId: { in: customerIds } };
 
-  // Written out per model rather than sharing one options object: Prisma types
-  // `by` per model (BeverageSaleScalarFieldEnum vs BakerySaleScalarFieldEnum),
-  // so a shared literal cannot satisfy all three.
-  //
   // Awaited in series, not Promise.all — see getCustomerActivity for why
   // concurrency is a liability on a one-connection pool.
-  const beverage = await prisma.beverageSale.groupBy({
+  const sales = await prisma.sale.groupBy({
     by: ["customerId"],
     where,
     _sum: { totalAmount: true },
     _max: { saleDate: true },
   });
-  const bakery = await prisma.bakerySale.groupBy({
-    by: ["customerId"],
-    where,
-    _sum: { totalAmount: true },
-    _max: { saleDate: true },
-  });
-  const milk = await prisma.milkSale.groupBy({
-    by: ["customerId"],
-    where,
-    _sum: { totalAmount: true },
-    _max: { saleDate: true },
-  });
-  const unified = await unifiedBilledGrouped(customerIds);
   const payments = await prisma.customerPayment.groupBy({
     by: ["customerId"],
     where,
@@ -269,14 +198,7 @@ export async function getCustomerBalances(
     _max: { paymentDate: true },
   });
 
-  for (const row of unified) {
-    const current = balances.get(row.customerId);
-    if (!current) continue;
-    current.totalBilled = current.totalBilled.add(new Prisma.Decimal(row.total));
-    current.lastSaleDate = laterOf(current.lastSaleDate, row.last);
-  }
-
-  for (const group of [...beverage, ...bakery, ...milk]) {
+  for (const group of sales) {
     const current = balances.get(group.customerId);
     if (!current) continue;
     current.totalBilled = current.totalBilled.add(
@@ -307,7 +229,7 @@ export async function getCustomerBalances(
 }
 
 /**
- * Total money owed across the whole book, in FOUR queries and without loading
+ * Total money owed across the whole book, in TWO queries and without loading
  * or even listing customers.
  *
  * Lives here rather than in lib/reports.ts on purpose: it is a receivables
@@ -326,27 +248,19 @@ export async function getCustomerBalances(
  * to a sum of positives, so enumerating them first would be a wasted query.
  */
 export async function getTotalOutstanding(): Promise<Prisma.Decimal> {
-  const money = { _sum: { totalAmount: true } } as const;
-
-  const beverage = await prisma.beverageSale.groupBy({ by: ["customerId"], ...money });
-  const bakery = await prisma.bakerySale.groupBy({ by: ["customerId"], ...money });
-  const milk = await prisma.milkSale.groupBy({ by: ["customerId"], ...money });
-  // `null` = every customer: a customer with no rows contributes 0 to a sum of
-  // positives, so enumerating ids first would be a wasted round trip.
-  const unified = await unifiedBilledGrouped(null);
+  // No `in` filter and no id list: a customer with no rows contributes 0 to a
+  // sum of positives, so enumerating them first would be a wasted round trip.
+  const sales = await prisma.sale.groupBy({
+    by: ["customerId"],
+    _sum: { totalAmount: true },
+  });
   const payments = await prisma.customerPayment.groupBy({
     by: ["customerId"],
     _sum: { amount: true },
   });
 
   const net = new Map<string, Prisma.Decimal>();
-  for (const row of unified) {
-    net.set(
-      row.customerId,
-      (net.get(row.customerId) ?? ZERO).add(new Prisma.Decimal(row.total))
-    );
-  }
-  for (const group of [...beverage, ...bakery, ...milk]) {
+  for (const group of sales) {
     net.set(
       group.customerId,
       (net.get(group.customerId) ?? ZERO).add(sumOrZero(group._sum?.totalAmount))
@@ -374,13 +288,14 @@ export type LedgerEntry = {
   id: string;
   kind: "sale" | "payment";
   /**
-   * Which module a sale came from; absent on payments.
+   * `"unified"` on a sale, null on a payment.
    *
-   * `"unified"` is a CROSS-MODULE bill and deliberately not one of the three:
-   * it may hold beverage, bakery and milk lines at once, so forcing it into a
-   * single module would mislabel it. Its `label` names the shops instead.
+   * Every sale is a unified bill since S9, and the union keeps the single
+   * member deliberately: a bill may hold beverage, bakery and milk lines at
+   * once, so there is no one module to name it by. `label` names the shops it
+   * actually drew from instead.
    */
-  module: "beverages" | "bakery" | "milk" | "unified" | null;
+  module: "unified" | null;
   date: Date;
   /** Positive for a sale (increases debt), negative for a payment. */
   amount: Prisma.Decimal;
@@ -394,7 +309,14 @@ export type LedgerEntry = {
 export type CustomerActivity = Awaited<ReturnType<typeof getCustomerActivity>>;
 
 /**
- * All of a customer's sales and payments, in FOUR SEQUENTIAL queries.
+ * All of a customer's sales and payments, in TWO SEQUENTIAL queries.
+ *
+ * It was four plus a JS de-duplication pass until S9. Every bill lived in one of
+ * four tables, and the unified copies of the legacy rows had to be filtered out
+ * using the legacy ids as the exclusion list — a JS twin of the SQL guard the
+ * balance paths used, and the two disagreeing once made the profile list the
+ * same milk sale twice. `Sale` is now the only sale table, so both the extra
+ * queries and the whole class of bug are gone.
  *
  * ---------------------------------------------------------------------------
  * WHY SEQUENTIAL, NOT Promise.all
@@ -418,50 +340,8 @@ export type CustomerActivity = Awaited<ReturnType<typeof getCustomerActivity>>;
  */
 export async function getCustomerActivity(customerId: string) {
   const where = { customerId };
-  const saleSelect = {
-    id: true,
-    saleDate: true,
-    totalAmount: true,
-    notes: true,
-    createdAt: true,
-    _count: { select: { items: true } },
-  } as const;
 
-  const beverage = await prisma.beverageSale.findMany({ where, select: saleSelect });
-  const bakery = await prisma.bakerySale.findMany({ where, select: saleSelect });
-  const milk = await prisma.milkSale.findMany({
-    where,
-    select: {
-      id: true,
-      saleDate: true,
-      totalAmount: true,
-      notes: true,
-      createdAt: true,
-      liters: true,
-      ratePerLiter: true,
-    },
-  });
-  /**
-   * The unified bills. Fetched through Prisma rather than the raw aggregate the
-   * balance paths use, because the ledger needs whole rows — and the
-   * migrated-copy exclusion is FREE here: the three arrays above are already
-   * this customer's complete legacy sets, so their ids ARE the exclusion list.
-   * No extra query, no NOT EXISTS. See `notAMigrationCopy()`.
-   *
-   * 🔴 ALL THREE TABLES, INCLUDING MILK. Found in the browser right after S5
-   * copied the real milk sale into `Sale`: with `milk` missing from this set the
-   * profile listed that ONE sale TWICE — once as "Milk" and once as
-   * "Sale · Milk" — while the balance beside it stayed correct, because the
-   * balance path uses the SQL guard and this one did not. Two exclusion lists
-   * that disagree is exactly the failure `notAMigrationCopy()` was centralised
-   * to prevent; this is its JS twin and must list the same tables.
-   */
-  const legacyIds = new Set([
-    ...beverage.map((sale) => sale.id),
-    ...bakery.map((sale) => sale.id),
-    ...milk.map((sale) => sale.id),
-  ]);
-  const unifiedRows = await prisma.sale.findMany({
+  const sales = await prisma.sale.findMany({
     where,
     select: {
       id: true,
@@ -476,7 +356,6 @@ export async function getCustomerActivity(customerId: string) {
       items: { select: { moduleKey: true } },
     },
   });
-  const unified = unifiedRows.filter((sale) => !legacyIds.has(sale.id));
 
   const payments = await prisma.customerPayment.findMany({
     where,
@@ -490,7 +369,7 @@ export async function getCustomerActivity(customerId: string) {
     },
   });
 
-  return { beverage, bakery, milk, unified, payments };
+  return { sales, payments };
 }
 
 /** "Beverages · Milk" — which shops one unified bill drew from, in fixed order. */
@@ -530,12 +409,7 @@ export function summariseActivity(activity: CustomerActivity): CustomerBalance {
   let totalBilled = ZERO;
   let lastSaleDate: Date | null = null;
 
-  for (const sale of [
-    ...activity.beverage,
-    ...activity.bakery,
-    ...activity.milk,
-    ...activity.unified,
-  ]) {
+  for (const sale of activity.sales) {
     totalBilled = totalBilled.add(sale.totalAmount);
     lastSaleDate = laterOf(lastSaleDate, sale.saleDate);
   }
@@ -565,42 +439,12 @@ export function summariseActivity(activity: CustomerActivity): CustomerBalance {
  * could reshuffle between reloads.
  */
 export function buildLedger(activity: CustomerActivity): LedgerEntry[] {
-  const { beverage, bakery, milk, unified, payments } = activity;
+  const { sales, payments } = activity;
 
   type Unsorted = Omit<LedgerEntry, "runningBalance"> & { createdAt: Date };
 
   const entries: Unsorted[] = [
-    ...beverage.map((sale) => ({
-      id: sale.id,
-      kind: "sale" as const,
-      module: "beverages" as const,
-      date: sale.saleDate,
-      amount: sale.totalAmount,
-      label: "Beverages sale",
-      itemCount: sale._count.items,
-      createdAt: sale.createdAt,
-    })),
-    ...bakery.map((sale) => ({
-      id: sale.id,
-      kind: "sale" as const,
-      module: "bakery" as const,
-      date: sale.saleDate,
-      amount: sale.totalAmount,
-      label: "Bakery sale",
-      itemCount: sale._count.items,
-      createdAt: sale.createdAt,
-    })),
-    ...milk.map((sale) => ({
-      id: sale.id,
-      kind: "sale" as const,
-      module: "milk" as const,
-      date: sale.saleDate,
-      amount: sale.totalAmount,
-      label: `Milk sale · ${sale.liters.toString()} L`,
-      itemCount: null,
-      createdAt: sale.createdAt,
-    })),
-    ...unified.map((sale) => ({
+    ...sales.map((sale) => ({
       id: sale.id,
       kind: "sale" as const,
       module: "unified" as const,

@@ -20,7 +20,7 @@ import {
   useSaveQuickEntry,
   type QuickEntryRow,
 } from "@/lib/hooks/use-milk";
-import { MODULE_BUTTON_CLASS } from "@/lib/sale-modules";
+import { MODULE_BUTTON_CLASS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 /**

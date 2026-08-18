@@ -31,7 +31,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCreateCustomer, type Customer } from "@/lib/hooks/use-customers";
 import type { AccentKey } from "@/lib/nav";
-import { MODULE_BUTTON_CLASS, MODULE_RING_CLASS } from "@/lib/sale-modules";
+import { MODULE_BUTTON_CLASS, MODULE_RING_CLASS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import {
   CUSTOMER_TYPES,

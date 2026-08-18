@@ -18,7 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatLiters, karachiToday, toDateKey } from "@/lib/format";
 import type { Delivery } from "@/lib/hooks/use-milk";
-import { MODULE_BUTTON_CLASS } from "@/lib/sale-modules";
+import { MODULE_BUTTON_CLASS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 /**

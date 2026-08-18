@@ -38,7 +38,7 @@ import {
   farmerBalanceMoneyTone,
   farmerBalanceTone,
 } from "@/lib/milk-display";
-import { MODULE_BUTTON_CLASS } from "@/lib/sale-modules";
+import { MODULE_BUTTON_CLASS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 /**
@@ -294,8 +294,12 @@ export function MilkHub() {
           <ArrowRight className="size-4 shrink-0 text-zinc-400" aria-hidden />
         </Link>
 
+        {/* The "Milk sales" tile pointed at /milk/sales, a history-only screen
+            that S9 deleted along with the MilkSale table. Milk is sold on the
+            till and its sales are listed there with everything else, so this
+            sends the owner to the sales screen rather than to a dead page. */}
         <Link
-          href="/milk/sales"
+          href="/sales"
           className="flex min-h-[56px] items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-zinc-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
         >
           <span className="flex items-center gap-3">
@@ -306,12 +310,8 @@ export function MilkHub() {
               <span className="block text-[15px] font-medium text-zinc-900">
                 Milk sales
               </span>
-              {/* The figures behind this link stopped growing at the S4.3
-                  cutover — new milk sales are rung up on the till. Saying so
-                  here is what stops the total reading as "all milk ever sold"
-                  when it is now "milk sold before the till". */}
               <span className="block text-sm text-zinc-500">
-                Sold before the till moved · new sales go on the bill
+                Every bill, on the sales screen
               </span>
             </span>
           </span>

@@ -20,7 +20,6 @@ import {
 } from "@tanstack/react-query";
 
 import { api } from "@/lib/api-client";
-import { customerKeys } from "@/lib/hooks/use-customers";
 import { invalidateReports } from "@/lib/hooks/use-reports";
 
 // ---------------------------------------------------------------------------
@@ -150,32 +149,6 @@ export type QuickEntryResult = {
   summary: FarmersSummary;
 };
 
-export type MilkSale = {
-  id: string;
-  customerId: string;
-  saleDate: string;
-  liters: number;
-  ratePerLiter: number;
-  totalAmount: number;
-  notes: string | null;
-  createdAt: string;
-  customer: { id: string; name: string; type: string };
-};
-
-export type MilkSalesResponse = {
-  sales: MilkSale[];
-  /** Totals for the WHOLE filtered set, not just the current page. */
-  totals: { liters: number; amount: number };
-  pagination: { page: number; limit: number; total: number; totalPages: number };
-};
-
-export type MilkSaleFilters = {
-  customerId?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  page?: number;
-};
-
 // ---------------------------------------------------------------------------
 // Query keys
 // ---------------------------------------------------------------------------
@@ -186,8 +159,6 @@ export const milkKeys = {
     [...milkKeys.all, "farmers", withBalances] as const,
   farmer: (id: string) => [...milkKeys.all, "farmer", id] as const,
   quickEntry: (date: string) => [...milkKeys.all, "quick-entry", date] as const,
-  sales: (filters: MilkSaleFilters) =>
-    [...milkKeys.all, "sales", filters] as const,
 };
 
 /**
@@ -265,14 +236,6 @@ export function useQuickEntryDay(date: string) {
     queryFn: () =>
       api.get<QuickEntryDay>(`/api/milk/deliveries/quick-entry?date=${date}`),
     enabled: Boolean(date),
-  });
-}
-
-export function useMilkSales(filters: MilkSaleFilters = {}) {
-  return useQuery({
-    queryKey: milkKeys.sales(filters),
-    queryFn: () =>
-      api.get<MilkSalesResponse>(`/api/milk/sales${buildQuery(filters)}`),
   });
 }
 
@@ -451,57 +414,15 @@ export function useSaveQuickEntry() {
   });
 }
 
-export function useCreateMilkSale() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: {
-      customerId: string;
-      saleDate: string;
-      liters: number;
-      ratePerLiter: number;
-      notes?: string | null;
-    }) =>
-      api.post<{ sale: MilkSale; balance: unknown }>("/api/milk/sales", input),
-    onSuccess: async () => {
-      await invalidateMilk(queryClient);
-      // A milk sale is a receivable too — see the note above.
-      await queryClient.invalidateQueries({ queryKey: customerKeys.all });
-    },
-  });
-}
-
-export function useUpdateMilkSale() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      ...patch
-    }: {
-      id: string;
-      saleDate?: string;
-      liters?: number;
-      ratePerLiter?: number;
-      notes?: string | null;
-    }) =>
-      api.patch<{ sale: MilkSale; balance: unknown }>(
-        `/api/milk/sales/${id}`,
-        patch
-      ),
-    onSuccess: async () => {
-      await invalidateMilk(queryClient);
-      await queryClient.invalidateQueries({ queryKey: customerKeys.all });
-    },
-  });
-}
-
-export function useDeleteMilkSale() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
-      api.delete<{ deleted: "hard"; id: string }>(`/api/milk/sales/${id}`),
-    onSuccess: async () => {
-      await invalidateMilk(queryClient);
-      await queryClient.invalidateQueries({ queryKey: customerKeys.all });
-    },
-  });
-}
+/**
+ * ⚠️ THE MILK-SALE HOOKS WERE DELETED IN S9, not mislaid.
+ *
+ * `useMilkSales`, `useCreateMilkSale`, `useUpdateMilkSale`, `useDeleteMilkSale`
+ * and the `MilkSale` types went with `/api/milk/sales` and the `MilkSale` table.
+ * Milk is sold on the unified till, so a milk sale is created, edited and
+ * deleted through `lib/hooks/use-unified-sales.ts` like every other bill.
+ *
+ * This file is now the FARMER side only — deliveries, purchases, balances —
+ * which is what `lib/milk.ts` has always been on the server. Do not add a sale
+ * hook back here.
+ */

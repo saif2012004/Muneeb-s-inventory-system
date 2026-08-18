@@ -14,7 +14,6 @@ import { getAllFarmerTotals } from "@/lib/milk";
 import { prisma } from "@/lib/prisma";
 // The migration-A dedupe, shared with lib/receivables.ts — ONE definition, so
 // revenue and balances cannot disagree about which Sale rows are real.
-import { notAMigrationCopy } from "@/lib/unified-sales";
 // NOTE: lib/receivables.ts is intentionally NOT imported any more. It still
 // exists and still works; nothing calls it. See getBalanceTotals() below.
 
@@ -102,11 +101,6 @@ export function reportRange(period: ReportPeriod): DateRange {
  * is the one part of the query below that cannot be a bound parameter, so it
  * must come from here and nowhere else.
  */
-const TREND_TABLE: Record<TrendModule, string> = {
-  beverages: "BeverageSale",
-  bakery: "BakerySale",
-  milk: "MilkSale",
-};
 
 export type TrendPoint = {
   /** Karachi calendar bucket, `YYYY-MM-DD`. */
@@ -165,25 +159,21 @@ export async function getTrend(options: {
   if (!TREND_MODULES.includes(module)) throw new Error("Unknown module");
   if (!TREND_GROUPINGS.includes(groupBy)) throw new Error("Unknown grouping");
 
-  const table = Prisma.raw(`"${TREND_TABLE[module]}"`);
-
   /**
-   * OLD TABLE ∪ UNIFIED LINES, in ONE round trip (S6).
+   * ONE row source since S9: the unified sale lines of this module.
    *
-   * A `UNION ALL` of two row sources — one row per old sale, one row per unified
-   * line of this module — then a single GROUP BY over both. The alternative,
-   * running a second query and merging the buckets in JS, would have cost an
-   * extra ~1.1s round trip on EVERY trend chart, three times per dashboard.
+   * It was a UNION ALL of the old per-module sale table and these lines, because
+   * a bill could live in either. Migration B dropped the old tables, so the
+   * union has one arm and the interpolated table name is gone with it.
    *
-   * Both sources emit `(period, revenue, sale_id)`, which is what lets the
-   * aggregate below be honest about each:
-   *   - `SUM(revenue)` adds a whole old sale but only the module's SHARE of a
-   *     mixed unified bill (`netLineTotal`, never `totalAmount`);
-   *   - `COUNT(DISTINCT sale_id)` counts a three-line unified bill ONCE, not
-   *     three times, and cannot collide across sources because the ids are cuids.
+   * The aggregate is unchanged and both halves of it still matter:
+   *   - `SUM(revenue)` uses `netLineTotal`, so a mixed bill contributes only
+   *     THIS module's share — never the bill's `totalAmount`, which would
+   *     attribute a cross-shop sale entirely to one shop;
+   *   - `COUNT(DISTINCT sale_id)` counts a three-line bill ONCE, not three times.
    *
-   * The Karachi bucketing expression is applied to each source separately and is
-   * character-for-character the one verified against the live database above.
+   * The Karachi bucketing expression is character-for-character the one verified
+   * against the live database above.
    */
   const rows = await prisma.$queryRaw<TrendRow[]>`
     SELECT
@@ -191,21 +181,6 @@ export async function getTrend(options: {
       SUM(revenue)::text        AS revenue,
       COUNT(DISTINCT sale_id)   AS count
     FROM (
-      SELECT
-        to_char(
-          date_trunc(
-            ${groupBy},
-            ("saleDate" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Karachi'
-          ),
-          'YYYY-MM-DD'
-        )                       AS period,
-        "totalAmount"           AS revenue,
-        id                      AS sale_id
-      FROM ${table}
-      WHERE "saleDate" >= ${range.start} AND "saleDate" < ${range.end}
-
-      UNION ALL
-
       SELECT
         to_char(
           date_trunc(
@@ -220,7 +195,6 @@ export async function getTrend(options: {
       JOIN "Sale" s ON s.id = i."saleId"
       WHERE i."moduleKey" = ${module}
         AND s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
-        AND ${notAMigrationCopy()}
     ) AS combined
     GROUP BY 1
     ORDER BY 1
@@ -240,13 +214,6 @@ export async function getTrend(options: {
 // Top products
 // ---------------------------------------------------------------------------
 
-
-/** The per-module item table for the OLD sales. Milk has none — see above. */
-const PRODUCT_ITEM_TABLE: Record<ProductModule, string | null> = {
-  beverages: "BeverageSaleItem",
-  bakery: "BakerySaleItem",
-  milk: null,
-};
 
 type TopProductRow = {
   product_id: string;
@@ -281,62 +248,36 @@ export async function getTopProducts(options: {
   if (!PRODUCT_MODULES.includes(module)) throw new Error("Unknown module");
 
   /**
-   * OLD ITEM TABLE ∪ UNIFIED LINES, still TWO queries: one grouped scan, one
-   * name lookup for the winners.
+   * TWO queries: one grouped scan, one name lookup for the winners.
    *
-   * Raw SQL rather than two `groupBy` calls merged in JS, for the reason that
-   * governs everything in this file — merging would need a second round trip at
-   * ~1.1s, and a JS merge would also have to re-sort and re-apply `LIMIT`, which
-   * is the kind of hand-rolled ranking that quietly disagrees with itself.
+   * It scanned the old per-module item table too until S9 — that arm went with
+   * Migration B, and milk gained a real one for the first time: it never had a
+   * per-module item table, so before the till existed there was nothing here to
+   * count, which is why `getTopProducts("milk")` used to come back empty even
+   * when milk had sold.
    *
-   * Revenue is `lineTotal` on the old tables and `netLineTotal` on the unified
-   * one. They are the same figure where no bill discount exists (which is always,
-   * on the unified endpoint), but the unified column is the one that is correct
-   * BY DEFINITION if a bill discount is ever reintroduced.
+   * Raw SQL rather than a `groupBy`, for the reason that governs this file: the
+   * ranking and LIMIT belong in the database, and a hand-rolled JS re-sort is
+   * the kind of thing that quietly disagrees with the table beside it.
    *
-   * Quantity is summed as a plain number and may be FRACTIONAL — 12.5 litres of
-   * milk is an ordinary quantity since Migration C.
+   * Quantity may be FRACTIONAL — 12.5 litres of milk is an ordinary quantity
+   * since Migration C.
    */
-  const oldTable = PRODUCT_ITEM_TABLE[module];
-  const oldSource =
-    oldTable === null
-      ? // Milk: no per-module item table ever existed, so the union has one arm.
-        Prisma.empty
-      : Prisma.sql`
-          SELECT
-            oi."productId"  AS product_id,
-            oi.quantity     AS quantity,
-            oi."lineTotal"  AS revenue
-          FROM ${Prisma.raw(`"${oldTable}"`)} oi
-          JOIN ${Prisma.raw(`"${oldTable.replace("Item", "")}"`)} os ON os.id = oi."saleId"
-          WHERE os."saleDate" >= ${range.start} AND os."saleDate" < ${range.end}
-
-          UNION ALL
-        `;
-
   const rows = await prisma.$queryRaw<TopProductRow[]>`
     SELECT
-      product_id,
-      SUM(quantity)::text AS quantity,
-      SUM(revenue)::text  AS revenue
-    FROM (
-      ${oldSource}
-      SELECT
-        i."productId"                  AS product_id,
-        /* BASE UNITS (the owner's Q3, option A): a peti counts as 360 eggs, not
-           as 1. That is the figure that reconciles against stock, which is what
-           the owner checks it against — and the only one that stays comparable
-           across months when the same goods sell in different units. */
-        i.quantity * i."unitFactor"    AS quantity,
-        i."netLineTotal"               AS revenue
-      FROM "SaleItem" i
-      JOIN "Sale" s ON s.id = i."saleId"
-      WHERE i."moduleKey" = ${module}
-        AND s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
-        AND ${notAMigrationCopy()}
-    ) AS combined
-    GROUP BY product_id
-    ORDER BY SUM(revenue) DESC
+      i."productId"                        AS product_id,
+      /* BASE UNITS (the owner's Q3, option A): a peti counts as 360 eggs, not
+         as 1. That is the figure that reconciles against stock, which is what
+         the owner checks it against — and the only one that stays comparable
+         across months when the same goods sell in different units. */
+      SUM(i.quantity * i."unitFactor")::text AS quantity,
+      SUM(i."netLineTotal")::text          AS revenue
+    FROM "SaleItem" i
+    JOIN "Sale" s ON s.id = i."saleId"
+    WHERE i."moduleKey" = ${module}
+      AND s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
+    GROUP BY i."productId"
+    ORDER BY SUM(i."netLineTotal") DESC
     LIMIT ${limit}
   `;
 
@@ -390,66 +331,27 @@ type ProductSalesRawRow = {
  * also the snapshot, so recategorising a product in the catalog cannot
  * retroactively move last month's sales between shops.
  *
- * TWO queries regardless of how many products sold: one grouped scan over the
- * three sources, one name/unit lookup for the rows that came back.
+ * TWO queries regardless of how many products sold: one grouped scan, one
+ * name/unit lookup for the rows that came back.
+ *
+ * It scanned four sources until S9 — the two old item tables, the unified lines,
+ * and the retired `MilkSale` rows mapped onto `prod_milk` so the table would
+ * reconcile with the summary above it. All four are now one, because every bill
+ * is a `Sale`.
  */
 export async function getProductSales(range: DateRange): Promise<ProductSalesRow[]> {
   const rows = await prisma.$queryRaw<ProductSalesRawRow[]>`
     SELECT
-      product_id,
-      module_key,
-      SUM(quantity)::text AS quantity,
-      SUM(revenue)::text  AS revenue
-    FROM (
-      SELECT bi."productId" AS product_id, 'beverages' AS module_key,
-             bi.quantity AS quantity, bi."lineTotal" AS revenue
-      FROM "BeverageSaleItem" bi
-      JOIN "BeverageSale" bs ON bs.id = bi."saleId"
-      WHERE bs."saleDate" >= ${range.start} AND bs."saleDate" < ${range.end}
-
-      UNION ALL
-
-      SELECT ki."productId", 'bakery',
-             ki.quantity, ki."lineTotal"
-      FROM "BakerySaleItem" ki
-      JOIN "BakerySale" ks ON ks.id = ki."saleId"
-      WHERE ks."saleDate" >= ${range.start} AND ks."saleDate" < ${range.end}
-
-      UNION ALL
-
-      SELECT i."productId", i."moduleKey",
-             /* BASE UNITS — see the note in getTopProducts. */
-             i.quantity * i."unitFactor", i."netLineTotal"
-      FROM "SaleItem" i
-      JOIN "Sale" s ON s.id = i."saleId"
-      WHERE s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
-        AND ${notAMigrationCopy()}
-
-      UNION ALL
-
-      /* ------------------------------------------------------------------
-       * THE RETIRED MilkSale ROWS, attributed to the milk product.
-       *
-       * A MilkSale predates the till and has no product line - it is litres
-       * times rate on a single row. Left out, this table would report 12.5 L
-       * of milk while the summary directly above it reported the full 62.5,
-       * and the owner would be left deciding which screen to believe.
-       *
-       * It IS milk sold, its litres and rate are recorded, and prod_milk is
-       * what it would be sold as today - so it is mapped there rather than
-       * dropped. No double count: once S5 copies these rows into Sale, the
-       * copy carries the same id and notAMigrationCopy() excludes it above.
-       *
-       * NOTE - no backticks in this comment: it lives inside a JS template
-       * literal, where a backtick ends the SQL string mid-statement.
-       * ------------------------------------------------------------------ */
-      SELECT 'prod_milk', 'milk',
-             ms.liters, ms."totalAmount"
-      FROM "MilkSale" ms
-      WHERE ms."saleDate" >= ${range.start} AND ms."saleDate" < ${range.end}
-    ) AS combined
-    GROUP BY product_id, module_key
-    ORDER BY SUM(revenue) DESC
+      i."productId"                          AS product_id,
+      i."moduleKey"                          AS module_key,
+      /* BASE UNITS — see the note in getTopProducts. */
+      SUM(i.quantity * i."unitFactor")::text AS quantity,
+      SUM(i."netLineTotal")::text            AS revenue
+    FROM "SaleItem" i
+    JOIN "Sale" s ON s.id = i."saleId"
+    WHERE s."saleDate" >= ${range.start} AND s."saleDate" < ${range.end}
+    GROUP BY i."productId", i."moduleKey"
+    ORDER BY SUM(i."netLineTotal") DESC
   `;
 
   if (rows.length === 0) return [];
@@ -564,18 +466,14 @@ export async function getBalanceTotals(): Promise<BalanceTotals> {
  * the number of days in the period, customers, farmers or products.
  */
 type PeriodFlowRow = {
-  bev_revenue: string | null;
-  bev_count: bigint;
-  bak_revenue: string | null;
-  bak_count: bigint;
   del_liters: string | null;
   del_value: string | null;
   purchases: string | null;
-  sold_liters: string | null;
-  sold_revenue: string | null;
-  // The UNIFIED half (S6). Revenue is Σ netLineTotal BY moduleKey — never the
-  // sale's totalAmount, which would attribute a mixed bill entirely to whichever
-  // module happened to be asked about.
+  // Revenue is Σ netLineTotal BY moduleKey — never the sale's totalAmount,
+  // which would attribute a mixed bill entirely to whichever module happened to
+  // be asked about. The `u_` prefix is a leftover from when these sat beside a
+  // second set read off the old per-module tables; it is kept because renaming
+  // seven aliases is churn that would obscure the real change in this diff.
   u_bev_revenue: string | null;
   u_bev_count: bigint;
   u_bak_revenue: string | null;
@@ -595,7 +493,7 @@ export async function getReportSummary(
   const { start, end } = range;
 
   /**
-   * All five period flows in ONE round trip.
+   * Every period flow in ONE round trip.
    *
    * This started as five separate `aggregate` calls, which is the more
    * idiomatic Prisma. It was measured and rejected: a single round trip to
@@ -615,28 +513,16 @@ export async function getReportSummary(
    */
   const [flows] = await prisma.$queryRaw<PeriodFlowRow[]>`
     SELECT
-      (SELECT SUM("totalAmount")::text FROM "BeverageSale"
-         WHERE "saleDate" >= ${start} AND "saleDate" < ${end})     AS bev_revenue,
-      (SELECT COUNT(*) FROM "BeverageSale"
-         WHERE "saleDate" >= ${start} AND "saleDate" < ${end})     AS bev_count,
-      (SELECT SUM("totalAmount")::text FROM "BakerySale"
-         WHERE "saleDate" >= ${start} AND "saleDate" < ${end})     AS bak_revenue,
-      (SELECT COUNT(*) FROM "BakerySale"
-         WHERE "saleDate" >= ${start} AND "saleDate" < ${end})     AS bak_count,
       (SELECT SUM("totalLiters")::text FROM "MilkDelivery"
          WHERE "deliveryDate" >= ${start} AND "deliveryDate" < ${end}) AS del_liters,
       (SELECT SUM("totalAmount")::text FROM "MilkDelivery"
          WHERE "deliveryDate" >= ${start} AND "deliveryDate" < ${end}) AS del_value,
       (SELECT SUM("amount")::text FROM "FarmerPurchase"
          WHERE "purchaseDate" >= ${start} AND "purchaseDate" < ${end}) AS purchases,
-      (SELECT SUM("liters")::text FROM "MilkSale"
-         WHERE "saleDate" >= ${start} AND "saleDate" < ${end})     AS sold_liters,
-      (SELECT SUM("totalAmount")::text FROM "MilkSale"
-         WHERE "saleDate" >= ${start} AND "saleDate" < ${end})     AS sold_revenue,
 
       /* ------------------------------------------------------------------
-       * THE UNIFIED HALF (S6). Eight more scalar subqueries, still ONE round
-       * trip — which is the whole reason the summary is written this way.
+       * SALES, PER MODULE. Seven scalar subqueries, still ONE round trip —
+       * which is the whole reason the summary is written this way.
        *
        * Revenue is SUM(netLineTotal) grouped by moduleKey, NOT the sale's
        * totalAmount: a bill holding beverages and milk contributes its
@@ -648,42 +534,39 @@ export async function getReportSummary(
        * touches, not one per line. Note the modules' counts therefore do not
        * add up to "bills rung", and should not be presented as if they did.
        *
-       * NOT_A_MIGRATION_COPY excludes migration A's duplicate; without it the
-       * real Rs. 5,000 bakery sale is in this period's revenue twice.
+       * Before S9 each of these was paired with a second subquery against the
+       * old per-module table, and every one carried a NOT EXISTS to skip rows
+       * that were copies of those tables. Migration B took both away.
        * ------------------------------------------------------------------ */
       (SELECT SUM(i."netLineTotal")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-         WHERE i."moduleKey" = 'beverages' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${notAMigrationCopy()})                            AS u_bev_revenue,
+         WHERE i."moduleKey" = 'beverages' AND s."saleDate" >= ${start} AND s."saleDate" < ${end})
+                                                                  AS u_bev_revenue,
       (SELECT COUNT(DISTINCT s.id) FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-         WHERE i."moduleKey" = 'beverages' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${notAMigrationCopy()})                            AS u_bev_count,
+         WHERE i."moduleKey" = 'beverages' AND s."saleDate" >= ${start} AND s."saleDate" < ${end})
+                                                                  AS u_bev_count,
       (SELECT SUM(i."netLineTotal")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-         WHERE i."moduleKey" = 'bakery' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${notAMigrationCopy()})                            AS u_bak_revenue,
+         WHERE i."moduleKey" = 'bakery' AND s."saleDate" >= ${start} AND s."saleDate" < ${end})
+                                                                  AS u_bak_revenue,
       (SELECT COUNT(DISTINCT s.id) FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-         WHERE i."moduleKey" = 'bakery' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${notAMigrationCopy()})                            AS u_bak_count,
+         WHERE i."moduleKey" = 'bakery' AND s."saleDate" >= ${start} AND s."saleDate" < ${end})
+                                                                  AS u_bak_count,
       (SELECT SUM(i."netLineTotal")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-         WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${notAMigrationCopy()})                            AS u_milk_revenue,
+         WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end})
+                                                                  AS u_milk_revenue,
       (SELECT COUNT(DISTINCT s.id) FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-         WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${notAMigrationCopy()})                            AS u_milk_count,
+         WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end})
+                                                                  AS u_milk_count,
       /* Litres SOLD on the till: the milk line's quantity IS litres. */
       (SELECT SUM(i.quantity * i."unitFactor")::text FROM "SaleItem" i JOIN "Sale" s ON s.id = i."saleId"
-         WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end}
-           AND ${notAMigrationCopy()})                            AS u_milk_liters
+         WHERE i."moduleKey" = 'milk' AND s."saleDate" >= ${start} AND s."saleDate" < ${end})
+                                                                  AS u_milk_liters
   `;
 
   // Balances are NOT fetched here — they are six queries and would hold the
   // whole dashboard on the slowest thing it needs. See getBalanceTotals().
-  //
-  // Each module's figure is OLD TABLE + UNIFIED LINES (S6). Both paths are live
-  // until S9, so a period can legitimately contain sales from either; reporting
-  // one and not the other is how a dashboard quietly understates a month.
-  const beverageRevenue = dec(flows.bev_revenue).add(dec(flows.u_bev_revenue));
-  const bakeryRevenue = dec(flows.bak_revenue).add(dec(flows.u_bak_revenue));
-  const milkSalesRevenue = dec(flows.sold_revenue).add(dec(flows.u_milk_revenue));
+  const beverageRevenue = dec(flows.u_bev_revenue);
+  const bakeryRevenue = dec(flows.u_bak_revenue);
+  const milkSalesRevenue = dec(flows.u_milk_revenue);
   const milkValue = dec(flows.del_value);
   const purchases = dec(flows.purchases);
 
@@ -691,7 +574,7 @@ export async function getReportSummary(
     period,
     range: { start, end },
     beverages: {
-      salesCount: Number(flows.bev_count) + Number(flows.u_bev_count),
+      salesCount: Number(flows.u_bev_count),
       revenue: beverageRevenue,
       // Top product is NOT computed here. The dashboard already fetches
       // /api/reports/top-products for its charts, and duplicating it cost four
@@ -699,7 +582,7 @@ export async function getReportSummary(
       topProduct: null,
     },
     bakery: {
-      salesCount: Number(flows.bak_count) + Number(flows.u_bak_count),
+      salesCount: Number(flows.u_bak_count),
       revenue: bakeryRevenue,
       topProduct: null,
     },
@@ -708,9 +591,10 @@ export async function getReportSummary(
       milkValue,
       farmerPurchases: purchases,
       netMilkCost: milkValue.sub(purchases),
-      // Litres sold = the retired MilkSale rows + the till's milk lines, whose
-      // quantity IS litres. After the S4.3 cutover only the second half grows.
-      litersSold: dec(flows.sold_liters).add(dec(flows.u_milk_liters)),
+      // Litres sold: a milk line's quantity IS litres. It used to add the
+      // retired `MilkSale` rows too; those went with Migration B, and their
+      // litres are in the unified lines they were copied to.
+      litersSold: dec(flows.u_milk_liters),
       milkSalesRevenue,
     },
     combined: {

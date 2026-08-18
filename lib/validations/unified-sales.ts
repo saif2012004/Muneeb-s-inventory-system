@@ -3,22 +3,15 @@ import { z } from "zod";
 import { startOfKarachiDay } from "@/lib/format";
 
 /**
- * Validation for the UNIFIED sale endpoint (`POST /api/sales`).
+ * Validation for the UNIFIED sale endpoints — THE sale schema since S9.
  *
- * ---------------------------------------------------------------------------
- * WHY THIS SITS ALONGSIDE `lib/validations/sales.ts` RATHER THAN REPLACING IT
- * ---------------------------------------------------------------------------
- * The per-module schema types quantity as `.int()`, and that must STAY strict:
- * 2.5 bottles of Pepsi is a typo, and `/api/beverages/sales` should keep
- * rejecting it. The unified endpoint has the opposite requirement — milk sells
- * in fractional litres — so it gets its OWN schema instead of the shared one
- * being loosened for everybody.
+ * It used to sit alongside `lib/validations/sales.ts`, whose quantity was
+ * `.int()` because 2.5 bottles of Pepsi is a typo. That file went with the
+ * per-module routes in S9; a quantity here is DECIMAL, because milk sells in
+ * fractional litres and one bill can now hold milk and bottles together.
  *
- * Both are live at once, deliberately. Do not "consolidate" them: the whole
- * point is that the two endpoints disagree about what a quantity may be.
- *
- * Dates follow the same Karachi-day rule as the per-module schema (Gotcha 4) —
- * a bare `yyyy-MM-dd` becomes the UTC instant of Karachi midnight on that day.
+ * Dates follow the Karachi-day rule (Gotcha 4) — a bare `yyyy-MM-dd` becomes
+ * the UTC instant of Karachi midnight on that day.
  */
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -60,6 +53,13 @@ const notes = z
 function isRealDate(value: string): boolean {
   return !Number.isNaN(new Date(value).getTime());
 }
+
+/** Left as a string: the route applies start-of-day vs end-of-day itself. */
+const dateBoundary = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(isRealDate, { message: "That date filter isn't a valid date" });
 
 const saleDate = z
   .string()
@@ -200,3 +200,36 @@ export const unifiedSaleUpdateSchema = z
   });
 
 export type UnifiedSaleUpdateInput = z.infer<typeof unifiedSaleUpdateSchema>;
+
+/**
+ * The sale LIST query. Moved here in S9 from `lib/validations/sales.ts`, which
+ * went with the per-module routes.
+ *
+ * `module` is new, and it is the replacement for the deleted /beverages and
+ * /bakery screens: those were the only way to see one shop's bills, so the
+ * unified list had to gain the filter before they could go.
+ *
+ * It matches a sale that has AT LEAST ONE LINE in that module — not a sale
+ * whose every line is. A mixed bill genuinely belongs in both shops' lists, and
+ * hiding it from one of them would understate what that shop sold.
+ */
+export const unifiedSaleListQuerySchema = z.object({
+  customerId: id.optional(),
+  dateFrom: dateBoundary.optional(),
+  dateTo: dateBoundary.optional(),
+  module: z.enum(["beverages", "bakery", "milk"]).optional(),
+  // `coerce` because these arrive as query-string text.
+  page: z.coerce
+    .number({ message: "Page must be a number" })
+    .int()
+    .min(1, { message: "Page must be at least 1" })
+    .default(1),
+  limit: z.coerce
+    .number({ message: "Limit must be a number" })
+    .int()
+    .min(1, { message: "Limit must be at least 1" })
+    .max(100, { message: "Limit cannot exceed 100" })
+    .default(10),
+});
+
+export type UnifiedSaleListQuery = z.infer<typeof unifiedSaleListQuerySchema>;
