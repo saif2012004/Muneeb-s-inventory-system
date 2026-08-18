@@ -2313,7 +2313,7 @@ of Pepsi and Coke Cola). **The owner prices what he stocks and deactivates the r
 handover step as stock counts and shop details. The four flavourless `Gourmet <size>` rows are left
 exactly as they were.
 
-#### `[ ]` **20. Per-product sales visibility in reporting**
+#### `[x]` **20. Per-product sales visibility in reporting — COMPLETE 2026-08-14**
 
 Reports currently answer "how much did Beverages sell". The owner also needs **each product's units
 sold**, not just per-category — and **milk shown as its own line**.
@@ -2362,7 +2362,14 @@ RLS makes those grants useless for reading rows, so this is **not** a leak — b
 PostgREST surface still exists. Restricting the exposed schemas or disabling the Data API is
 pending the owner's call; it would not affect Prisma, which never goes through PostgREST.
 
-#### `[ ]` **16. Two applied migrations are UNTRACKED in git — found 2026-08-11**
+#### `[x]` **16. Untracked migrations — CLOSED. All 12 are in git (verified 2026-08-18)**
+
+Both of the directories this item named are committed, along with every migration since. Confirmed
+with `git ls-files prisma/migrations`, which lists all 12 — so a fresh clone builds the same database
+this one has, which is the property the item existed to protect.
+
+<details>
+<summary>Original item</summary>
 
 ```
 ?? prisma/migrations/20260809180000_unify_sale_tables_part_a/
@@ -2377,6 +2384,8 @@ on a new environment would build a database missing the unified `Sale` tables an
 The second is part of the uncommitted item #9 change set and goes in with it. The first has been
 untracked since 2026-08-09. **Commit both.** Also worth running `npx prisma migrate status` once
 after, to confirm git and `_prisma_migrations` agree.
+
+</details>
 
 ---
 
