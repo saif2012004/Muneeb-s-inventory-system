@@ -18,9 +18,10 @@ is code:
 
 | | What | Whose job |
 |---|---|---|
-| 🔴 | **The data reset** — the database still holds the working set this was built against | Ours to run, ONCE, with his confirmed delete set — CHECKLIST #2 |
+| ✅ | ~~The data reset~~ — **DONE 2026-08-19.** All transactional history cleared; catalog, settings and login kept | closed — CHECKLIST #2 |
 | 🔴 | **Vercel Pro + Supabase Pro** — Hobby FORBIDS commercial use and the free Supabase tier keeps ZERO backups | A billing action at handover — CHECKLIST #3 |
-| 🟡 | **Prices and shelf counts** — 73 of 75 products sit at Rs. 0 and stock is a placeholder | His, at handover |
+| 🟡 | **Prices and shelf counts** — 73 of 75 products sit at Rs. 0 and stock is still the seed placeholder | His, at handover |
+| 🟡 | **`prod_milk.stock` reads 4,050 L against an EMPTY delivery ledger** — see the milk-stock note | His to set, at handover |
 
 **Do not read "build complete" as "ready to hand over".** The full, current picture is in
 `REMAINING-WORK.md`.
@@ -999,11 +1000,15 @@ S9.** Milk selling moved to the unified till, and the old screen, `POST /api/mil
 through exactly two places** — the delivery bridge and a till line — which is what makes the figure
 checkable at all.
 
-**⚠️ ONE CAVEAT, AND IT IS ABOUT THE OPENING NUMBER, NOT THE ARITHMETIC.** `prod_milk.stock` started
-at 0 and the real 250 L delivery predates the bridge, so it was never added. Every movement SINCE the
-bridge is correct; the starting point is not a count of the fridge. **The owner sets the true opening
-litres at handover**, exactly as he does for every other product's shelf count (CHECKLIST #2). Until
-then the figure is a running total from zero, not an inventory.
+**⚠️ ONE CAVEAT, AND IT IS ABOUT THE OPENING NUMBER, NOT THE ARITHMETIC.** The arithmetic is sound;
+the starting point is not a count of the fridge. **The owner sets the true opening litres at
+handover**, exactly as he does for every other product's shelf count.
+
+> 🔴 **SINCE THE DATA RESET (2026-08-19) THIS IS SHARPER: `prod_milk.stock` reads 4,050 L against an
+> EMPTY delivery ledger.** The reset deleted every `MilkDelivery` but deliberately left stock alone
+> (the owner said "leave the stock as is"), so the figure the bridge had built up no longer has any
+> record behind it. **It is not inventory and nothing reconciles to it** — the till will still sell
+> against it. Fix by SETTING the real count in the catalog's inline stock editor. See CHECKLIST #2.
 
 #### The bridge's rules (all four delivery write paths)
 
@@ -1741,7 +1746,7 @@ table. Phase 8 is polish; the checklist is everything that must be true at hando
 | | Blocker | Status | Full item |
 |---|---|---|---|
 | ✅ | **Login POST-only security fix.** ~~With JS absent the form submits GET and puts the owner's email and password in the URL.~~ Fixed and verified with JavaScript disabled on 2026-08-10. **No longer blocks go-live or Phase 8.** | `[x]` closed | CHECKLIST #1 |
-| 🔴 | **Data reset before go-live.** The owner must start on a database holding only his own real records, not the working set this was built against. Once, deliberately, with the delete set confirmed first. *(The other half of this row — his real shop details in Settings — was DONE on 2026-08-19: `configuredAt` is non-NULL and the shop is "Mateen Traders".)* | `[ ]` open | CHECKLIST #2 |
+| ✅ | ~~**Data reset before go-live.**~~ **DONE 2026-08-19** — 10 sales, 14 line items, 3 customers, 2 farmers, 3 deliveries and 4 purchases deleted in one transaction against a freshly verified backup. Catalog, settings and owner login kept and confirmed intact. Shop details were already set. | `[x]` closed | CHECKLIST #2 |
 
 (The other go-live blocker — the Vercel Pro / Supabase backup upgrade, CHECKLIST #3 — is not
 duplicated here: it is a billing action at handoff rather than something that can be silently
@@ -1942,8 +1947,8 @@ development work:
 
 | | Item | |
 |---|---|---|
-| 🔴 | **#2** data reset | **BLOCKS GO-LIVE** — ours to run, with his confirmed delete set |
-| 🔴 | **#3** Vercel Pro + Supabase Pro | **BLOCKS GO-LIVE** — a billing action |
+| ✅ | ~~**#2** data reset~~ | **CLOSED 2026-08-19** |
+| 🔴 | **#3** Vercel Pro + Supabase Pro | **THE LAST GO-LIVE BLOCKER** — a billing action |
 | 🟡 | **#13** on-device check on a real phone | the last untested surface |
 | ⚪ | **#15** Supabase Data API surface | the owner's decision, not a leak |
 
@@ -1977,51 +1982,58 @@ read `http://localhost:3000/beverages` with no credentials anywhere. Wrong passw
 re-verified unchanged (still `/api/auth/callback/credentials`, no console errors, bad password
 rejected in place, good password lands on `/`).
 
-#### `[ ]` **2. [BLOCKS GO-LIVE] One deliberate data reset before go-live**
+#### `[x]` **2. Data reset — DONE 2026-08-19. No longer blocks go-live.**
 
-**Status:** open. **Do it ONCE, at handoff — never incrementally.** Piecemeal cleanup is how a row
-that turned out to matter gets lost; every verification pass so far has been `ZZ_TEST_`-scoped
-precisely so this can be a single decision at the end.
+**Run once, deliberately, with the delete set confirmed by the owner first** — exactly as this item
+always demanded. `scripts/data-reset.ts` is the implementation; it **dry-runs by default** and only
+writes with `--confirm`, because a script whose destructive path is the one you get by typing its
+name is a script that eventually runs by accident.
 
-The owner should start on a database holding only his own real records, not the working set that
-accumulated while the app was built.
+**Deleted** (one transaction, so a half-applied reset could not leave orphaned money):
 
-**Decide explicitly what survives:** the owner account, the catalog (categories, sub-categories,
-products) with real prices, and real customers/farmers — versus everything transactional (sales,
-deliveries, purchases, payments), which almost certainly should not.
+| Table | rows |
+|---|---|
+| `Sale` | 10 |
+| `SaleItem` | 14 (cascade) |
+| `Customer` | 3 |
+| `CustomerPayment` | 0 |
+| `Farmer` | 2 |
+| `MilkDelivery` | 3 |
+| `FarmerPurchase` | 4 |
 
-**Stock is the subtle one.** Products still carry the seed's placeholder count, which is not a real
-number. The reset is the moment the owner walks the shelf and enters actual figures — **his task,
-not a figure for us to invent.** The same goes for price: **73 of the 75 products are still at
-Rs. 0**, because the S8 seed created the multi-unit matrix at zero for him to price.
+**Kept, and verified kept rather than assumed:** `User` 1 · `Settings` 1 · `Category` 3 ·
+`SubCategory` 20 · `Product` 75 · `ProductUnit` 60. The script asserts this itself and prints
+`🔴 CATALOG CHANGED` if any of those counts moved.
 
-**Confirm the exact delete set with the owner before running it**, the same way the 36-variant
-delete and every other destructive step here was confirmed.
+**The backup that made it safe:** `E:/Carreer_efforts/pre-reset-backup8-20260819-1635.sql`, verified
+**BY CONTENTS** — ends with `-- PostgreSQL database dump complete`, contains "Mateen Traders" and the
+owner's login row, carries no `DROP`/`TRUNCATE`, and its `COPY` counts matched live exactly.
 
-> ⚠️ **COUNT THE ENVIRONMENT YOU ARE ACTUALLY HANDING OVER, THE DAY YOU DO IT.** The figures below
-> were true on **2026-08-19**, in the Mumbai database the `.env` points at. **They will not be true
-> when you read this** — the app is live and in use.
->
-> | | rows |
-> |---|---|
-> | `Sale` | **10** |
-> | `SaleItem` | **14** |
-> | `Customer` | **3** |
-> | `CustomerPayment` | 0 |
-> | `Farmer` | **2** |
-> | `MilkDelivery` | **3** |
-> | `FarmerPurchase` | **4** |
-> | `Product` | **75** (73 at Rs. 0) |
->
-> ⚠️ **This table replaced one that had gone badly stale** — it still listed `BakerySale`,
-> `MilkSale` and `BeverageSale`, three tables Migration B **dropped on 2026-08-18**, and put `Sale`
-> at 2 when it now holds 10. A delete set sized from those numbers would have been written against
-> a database that no longer exists. **Re-run the counts; do not trust this table either.**
->
-> The mixture is the whole difficulty: some of these rows are the owner's genuine records (the
-> farmer ledger especially — that is real money owed) and some are ours from building and testing.
-> **Nobody but the owner can tell you which is which.** Go through it with him row by row before
-> deleting anything.
+> ⚠️ **Every pre-existing backup was STALE and would have been the wrong safety net.** `backup7.sql`,
+> taken the same day, held 5 sales and 1 customer against a live database of 10 and 3 — the owner had
+> kept using the app after it was taken. **Take a fresh dump immediately before the reset and compare
+> its row counts to live; do not reach for the most recent file on disk.**
+
+**Verified after:** every screen renders its empty state cleanly with no console errors — dashboard
+"No sales recorded today yet", `/sales` "No sales yet", `/customers` "No customers yet", `/milk`
+"No farmers yet", `/reports` all Rs. 0. `getTotalOutstanding()` and `getAllFarmerTotals()` return 0
+on an empty database rather than throwing.
+
+**Stock and prices were LEFT AS THEY WERE, at the owner's explicit instruction** ("leave the stock as
+is"). So 73 of 75 products remain at Rs. 0, two carry test prices (Big Apple 0.5L at 120, 7Up 0.5L at
+250), and every product keeps the seed placeholder of 100. The script has `--zero-stock` and
+`--zero-prices` flags if that is ever wanted; neither was used.
+
+##### 🔴 ONE LOOSE END THE RESET CREATED: `prod_milk.stock` is 4,050 L with an EMPTY ledger
+
+Milk stock is **derived** — deliveries add to it, sales subtract. The reset deleted every delivery
+but left the stock figure alone, so the catalog now claims 4,050 litres that no record accounts for.
+The till will happily sell them.
+
+This is not a bug in the bridge; it is the consequence of clearing the ledger without clearing the
+figure it had produced. **The owner sets the true opening litres at handover**, the same as every
+other shelf count — the escape hatch is the catalog's inline stock editor, which SETS the value
+outright. Until he does, treat that number as meaningless rather than as inventory.
 
 #### `[x]` **2b. Owner's real shop details — DONE 2026-08-19. No longer blocks go-live.**
 

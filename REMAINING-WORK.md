@@ -9,45 +9,38 @@ development work left — only the sitting where the owner's real data replaces 
 plan changes. `CLAUDE.md` remains the source of truth for how the codebase works and for the safety
 rules; this file is what is left to *do*.
 
-> ⚠️ **"Build complete" is NOT "ready to hand over."** Two of the items below block go-live
-> outright, and one of them is a terms-of-service problem, not a nice-to-have.
+> ⚠️ **"Build complete" is NOT "ready to hand over."** The data reset is now done, so **one blocker
+> is left — the Pro upgrades — and it is a terms-of-service problem, not a nice-to-have.**
 
 ---
 
 ## 1. WHAT IS LEFT — all of it, honestly
 
-### 🔴 1a. The data reset — **BLOCKS GO-LIVE** (CHECKLIST #2)
+*(1a is closed; kept in place as the record of what was deleted and what was kept.)*
 
-The database still holds the working set this app was built against, mixed in with the owner's
-genuine records. He must start on a database holding only his own.
+### ✅ 1a. The data reset — **DONE 2026-08-19**
 
-**Counted 2026-08-19, in the Mumbai database `.env` points at:**
+Run once, deliberately, against a freshly verified backup, with the delete set confirmed first.
 
-| Table | rows |
-|---|---|
-| `Sale` | 10 |
-| `SaleItem` | 14 |
-| `Customer` | 3 |
-| `CustomerPayment` | 0 |
-| `Farmer` | 2 |
-| `MilkDelivery` | 3 |
-| `FarmerPurchase` | 4 |
-| `Product` | 75 (73 still at Rs. 0) |
+**Deleted in one transaction:** `Sale` 10 · `SaleItem` 14 (cascade) · `Customer` 3 ·
+`CustomerPayment` 0 · `Farmer` 2 · `MilkDelivery` 3 · `FarmerPurchase` 4.
 
-⚠️ **Re-count these the day you do it.** The app is live and in use, so these are a snapshot, not a
-specification. The version of this table that lived here before listed three tables Migration B had
-already dropped — a delete set sized from it would have targeted a database that no longer existed.
+**Kept and verified intact:** owner login · Settings ("Mateen Traders") · 3 categories ·
+20 sub-categories · 75 products · 60 product units.
 
-**The difficulty is that the rows are MIXED.** Some are the owner's real records — the farmer ledger
-especially, which is genuine money owed — and some are ours from building and testing. **Nobody but
-the owner can tell you which is which.** Go through it with him row by row.
+**Backup:** `E:/Carreer_efforts/pre-reset-backup8-20260819-1635.sql`, verified BY CONTENTS.
 
-**Do it ONCE, deliberately, with the delete set confirmed first.** Piecemeal cleanup is how a row
-that turned out to matter gets lost.
+> ⚠️ **The lesson worth keeping: every backup already on disk was STALE.** `backup7.sql`, from the
+> same day, held 5 sales and 1 customer against a live database of 10 and 3 — the app had been used
+> since. **Take a fresh dump immediately before any destructive step and compare its counts to live.**
 
-**What to decide explicitly:** the owner account, the catalog, and real customers/farmers almost
-certainly survive; everything transactional almost certainly does not. *Almost* is doing real work
-in that sentence — confirm it, do not assume it.
+The tool is `scripts/data-reset.ts`. It **dry-runs by default**; `--confirm` is required to write,
+and `--zero-stock` / `--zero-prices` exist but were not used.
+
+**🔴 One loose end it created:** `prod_milk.stock` still reads **4,050 L** although every delivery
+behind that figure is now deleted. Milk stock is derived, so the number no longer reconciles to
+anything, and the till will still sell against it. **Set the real count in the catalog's inline stock
+editor at handover.**
 
 ### 🔴 1b. Vercel Pro + Supabase Pro — **BLOCKS GO-LIVE** (CHECKLIST #3)
 
@@ -67,9 +60,9 @@ weekly verified `pg_dump`. Pro is the better answer.
 - **73 of 75 products are at Rs. 0.** The S8 seed created the multi-unit matrix (47 new beverage
   products) at zero deliberately, for him to price. **He prices what he stocks and deactivates the
   rest.**
-- **Stock is a placeholder on every product.** The reset is the moment he walks the shelf and enters
-  real counts. **Milk is the exception** — its stock is derived (deliveries add, sales subtract) —
-  but its opening figure was never a count of the fridge, so he sets that too.
+- **Stock is still the seed placeholder of 100 on every product.** He said to leave it as-is through
+  the reset, so entering real shelf counts is now entirely a handover task. **Milk is the sharpest
+  case**: `prod_milk.stock` reads 4,050 L with no deliveries behind it at all (see 1a).
 - **Cooling charges are unset.** No product carries one, so no chill toggle appears anywhere yet.
 
 ### 🟡 1d. On-device check on a real phone (CHECKLIST #13)
