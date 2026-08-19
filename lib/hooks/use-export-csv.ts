@@ -88,7 +88,15 @@ export function useExportCSV() {
       // type rather than status alone, so an unexpected HTML error page from a
       // proxy is also caught instead of being saved as a spreadsheet.
       const contentType = response.headers.get("Content-Type") ?? "";
-      if (!response.ok || !contentType.includes("text/csv")) {
+      /**
+       * Two acceptable shapes now: CSV for the row dumps, and a real .xlsx
+       * workbook for the farmer statement — which needs formatting CSV cannot
+       * carry (see lib/milk-statement-xlsx.ts). Anything else is an error page.
+       */
+      const isFile =
+        contentType.includes("text/csv") ||
+        contentType.includes("spreadsheetml.sheet");
+      if (!response.ok || !isFile) {
         let message = "Couldn't build the export.";
         try {
           const envelope = (await response.json()) as { error?: string };

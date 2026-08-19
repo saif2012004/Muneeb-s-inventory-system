@@ -1,15 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { fail, requireOwner, serverError } from "@/lib/api";
-import {
-  csvAttachmentHeader,
-  toCsv,
-  toSectionedCsv,
-  type CsvValue,
-} from "@/lib/csv";
+import { csvAttachmentHeader, toCsv, type CsvValue } from "@/lib/csv";
 import { endOfKarachiDay, formatDate, startOfKarachiDay } from "@/lib/format";
 import { getFarmerBalances } from "@/lib/milk";
 import { getFarmerStatement } from "@/lib/milk-statement";
+import { buildFarmerStatementWorkbook } from "@/lib/milk-statement-xlsx";
 import { prisma } from "@/lib/prisma";
 import { getCustomerBalances, unifiedSaleModules } from "@/lib/receivables";
 import { getProductSales } from "@/lib/reports";
@@ -149,6 +145,23 @@ export async function GET(request: Request): Promise<NextResponse> {
     if ("error" in result) return fail(result.error, result.status);
 
     const stamp = new Date().toISOString().slice(0, 10);
+
+    // An export is a point-in-time snapshot; never let one be reused.
+    const common = { "Cache-Control": "no-store" } as const;
+
+    // A real workbook — binary, and the only branch that is not text.
+    if ("workbook" in result) {
+      return new NextResponse(new Uint8Array(result.workbook), {
+        status: 200,
+        headers: {
+          ...common,
+          "Content-Type":
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": csvAttachmentHeader(result.filename),
+        },
+      });
+    }
+
     const csv = "csv" in result ? result.csv : toCsv(result.headers, result.rows);
     const filename =
       "filename" in result ? result.filename : `${type}_${stamp}.csv`;
@@ -156,10 +169,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     return new NextResponse(csv, {
       status: 200,
       headers: {
+        ...common,
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": csvAttachmentHeader(filename),
-        // An export is a point-in-time snapshot; never let one be reused.
-        "Cache-Control": "no-store",
       },
     });
   } catch (error) {
@@ -177,7 +189,14 @@ export async function GET(request: Request): Promise<NextResponse> {
  */
 type ExportResult =
   | { headers: string[]; rows: CsvValue[][] }
-  | { csv: string; filename: string };
+  | { csv: string; filename: string }
+  /**
+   * A real .xlsx workbook. Only the farmer statement uses this: it is a
+   * DOCUMENT handed to a farmer settling a balance, so it needs bold headings,
+   * sized columns and money formatting — none of which CSV can express. The row
+   * dumps stay CSV, which is the right shape for sorting and pivoting.
+   */
+  | { workbook: Buffer; filename: string };
 
 async function buildExport(
   type: ExportType,
@@ -330,103 +349,13 @@ async function buildExport(
         return { error: "That farmer no longer exists.", status: 404 };
       }
 
-      const { farmer, deliveries, purchases, totals } = statement;
-      const period =
-        window && statement.period.from && statement.period.to
-          ? `${formatDate(statement.period.from)} to ${formatDate(
-              new Date(window.lt.getTime() - 1)
-            )}`
-          : "All time";
-
-      const csv = toSectionedCsv([
-        {
-          title: "Farmer statement",
-          rows: [
-            ["Farmer", farmer.name],
-            ["Phone", farmer.phone],
-            ["Status", farmer.isActive ? "Active" : "Retired"],
-            ["Period", period],
-            ["Generated", formatDate(new Date())],
-          ],
-        },
-        {
-          title: "Milk delivered",
-          headers: [
-            "Date",
-            "Morning (L)",
-            "Evening (L)",
-            "Total Litres",
-            "Rate Per Litre",
-            "Amount",
-          ],
-          rows: [
-            ...deliveries.map((d) => [
-              formatDate(d.date),
-              // A session that did not happen prints blank, never 0 — see the
-              // note on StatementDelivery.
-              d.morningLiters,
-              d.eveningLiters,
-              d.totalLiters,
-              d.ratePerLiter,
-              d.amount,
-            ]),
-            deliveries.length === 0
-              ? ["No deliveries in this period", null, null, null, null, null]
-              : ["Total", null, null, totals.litres, null, totals.milkValue],
-          ],
-        },
-        {
-          title: "Purchases",
-          headers: ["Date", "Item", "Amount"],
-          rows: [
-            ...purchases.map((p) => [
-              formatDate(p.date),
-              // "Cash" when money was handed over rather than goods — the
-              // owner's instruction. His own wording is kept otherwise.
-              p.isCash ? "Cash" : p.item,
-              p.amount,
-            ]),
-            purchases.length === 0
-              ? ["No purchases in this period", null, null]
-              : ["Total", null, totals.purchases],
-          ],
-        },
-        {
-          title: "Summary",
-          rows: [
-            ["Milk value (this period)", totals.milkValue],
-            ["Purchases (this period)", totals.purchases],
-            ["Net for this period", totals.netForPeriod],
-            [
-              "Direction",
-              totals.netForPeriod > 0
-                ? "You owe the farmer"
-                : totals.netForPeriod < 0
-                  ? "The farmer owes you"
-                  : "Settled",
-            ],
-            [],
-            /**
-             * BOTH figures, labelled. The period net is not the balance — if the
-             * range starts partway through the relationship they can differ by
-             * any amount, and a farmer reading one number has no way to tell
-             * which he is holding.
-             */
-            ["All-time balance (not just this period)", statement.allTimeNetBalance],
-            [
-              "All-time direction",
-              statement.allTimeNetBalance > 0
-                ? "You owe the farmer"
-                : statement.allTimeNetBalance < 0
-                  ? "The farmer owes you"
-                  : "Settled",
-            ],
-          ],
-        },
-      ]);
-
+      // Layout and formatting live in the workbook builder — this route's job
+      // ends at loading the data and naming the file.
       const stamp = new Date().toISOString().slice(0, 10);
-      return { csv, filename: `statement_${farmer.name}_${stamp}.csv` };
+      return {
+        workbook: await buildFarmerStatementWorkbook(statement),
+        filename: `statement_${statement.farmer.name}_${stamp}.xlsx`,
+      };
     }
 
     case "farmer_balances": {

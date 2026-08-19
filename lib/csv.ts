@@ -79,43 +79,16 @@ export function csvAttachmentHeader(filename: string): string {
   return `attachment; filename="${safe}"`;
 }
 
+
 /**
- * A CSV made of TITLED SECTIONS, separated by blank lines.
+ * ⚠️ `toSectionedCsv` was here and is GONE (2026-08-19).
  *
- * `toCsv` renders one table with one header row, which is right for a row dump.
- * A farmer statement is not a row dump: it is a heading block, a deliveries
- * table, a purchases table and a summary, and flattening those into one grid
- * with a "Section" column would make the spreadsheet harder to read than the
- * screen it came from.
+ * It rendered the farmer statement as titled CSV blocks. The owner's verdict on
+ * the result was fair — "no columns spaced properly, all the text is same" —
+ * and that is not a bug in the renderer, it is what CSV is: plain text with no
+ * font, weight, colour, width or number format.
  *
- * Excel and LibreOffice both handle blank lines and ragged rows inside a CSV —
- * they simply leave the cells empty — so this stays a plain `.csv` the owner can
- * open by double-clicking, with no library and no `.xlsx` writer.
- *
- * The UTF-8 BOM leads the file, exactly as `toCsv` does it: without it Excel
- * mis-decodes non-ASCII names.
+ * The statement is now a real `.xlsx` (`lib/milk-statement-xlsx.ts`). If another
+ * multi-section DOCUMENT is ever needed, build a workbook — do not bring this
+ * back and expect it to look like one.
  */
-export type CsvSection = {
-  /** Rendered as its own row above the block. Omit for an untitled block. */
-  title?: string;
-  /** Column headers for this block, if it has any. */
-  headers?: string[];
-  rows: CsvValue[][];
-};
-
-export function toSectionedCsv(sections: CsvSection[]): string {
-  const lines: string[] = [];
-
-  sections.forEach((section, index) => {
-    // One blank line BETWEEN blocks, never a trailing one — a stray empty row
-    // at the end of a spreadsheet reads as a missing record.
-    if (index > 0) lines.push("");
-    if (section.title) lines.push(csvField(section.title));
-    if (section.headers) lines.push(section.headers.map(csvField).join(","));
-    for (const row of section.rows) {
-      lines.push(row.map(csvField).join(","));
-    }
-  });
-
-  return `\ufeff${lines.join("\r\n")}\r\n`;
-}
