@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { fail, requireOwner, serverError } from "@/lib/api";
-import { csvAttachmentHeader, toCsv, type CsvValue } from "@/lib/csv";
+import {
+  csvAttachmentHeader,
+  toCsv,
+  toSectionedCsv,
+  type CsvValue,
+} from "@/lib/csv";
 import { endOfKarachiDay, formatDate, startOfKarachiDay } from "@/lib/format";
 import { getFarmerBalances } from "@/lib/milk";
+import { getFarmerStatement } from "@/lib/milk-statement";
 import { prisma } from "@/lib/prisma";
 import { getCustomerBalances, unifiedSaleModules } from "@/lib/receivables";
 import { getProductSales } from "@/lib/reports";
@@ -62,6 +68,13 @@ const EXPORT_TYPES = [
    */
   "sales",
   "product_sales",
+  /**
+   * ONE FARMER, ONE DATE RANGE — the statement the owner hands to a farmer.
+   *
+   * Unlike every other type here it REQUIRES `farmerId`, and unlike the row
+   * dumps it renders its own sectioned document rather than one flat table.
+   */
+  "farmer_statement",
 ] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
@@ -108,6 +121,8 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     const dateFrom = searchParams.get("dateFrom")?.trim();
     const dateTo = searchParams.get("dateTo")?.trim();
+    // Only `farmer_statement` reads this; every other type ignores it.
+    const farmerId = searchParams.get("farmerId")?.trim() || undefined;
 
     let window: { gte: Date; lt: Date } | undefined;
     if (!IGNORES_DATE_RANGE.has(type) && (dateFrom || dateTo)) {
@@ -125,15 +140,24 @@ export async function GET(request: Request): Promise<NextResponse> {
       window = { gte, lt };
     }
 
-    const { headers, rows } = await buildExport(type, window);
-    const csv = toCsv(headers, rows);
+    const result = await buildExport(type, window, farmerId);
+
+    // A builder can refuse — a statement with no farmer chosen, or a farmer that
+    // no longer exists. Those are 400/404 in the { data, error } envelope, NOT a
+    // CSV: `useExportCSV` checks the content type before saving, so an error
+    // written as a file would land on disk as a .csv full of JSON.
+    if ("error" in result) return fail(result.error, result.status);
 
     const stamp = new Date().toISOString().slice(0, 10);
+    const csv = "csv" in result ? result.csv : toCsv(result.headers, result.rows);
+    const filename =
+      "filename" in result ? result.filename : `${type}_${stamp}.csv`;
+
     return new NextResponse(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": csvAttachmentHeader(`${type}_${stamp}.csv`),
+        "Content-Disposition": csvAttachmentHeader(filename),
         // An export is a point-in-time snapshot; never let one be reused.
         "Cache-Control": "no-store",
       },
@@ -143,10 +167,23 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 }
 
+/**
+ * What a builder produces.
+ *
+ * Most exports are a single table and return `{ headers, rows }`. The farmer
+ * statement renders its own multi-section document, so it returns a finished
+ * `csv` string plus the filename it wants — the generic `type_date.csv` would
+ * lose the one thing that identifies it, which farmer it is for.
+ */
+type ExportResult =
+  | { headers: string[]; rows: CsvValue[][] }
+  | { csv: string; filename: string };
+
 async function buildExport(
   type: ExportType,
-  window: { gte: Date; lt: Date } | undefined
-): Promise<{ headers: string[]; rows: CsvValue[][] }> {
+  window: { gte: Date; lt: Date } | undefined,
+  farmerId: string | undefined
+): Promise<ExportResult | { error: string; status: number }> {
   switch (type) {
     case "milk_deliveries": {
       const deliveries = await prisma.milkDelivery.findMany({
@@ -278,6 +315,118 @@ async function buildExport(
           row.revenue,
         ]),
       };
+    }
+
+    /**
+     * THE FARMER STATEMENT. Deliveries and purchases for one farmer over one
+     * date range, sorted by date, with the totals the owner asked for.
+     */
+    case "farmer_statement": {
+      if (!farmerId) {
+        return { error: "Choose a farmer for the statement.", status: 400 };
+      }
+      const statement = await getFarmerStatement(farmerId, window);
+      if (!statement) {
+        return { error: "That farmer no longer exists.", status: 404 };
+      }
+
+      const { farmer, deliveries, purchases, totals } = statement;
+      const period =
+        window && statement.period.from && statement.period.to
+          ? `${formatDate(statement.period.from)} to ${formatDate(
+              new Date(window.lt.getTime() - 1)
+            )}`
+          : "All time";
+
+      const csv = toSectionedCsv([
+        {
+          title: "Farmer statement",
+          rows: [
+            ["Farmer", farmer.name],
+            ["Phone", farmer.phone],
+            ["Status", farmer.isActive ? "Active" : "Retired"],
+            ["Period", period],
+            ["Generated", formatDate(new Date())],
+          ],
+        },
+        {
+          title: "Milk delivered",
+          headers: [
+            "Date",
+            "Morning (L)",
+            "Evening (L)",
+            "Total Litres",
+            "Rate Per Litre",
+            "Amount",
+          ],
+          rows: [
+            ...deliveries.map((d) => [
+              formatDate(d.date),
+              // A session that did not happen prints blank, never 0 — see the
+              // note on StatementDelivery.
+              d.morningLiters,
+              d.eveningLiters,
+              d.totalLiters,
+              d.ratePerLiter,
+              d.amount,
+            ]),
+            deliveries.length === 0
+              ? ["No deliveries in this period", null, null, null, null, null]
+              : ["Total", null, null, totals.litres, null, totals.milkValue],
+          ],
+        },
+        {
+          title: "Purchases",
+          headers: ["Date", "Item", "Amount"],
+          rows: [
+            ...purchases.map((p) => [
+              formatDate(p.date),
+              // "Cash" when money was handed over rather than goods — the
+              // owner's instruction. His own wording is kept otherwise.
+              p.isCash ? "Cash" : p.item,
+              p.amount,
+            ]),
+            purchases.length === 0
+              ? ["No purchases in this period", null, null]
+              : ["Total", null, totals.purchases],
+          ],
+        },
+        {
+          title: "Summary",
+          rows: [
+            ["Milk value (this period)", totals.milkValue],
+            ["Purchases (this period)", totals.purchases],
+            ["Net for this period", totals.netForPeriod],
+            [
+              "Direction",
+              totals.netForPeriod > 0
+                ? "You owe the farmer"
+                : totals.netForPeriod < 0
+                  ? "The farmer owes you"
+                  : "Settled",
+            ],
+            [],
+            /**
+             * BOTH figures, labelled. The period net is not the balance — if the
+             * range starts partway through the relationship they can differ by
+             * any amount, and a farmer reading one number has no way to tell
+             * which he is holding.
+             */
+            ["All-time balance (not just this period)", statement.allTimeNetBalance],
+            [
+              "All-time direction",
+              statement.allTimeNetBalance > 0
+                ? "You owe the farmer"
+                : statement.allTimeNetBalance < 0
+                  ? "The farmer owes you"
+                  : "Settled",
+            ],
+          ],
+        },
+      ]);
+
+      const stamp = new Date().toISOString().slice(0, 10);
+      return { csv, filename: `statement_${farmer.name}_${stamp}.csv` };
     }
 
     case "farmer_balances": {

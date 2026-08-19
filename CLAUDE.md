@@ -474,6 +474,10 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
   /modules.ts             → MODULE_CATEGORIES (beverages | bakery | milk) → Category
   /milk.ts                → FARMER side only: deliveries, purchases, balances, ledger
                             (`lib/milk-sales.ts` went with the MilkSale table in S9)
+  /milk-statement.ts      → ONE farmer over ONE date range, for the spreadsheet
+                            the owner hands over. Carries the period net AND the
+                            all-time balance, labelled — they are different
+                            numbers and a farmer cannot tell which he is holding
   /milk-stock.ts          → the DELIVERY-TO-STOCK BRIDGE
   /receivables.ts         → THE customer balance calculation
 /prisma

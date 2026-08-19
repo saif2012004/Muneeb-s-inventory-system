@@ -35,7 +35,9 @@ export type ExportType =
   // S6: the unified bill, and per-product units sold (#20) with milk on its
   // own line.
   | "sales"
-  | "product_sales";
+  | "product_sales"
+  /** One farmer, one date range — deliveries and purchases. Needs `farmerId`. */
+  | "farmer_statement";
 
 export type ExportOptions = {
   type: ExportType;
@@ -44,6 +46,8 @@ export type ExportOptions = {
   dateTo?: string;
   /** Overrides the server-suggested filename. */
   filename?: string;
+  /** Required by `farmer_statement`; ignored by every other type. */
+  farmerId?: string;
 };
 
 export function useExportCSV() {
@@ -58,6 +62,7 @@ export function useExportCSV() {
       params.set("dateFrom", options.dateFrom);
       params.set("dateTo", options.dateTo);
     }
+    if (options.farmerId) params.set("farmerId", options.farmerId);
 
     let objectUrl: string | null = null;
 

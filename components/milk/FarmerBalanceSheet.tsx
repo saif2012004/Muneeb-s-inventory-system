@@ -6,7 +6,7 @@ import Link from "next/link";
 
 import { AnimatedMoney } from "@/components/shared/AnimatedMoney";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { ExportCsvButton } from "@/components/shared/ExportCsvButton";
+import { FarmerStatementDialog } from "@/components/milk/FarmerStatementDialog";
 import { MoneyText } from "@/components/shared/MoneyText";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Badge } from "@/components/ui/badge";
@@ -149,7 +149,14 @@ export function FarmerBalanceSheet() {
         title="Balance sheet"
         accent="emerald"
         description="What you owe every farmer, biggest first."
-        action={<ExportCsvButton type="farmer_balances" label="Export" />}
+        /**
+         * WAS a plain `farmer_balances` CSV — every farmer, one row each, no
+         * dates and no detail. That answers "what do I owe everyone", which
+         * this screen already shows on screen. It is now the statement: one
+         * farmer, a date range, and the deliveries and purchases behind the
+         * number. See FarmerStatementDialog.
+         */
+        action={<FarmerStatementDialog farmers={farmers} />}
       />
     </>
   );
