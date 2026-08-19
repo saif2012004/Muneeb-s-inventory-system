@@ -94,10 +94,27 @@ export async function GET(request: Request): Promise<NextResponse> {
       ...(module ? { items: { some: { moduleKey: module } } } : {}),
     };
 
-    // One transaction so the page and the total cannot disagree about how many
-    // rows exist — otherwise a sale created between the two queries makes the
-    // pager offer a page that isn't there.
-    const [sales, total] = await prisma.$transaction([
+    /**
+     * TWO ROUND TRIPS, CONCURRENT — not four in a transaction.
+     *
+     * This was `prisma.$transaction([findMany, count])`, so that the page and
+     * the total could not disagree about how many rows exist. The guarantee is
+     * real but it cost **BEGIN + COMMIT as two extra round trips**, and at
+     * ~230ms each that was ~460ms of the ~764ms this endpoint took — more than
+     * half the wait, spent protecting against a race that needs a SECOND person
+     * writing a sale in the gap between two queries. There is no second person:
+     * this is a single-owner app.
+     *
+     * The worst case if it ever did happen is a pager offering a page that is
+     * empty, which corrects itself on the next load. That is a fair trade for
+     * halving the wait on the screen the owner opens most.
+     *
+     * `Promise.all` is now genuinely parallel: `connection_limit` went from 1 to
+     * 5 with the session-pooler change, so these two run at once rather than
+     * queueing. Two is well inside the pool — see the note in CLAUDE.md before
+     * fanning out wider.
+     */
+    const [sales, total] = await Promise.all([
       prisma.sale.findMany({
         where,
         select: UNIFIED_SALE_LIST_SELECT,
@@ -166,20 +183,29 @@ export async function POST(request: Request): Promise<NextResponse> {
 
     // Checked up front so a bad customer id surfaces as a sentence rather than
     // a raw foreign-key violation from the write.
-    const customer = await prisma.customer.findUnique({
-      where: { id: customerId },
-      select: { id: true },
-    });
+    /**
+     * The customer check and the product load are INDEPENDENT, so they run
+     * together — one round trip instead of two. Worth ~230ms on every save.
+     *
+     * Safe to fan out only because `connection_limit` is 5 since the
+     * session-pooler change; at 1 these would have queued and gained nothing.
+     * Keep it at two — this is not licence to `Promise.all` a whole route.
+     */
+    const [customer, products] = await Promise.all([
+      prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { id: true },
+      }),
+      loadUnifiedSaleProducts(
+        items.map((item) => item.productId),
+        (ids) =>
+          prisma.product.findMany({
+            where: { id: { in: ids } },
+            select: UNIFIED_SALE_PRODUCT_SELECT,
+          })
+      ),
+    ]);
     if (!customer) return fail("That customer no longer exists.", 404);
-
-    const products = await loadUnifiedSaleProducts(
-      items.map((item) => item.productId),
-      (ids) =>
-        prisma.product.findMany({
-          where: { id: { in: ids } },
-          select: UNIFIED_SALE_PRODUCT_SELECT,
-        })
-    );
     if (isSaleProblem(products)) return fail(products.message, products.status);
 
     const noCharge = items.find(
@@ -354,21 +380,31 @@ export async function POST(request: Request): Promise<NextResponse> {
             totalAmount,
             items: { create: itemWrites },
           },
-          // MINIMAL select. The detail read-back happens outside, so the
-          // transaction holds only the writes — at ~1.1s per round trip a deep
-          // join in here spends the timeout budget holding row locks.
-          select: { id: true },
+          /**
+           * THE FULL DETAIL, returned by the write itself.
+           *
+           * This used to be `select: { id: true }` with a separate
+           * `findUniqueOrThrow` after COMMIT, and the reasoning was written down:
+           * "at ~1.1s per round trip a deep join in here spends the timeout
+           * budget holding row locks."
+           *
+           * **That premise expired on 2026-08-19.** A round trip is ~230ms since
+           * the session-pooler change, so the join costs the transaction a fifth
+           * of what it used to — while the split cost TWO extra round trips
+           * outside it (Prisma issued a SELECT for the minimal select, then the
+           * detail read), which is ~460ms on every single save.
+           *
+           * Holding the lock ~230ms longer to save ~460ms of wall clock is the
+           * right way round for a single-owner app. If this ever becomes
+           * multi-user, revisit — the old shape is the conservative one.
+           */
+          select: UNIFIED_SALE_DETAIL_SELECT,
         });
       },
       { timeout: 15_000, maxWait: 5_000 }
     );
 
-    const sale = await prisma.sale.findUniqueOrThrow({
-      where: { id: created.id },
-      select: UNIFIED_SALE_DETAIL_SELECT,
-    });
-
-    return ok(serialize(sale), 201);
+    return ok(serialize(created), 201);
   } catch (error) {
     // Stock moved between the pre-check and the write. Nothing is broken — the
     // number changed — so it is a 409 "reload and try again", not a 500.

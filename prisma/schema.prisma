@@ -3,12 +3,27 @@
 
 generator client {
   provider = "prisma-client-js"
+
+  // ⚠️ `previewFeatures = ["relationJoins"]` was tried on 2026-08-19 and REMOVED
+  // because it changed nothing. Measured, same query, same data:
+  //
+  //     default strategy        246 ms   1 query
+  //     relationLoadStrategy    237 ms   1 query
+  //
+  // Prisma 6 already collapses a nested `select` with relations into ONE
+  // statement using JSON aggregation (you can see `"Product_units"."__prisma_data__"`
+  // in the query log). The four-queries-per-product fan-out that motivated it
+  // comes from `include`, which this codebase does not use on hot paths — every
+  // sale/product read goes through an explicit `select`.
+  //
+  // Do not re-enable it hoping for a speed-up. If a future query does fan out,
+  // the first move is to convert its `include` to a `select`.
 }
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL") // pooled (Supavisor transaction mode, :6543)
-  directUrl = env("DIRECT_URL") // direct/session mode (:5432), migrations only
+  url       = env("DATABASE_URL") // Supavisor SESSION mode, :5432 (see CLAUDE.md)
+  directUrl = env("DIRECT_URL") // session mode too; migrations only
 }
 
 // ---------------------------------------------------------------------------

@@ -1371,10 +1371,29 @@ nearest region, not about moving the Vercel function.
 | 12 (one sale save) | **~2.9s — measured** |
 | 18 | ~4.1s |
 
-**A sale save is 12 round trips**, measured by logging every statement. Four of them are one
-`findMany` with `include: { subCategory: { include: { category: true } }, units: true }` — Prisma
-issues a separate query per relation level. `relationJoins` (a Prisma 6 preview feature, plus
-`relationLoadStrategy: "join"` per query) collapses those into one JOIN and is the obvious next win.
+**A sale save was 9 sequential round trips; it is 7 now** (~1.6s), measured by counting
+`prisma:query` lines in the dev log for one real save. Two cuts, both only safe AFTER the pooler
+change:
+
+- **The customer check and the product load run CONCURRENTLY.** They are independent, and
+  `connection_limit` is 5 now rather than 1, so a `Promise.all` of two is genuinely parallel instead
+  of queueing. −1 trip.
+- **The sale's create returns the full detail** instead of `select: { id: true }` plus a
+  `findUniqueOrThrow` after COMMIT. That split cost two extra round trips outside the transaction to
+  avoid holding a lock during a join — a trade priced at 1.1s per trip, which no longer holds. −2.
+
+**The sales LIST went 4 trips to 2** the same way: it was `$transaction([findMany, count])`, whose
+BEGIN and COMMIT were two of the four. 764ms → 245ms.
+
+⚠️ **`relationJoins` was tried and removed — it changed NOTHING.** Prisma 6 already collapses a
+nested `select` into one statement with JSON aggregation. The four-queries-per-product fan-out that
+motivates that flag comes from `include`, which no hot path here uses. See the note in
+`prisma/schema.prisma`; do not re-enable it hoping for a speed-up.
+
+**What is left in a save is the transaction itself** — BEGIN, the stock update, two INSERTs, the
+detail select, COMMIT. Prisma's interactive transactions cost one round trip per statement, so that
+is the floor without rewriting the write as raw SQL. **At 230ms it is ~1.6s; from Mumbai it would be
+~350ms.** The region is now the biggest remaining lever, not the query count.
 
 The old lessons still hold and are still the technique:
 
