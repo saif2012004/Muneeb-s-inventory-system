@@ -1558,10 +1558,21 @@ item 14.**
   **Fixed** by pinning `useSecureCookies` in `lib/auth.config.ts` (see the comment there);
   preview now returns 200 on gated routes with a real session. Behavioural verification is
   still primarily the local browser pass, but preview is now usable for it too.
-- **Production is deliberately a PHASE 1 BUILD.** Every route from Phases 2–7 returns 404
-  there, because only preview deploys have been run. That is by design: **production goes live
-  at client handoff, on Pro.** Do not `--prod` deploy to chase a number or to "check" something.
-  Auth itself works correctly on production (307 signed out, passes middleware signed in).
+- **Production is LIVE with the full app since 2026-08-19** — deployed at the owner's explicit
+  request. ~~Every route from Phases 2–7 returns 404 there~~ no longer true; that described the
+  state when only preview deploys had ever been run.
+
+  **Live at `https://muneeb-inventory-system.vercel.app`**, functions in `bom1` (Mumbai) beside the
+  database, PWA installable, auth gating verified (`/login` 200, `/sales` 307 signed out).
+
+  ⚠️ **Live is NOT the same as handed over.** These are still open and are what "go-live" means:
+  the data reset (#2), the owner's real shop details (#2b), and the Pro upgrades (#3 — **Hobby
+  forbids commercial use**, so the plan must change before this is a business's working tool).
+
+  **How the Vercel→Mumbai connection was verified**, since every DB-touching route needs a login:
+  the runtime errors showed `CredentialsSignin` and nothing else. That error can only be reached
+  AFTER the user lookup and password compare have run, so the database was reached — an unreachable
+  one produces `PrismaClientInitializationError` instead. A failed sign-in is a useful probe.
 
 ### Live project
 | | |
