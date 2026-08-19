@@ -2524,42 +2524,52 @@ summary said 62.5, and the owner would have to pick which of his own screens to 
 
 ### ⚪ Handoff infra
 
-#### `[~]` **14. Geography — DATABASE MOVED to Mumbai 2026-08-19. Only the function region is left.**
+#### `[x]` **14. Geography — CLOSED 2026-08-19. Database and functions are both in Mumbai.**
 
-**The database now sits in `ap-south-1` (Mumbai)**, ~1,300 km from Lahore instead of ~5,000 km to
-Seoul. Round trip **226 ms → 96 ms**, measured 20 samples warm.
+Three separate problems wore the same disguise ("queries take ~1.1s"), and all three are fixed:
 
-Both halves of the old item are now done:
+| | Was | Now |
+|---|---|---|
+| Transaction pooler overhead | ~950 ms per query | gone — session pooler on `:5432` |
+| Database region | `ap-northeast-2` Seoul, ~5,000 km | **`ap-south-1` Mumbai**, ~1,300 km |
+| Function region | `iad1` Washington DC | **`bom1` Mumbai** — `vercel.json` |
 
-| | |
-|---|---|
-| ~~Transaction pooler adding ~950 ms~~ | ✅ session pooler, 2026-08-19 |
-| ~~Database in Seoul~~ | ✅ **Mumbai, 2026-08-19** |
-| Serverless function in `iad1` (Washington DC) | ⬜ **still open — production only** |
+Round trip from the dev machine: **226 ms → 96 ms**, 20 samples warm.
 
-**How the move was done** (Supabase cannot change a project's region in place): a new project in
-`ap-south-1`, `pg_dump --schema=public --no-owner --no-privileges` from Seoul, restored with `psql`.
-14 `COPY` blocks, 191 rows, **zero errors** — dumping only `public` avoids the Supabase-internal
-schemas whose roles cannot be recreated, which is what caused the error flood in the August restore.
+##### 🔴 The function region was not optional — without it the move BACKFIRED for production
 
-**Verified by fingerprinting EVERY table on both databases and comparing** — Product, ProductUnit,
-Sale, SaleItem, MilkDelivery, FarmerPurchase, Customer, Farmer, Settings, User, Category,
-SubCategory: all twelve identical. RLS 14/14 with FORCE RLS 0. `_prisma_migrations` restored at 12
-rows with original timestamps, so `migrate status` reports "up to date" without re-applying anything.
+Washington→Seoul is ~11,000 km; Washington→**Mumbai** is ~12,500 km. Moving the database to Mumbai
+put it FURTHER from functions running in `iad1`. Local development got faster and production would
+have got slower, silently, with a green deploy.
 
-⚠️ **The documented 27-product fingerprint `b57a51bb…` is STALE and that is expected.** It includes
-`stock`, which changes on every sale, so it can only ever be a point-in-time check. It now reads
-`cb3395fe9afc47d087957f788c7b1423` because the owner priced Big Apple 0.5L and three products' stock
-moved through test sales. **For comparing two databases, fingerprint both live and diff them** — a
-frozen constant that includes mutable columns will always drift.
+**Verified by the `x-vercel-id` header on an SSR render of a preview deploy:**
 
-**What remains:**
+```
+before   bom1:iad1::iad1::…     edge PoP Mumbai, function Washington
+after    bom1::…                function Mumbai
+```
 
-1. **Vercel `DATABASE_URL` / `DIRECT_URL` still point at the OLD Seoul project on `:6543`.** Production
-   has neither the pooler fix nor the region move until those are updated.
-2. **Set the Vercel function region to `bom1`** so the function sits beside the database.
-3. **The Seoul project is still alive and is the rollback.** Delete it only after production is
-   verified on Mumbai — and take a backup first.
+`{"regions": ["bom1"]}` in `vercel.json`. **The Hobby plan accepts a single region** — no upgrade
+needed for this.
+
+⚠️ **The MIDDLEWARE is unaffected, and that is correct.** It runs on the Edge runtime, which
+`regions` does not govern, and it touches no database — precisely what the split auth config exists
+for (Gotcha 3). An `x-vercel-id` of `bom1:iad1::` on a 401 is the edge path, not the serverless
+function; measure the region on a request that actually reaches a route handler.
+
+##### Vercel env vars — updated 2026-08-19
+
+`DATABASE_URL` and `DIRECT_URL` now point at Mumbai for **both Preview and Production**.
+
+⚠️ **`vercel env rm NAME production` removes the variable from EVERY environment, not just the one
+named.** It silently took Preview with it; both had to be re-added. Check `vercel env ls` after any
+removal.
+
+⚠️ **`vercel env pull` REDACTS encrypted values** — they come back as a 13-character placeholder, so
+you cannot verify what you set by reading it back. The only real verification is a deployment.
+
+**Env vars only apply to NEW deployments.** Production keeps the old values until
+`vercel deploy --prod`.
 
 #### `[ ]` **15. Data API surface — an owner decision, not a leak**
 
