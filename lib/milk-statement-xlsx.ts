@@ -101,10 +101,12 @@ export async function buildFarmerStatementWorkbook(
   ws.mergeCells(r, 1, r, 6);
   const sub = ws.getCell(r, 1);
   sub.value = settings.shopName;
-  sub.font = { size: 11, color: { argb: "FFFFFFFF" } };
+  // Bigger and bold at the owner's request — this is the letterhead, and it is
+  // what a farmer looks for first to know whose statement he is holding.
+  sub.font = { size: 16, bold: true, color: { argb: "FFFFFFFF" } };
   sub.fill = { type: "pattern", pattern: "solid", fgColor: { argb: ZINC_900 } };
-  sub.alignment = { horizontal: "center" };
-  ws.getRow(r).height = 18;
+  sub.alignment = { horizontal: "center", vertical: "middle" };
+  ws.getRow(r).height = 24;
   r += 1;
 
   ws.mergeCells(r, 1, r, 6);

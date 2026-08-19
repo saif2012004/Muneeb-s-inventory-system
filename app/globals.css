@@ -141,6 +141,29 @@
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
 }
 
+/* The shop name — the one thing on the roll that should catch the eye first.
+   Bigger and bold, at the owner's request.
+ 
+   🔴 This is the ONLY element on the receipt allowed to leave the character
+   grid, and it can only because it is rendered from the raw shop name rather
+   than from a space-padded line (see ReceiptDocument). Every other line is
+   aligned by counting characters at 32 per line; enlarging any of them would
+   break the money columns.
+ 
+   `display: block` + `text-align: center` replaces the space padding.
+   `white-space: normal` lets a long name WRAP instead of running off the roll:
+   the field is capped at 32 characters, which at this size is wider than 58mm. */
+.receipt-shop-name {
+  display: block;
+  font-size: 1.6em;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  /* Balances the taller line against the rows beneath it. */
+  margin-bottom: 0.15em;
+}
+
 @media print {
   /* The roll: full bleed, continuous length, no driver margins. Without
      `margin: 0` most drivers add ~10mm and the 58mm content is scaled down or

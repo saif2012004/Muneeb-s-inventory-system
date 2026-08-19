@@ -220,12 +220,51 @@ export function buildReceiptLines(receipt: ReceiptData): string[] {
 }
 
 export function ReceiptDocument({ receipt }: { receipt: ReceiptData }) {
-  const text = buildReceiptLines(receipt).join("\n");
+  const lines = buildReceiptLines(receipt);
+
+  /**
+   * THE SHOP NAME IS BOLD — presentation only, and that distinction matters.
+   *
+   * `buildReceiptLines` is deliberately NOT changed to do this. It returns the
+   * exact text of the roll, and the browser verification asserts that no line it
+   * produces exceeds `RECEIPT_LINE_CHARS`; putting markup inside it would make
+   * that check meaningless. So the text is built first, and only its opening
+   * lines are wrapped for display.
+   *
+   * ⚠️ Bold is SAFE for the line budget where double-width would not be. A bold
+   * monospace glyph occupies the same cell, so 32 characters still fit — the
+   * Design System's warning that double-width halves the budget to 16 does not
+   * apply to weight.
+   *
+   * `centreLines` is called again rather than the count being hardcoded: a shop
+   * name up to the 32-character cap (CHECKLIST #2b) is one line today, but the
+   * count is derived so a wrapped name cannot silently leave half the header
+   * unbolded.
+   */
+  const nameLineCount = centreLines(receipt.settings.shopName).length;
+  const restText = lines.slice(nameLineCount).join("\n");
 
   return (
     // `receipt-paper` sizes the roll and is the ONLY thing @media print keeps.
     <pre className="receipt-paper" data-line-chars={RECEIPT_LINE_CHARS}>
-      {text}
+      {/**
+       * 🔴 The name is rendered from `settings.shopName` DIRECTLY, not from the
+       * built line — and the built line is dropped (`slice(nameLineCount)`) so
+       * it cannot appear twice.
+       *
+       * Why not reuse the text: `centreLines` centres by prepending SPACES to
+       * fill a 32-character grid. Those spaces are glyphs. Enlarge the font and
+       * the padding enlarges with it, shoving the name right and off the roll.
+       * A bigger name therefore has to be centred by CSS, on the trimmed string.
+       *
+       * Everything BELOW the name still comes from `buildReceiptLines`
+       * untouched, so the character-grid alignment the money columns depend on
+       * is unaffected.
+       */}
+      <strong className="receipt-shop-name">
+        {receipt.settings.shopName.trim()}
+      </strong>
+      {restText}
     </pre>
   );
 }
