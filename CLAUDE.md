@@ -2302,12 +2302,61 @@ the three primitive defaults, not one `TabsTrigger` line.
 
 </details>
 
-#### `[ ]` **11. PWA — manifest, service worker, install prompt**
+#### `[x]` **11. PWA — SHIPPED 2026-08-19. Installable, and it caches nothing dangerous.**
 
-**`start_url` and `scope` must BOTH be `"/"`.** The app is served at the root; `(dashboard)` is a
-layout group contributing nothing to the URL, and no `/dashboard` route exists. A wrong `start_url`
-**404s every installed home-screen launch and only breaks after install** — easy to miss, because
-it cannot be seen in the browser.
+Tap once to add to the home screen; after that it opens standalone — no address
+bar, ~15% more usable height on a phone, which matters most on milk quick entry.
+
+**Files:** `public/manifest.webmanifest` · `public/sw.js` · `public/offline.html` ·
+`public/icon-*.png` (any + maskable, 192/512, plus apple-touch-icon and favicon) ·
+`components/providers/pwa-provider.tsx`.
+
+##### 🔴 THE SERVICE WORKER NEVER CACHES `/api/`. Not a preference — a safety rule.
+
+This app's data is stock, prices, sales and farmer balances. A cached API response is a **wrong
+number shown confidently**: the owner sells 12 bottles, the till still says 100 in stock, and the
+shortfall guard measures against a figure from ten minutes ago.
+
+Only `/_next/static/` is cache-first, and that is safe **by construction** — Next content-hashes
+those filenames, so a changed file gets a new name and stale code can never be served. Everything
+else is network-first.
+
+Verified in the browser: **30 static entries cached, 0 API entries**, nothing outside
+`/_next/static/` and the offline page.
+
+##### It does NOT work offline, deliberately
+
+Queuing sales offline means two queued sales of the last 5 bottles both succeed locally and one has
+to lose — discovered afterwards. That is a real feature with real risk, not a service-worker setting.
+What exists instead is an honest offline page that says plainly that **nothing part-way through was
+saved**.
+
+##### `start_url` and `scope` are both `"/"`
+
+The app is served at the root — `(dashboard)` is a route group contributing nothing to the URL. A
+wrong value **404s every home-screen launch but only AFTER install**, so no amount of browser testing
+finds it.
+
+##### 🔴 `app/manifest.ts` CANNOT BUILD IN THIS REPO — use the static file
+
+Next's metadata-route loader interpolates the file path into a **single-quoted JS string**, and the
+apostrophe in `Muneeb's inventory system` closes it early:
+
+```
+Module parse failed: Unexpected token (11:79)
+throw new Error('Default export is missing in "E:\...\Muneeb's inventory systempp\manifest.ts"')
+```
+
+**The same breakage hits `icon.tsx`, `sitemap.ts`, `robots.ts` and `opengraph-image.tsx`.** Any
+dynamic metadata route is unavailable until the folder is renamed without the apostrophe. The cost
+here is only that the manifest's shape is not type-checked.
+
+##### The middleware had to learn about two files
+
+`/sw.js` and `/offline.html` are excluded **by name** in `middleware.ts`. The matcher already excluded
+`.png` and `.webmanifest`, but not these — and gated, both 307 to `/login`, which makes
+`navigator.serviceWorker.register()` fail on a `text/html` response and the install silently never
+happen. Named rather than adding `js|html`, which would un-gate any future route ending in `.js`.
 
 #### `[x]` **12. Native date input locale — CLOSED. Verified 2026-08-19, no screen uses one.**
 
