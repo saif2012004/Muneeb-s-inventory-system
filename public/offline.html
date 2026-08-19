@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>No connection · Business Manager</title>
+    <!--
+      Plain HTML and inline CSS on purpose. This page is served by the service
+      worker when the network has already failed, so it cannot depend on a
+      stylesheet, a font or a script that would also fail to load.
+
+      Design System colours by hand: zinc-50 background, zinc-900 text.
+    -->
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: #fafafa;
+        color: #18181b;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .card {
+        width: 100%;
+        max-width: 420px;
+        background: #fff;
+        border: 1px solid #e4e4e7;
+        border-radius: 12px;
+        padding: 24px;
+        box-shadow: 0 1px 2px rgb(0 0 0 / 5%);
+        text-align: center;
+      }
+      .dot {
+        width: 44px;
+        height: 44px;
+        margin: 0 auto 16px;
+        border-radius: 12px;
+        background: #fef2f2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+      p { margin: 0 0 20px; font-size: 15px; line-height: 1.5; color: #71717a; }
+      button {
+        width: 100%;
+        min-height: 44px; /* Design System touch target */
+        border: 0;
+        border-radius: 8px;
+        background: #18181b;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      button:active { background: #27272a; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="dot" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+             stroke="#e11d48" stroke-width="2" stroke-linecap="round">
+          <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+          <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.58 9" />
+          <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0" />
+          <path d="M12 20h.01" />
+        </svg>
+      </div>
+      <h1>No connection</h1>
+      <!--
+        Says what is and is not safe, because the honest worry is "did my sale
+        save?". It did not: writes never leave the phone without a network.
+      -->
+      <p>
+        This app needs the internet to load your sales, stock and balances.
+        Nothing you were part-way through has been saved — reconnect and try
+        again.
+      </p>
+      <button onclick="location.reload()">Try again</button>
+    </div>
+  </body>
+</html>
