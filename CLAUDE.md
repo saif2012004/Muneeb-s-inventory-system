@@ -210,6 +210,47 @@ Each of the three sites now carries a 🔴 comment saying every control must be 
 field to one of those forms, add it to the payload — and verify by reading the row back, not by the
 toast.**
 
+### 3d. 🔴 PERCENT-ENCODE THE DB PASSWORD, or the app fails while your scripts work
+
+**A `$` or `&` in the Supabase password breaks the app and NOTHING ELSE.** Cost real time on
+2026-08-19, during the Mumbai move, because every diagnostic pointed the wrong way.
+
+**The symptom is two different errors, neither of which mentions the password:**
+
+```
+Can't reach database server at `aws-0-ap-south-1.pooler.supabase.com:5432`
+Authentication failed against database server, the provided database
+credentials for `postgres` are not valid
+```
+
+Meanwhile: `psql` connects fine. `prisma migrate status` connects fine. A standalone
+`new PrismaClient({ datasources: { db: { url } } })` script connects fine and benchmarks at 96ms.
+Only the Next app fails.
+
+**Why:** the app reads `.env` through dotenv (`@next/env`), which performs **`$VAR` expansion**. A
+password containing `$` is silently rewritten before Prisma ever sees it. Scripts that read the file
+with their own regex — which is what every diagnostic here did — get the true string and work
+perfectly, which is exactly what makes this so misleading.
+
+`&` is the second trap: it is a query-string separator, so a bare `&` can truncate
+`?connection_limit=5`.
+
+**The fix**, and `.env.example` has warned about it since Phase 1:
+
+| Char | Encode as | | Char | Encode as |
+|---|---|---|---|---|
+| `$` | `%24` | | `#` | `%23` |
+| `&` | `%26` | | `?` | `%3F` |
+| `@` | `%40` | | `/` | `%2F` |
+| `%` | `%25` — do this FIRST | | | |
+
+⚠️ **Encode ONLY the password**, between the first `:` after the scheme and the last `@`. Encoding the
+whole URL turns `:5432/postgres` into nonsense, and a sloppy regex that swallows the closing quote
+gives you `database "postgres%22" does not exist` — both happened while fixing this.
+
+**Diagnosis shortcut for next time:** if `psql` and a standalone script both connect but the app
+cannot, stop looking at the network and look at the password characters.
+
 ### 4. Dates must be handled in Asia/Karachi, not server UTC
 Vercel serverless functions run in UTC. The owner logs morning and evening deliveries in Pakistan time. A delivery logged near midnight PKT can land on the wrong calendar day if you use `new Date()` server-side.
 
@@ -1325,7 +1366,28 @@ Found the hard way in Phase 3.2: the new-sale Save button hung indefinitely offl
 feedback. Verified fixed in-browser — recovery in ~305ms. See
 `docs/phase-3.2-fixes-verified.md` §4.
 
-### 🔴 A round trip costs ~230ms, NOT ~1.1s — corrected 2026-08-19
+### 🔴 A round trip costs ~96ms — Mumbai, since 2026-08-19
+
+**The database moved to `ap-south-1` (Mumbai) on 2026-08-19.** Measured from the dev machine, 20
+samples after warming every pooled connection:
+
+| | Median | Range |
+|---|---|---|
+| **Mumbai `ap-south-1`** (now) | **96 ms** | 92–110 |
+| Seoul `ap-northeast-2` (before) | 226 ms | 205–263 |
+
+⚠️ **Warm every connection before benchmarking.** With `connection_limit=5` the first few queries each
+open a new connection and read ~230ms, which looks bimodal and made the first measurement of this
+move look like no improvement at all. Fire 3–5 throwaway queries first.
+
+End to end on a production build, same screens: settings 235 → **141 ms**, reports summary 237 →
+**135 ms**, sales list ~630 → **339 ms**, customers ~630 → **343 ms**, products ~1,020 → **~490 ms**,
+saving a sale ~1,600 → **~1,330 ms**.
+
+The section below records the PREVIOUS correction, which is what made this move worth doing rather
+than being swamped by pooler overhead.
+
+#### The earlier correction: it was never 1.1s of distance — 2026-08-19
 
 **This section said ~1.1s for months and blamed the Washington↔Seoul split. The number was real; the
 attribution was wrong, and it shaped the architecture.** Nearly a second of it was the **transaction
@@ -1430,7 +1492,9 @@ background/window-focus refetches and would wipe half-typed input mid-entry.
 ```env
 DATABASE_URL=     # Supabase SESSION pooler, port 5432 (?connection_limit=5)
                   # NOT :6543 — the transaction pooler adds ~950ms per query here.
-                  # See "A round trip costs ~230ms" in API Route Conventions.
+                  # 🔴 PERCENT-ENCODE THE PASSWORD — see the gotcha below.
+DIRECT_URL=       # Same session-pooler host. NOT db.<ref>.supabase.co, which does
+                  # not resolve from this network (confirmed twice: Aug 12, Aug 19).
 DIRECT_URL=       # Supabase direct connection (for migrations)
 NEXTAUTH_SECRET=  # random 32+ char string
 NEXTAUTH_URL=     # http://localhost:3000 dev, production URL on Vercel
@@ -2399,36 +2463,42 @@ summary said 62.5, and the owner would have to pick which of his own screens to 
 
 ### ⚪ Handoff infra
 
-#### `[~]` **14. Geography — the POOLER half is fixed; the DATABASE is still in the wrong region**
+#### `[~]` **14. Geography — DATABASE MOVED to Mumbai 2026-08-19. Only the function region is left.**
 
-**Half of this closed on 2026-08-19, and it was the half nobody had identified.** The item used to
-read "the function and the database are on different continents" and treated ~1.1s per query as the
-consequence. Benchmarking showed **~950 ms of that was the transaction pooler, not distance**, and
-switching `DATABASE_URL` to the session pooler took every query to **230 ms**. See "A round trip
-costs ~230ms" in API Route Conventions.
+**The database now sits in `ap-south-1` (Mumbai)**, ~1,300 km from Lahore instead of ~5,000 km to
+Seoul. Round trip **226 ms → 96 ms**, measured 20 samples warm.
 
-**What is left is genuine distance, and it is now the whole remaining cost:**
+Both halves of the old item are now done:
 
 | | |
 |---|---|
-| Supabase region | **`ap-northeast-2` — Seoul** |
-| Distance from Pakistan | ~5,000 km — **measured at 230 ms per round trip** |
-| Nearest available region | **`ap-south-1` — Mumbai**, ~1,300 km from Lahore |
-| Serverless function region | `iad1` — Washington DC (production only) |
+| ~~Transaction pooler adding ~950 ms~~ | ✅ session pooler, 2026-08-19 |
+| ~~Database in Seoul~~ | ✅ **Mumbai, 2026-08-19** |
+| Serverless function in `iad1` (Washington DC) | ⬜ **still open — production only** |
 
-**Two separate moves, and the DATABASE one matters more:**
+**How the move was done** (Supabase cannot change a project's region in place): a new project in
+`ap-south-1`, `pg_dump --schema=public --no-owner --no-privileges` from Seoul, restored with `psql`.
+14 `COPY` blocks, 191 rows, **zero errors** — dumping only `public` avoids the Supabase-internal
+schemas whose roles cannot be recreated, which is what caused the error flood in the August restore.
 
-1. **Move the Supabase project to `ap-south-1` (Mumbai).** This helps **local development too**,
-   because the dev server runs in Pakistan and talks to Seoul today. Expect ~230 ms → roughly 40–60 ms.
-   ⚠️ **Supabase cannot change a project's region in place.** It requires creating a new project in
-   the target region and migrating into it (their documented path: `/docs/guides/platform/migrating-within-supabase`).
-   That means a new project ref, new connection strings and new keys — a gated operation with a
-   verified backup, exactly like Migration B.
-2. **Set the Vercel function region to `bom1`/`icn1`** to match wherever the database ends up.
-   Production only; does nothing for local.
+**Verified by fingerprinting EVERY table on both databases and comparing** — Product, ProductUnit,
+Sale, SaleItem, MilkDelivery, FarmerPurchase, Customer, Farmer, Settings, User, Category,
+SubCategory: all twelve identical. RLS 14/14 with FORCE RLS 0. `_prisma_migrations` restored at 12
+rows with original timestamps, so `migrate status` reports "up to date" without re-applying anything.
 
-`X-Vercel-Id: bom1::iad1::…` — the first segment is only the edge PoP that accepted the request
-(Mumbai, nearest to Pakistan); the second is where the function actually ran.
+⚠️ **The documented 27-product fingerprint `b57a51bb…` is STALE and that is expected.** It includes
+`stock`, which changes on every sale, so it can only ever be a point-in-time check. It now reads
+`cb3395fe9afc47d087957f788c7b1423` because the owner priced Big Apple 0.5L and three products' stock
+moved through test sales. **For comparing two databases, fingerprint both live and diff them** — a
+frozen constant that includes mutable columns will always drift.
+
+**What remains:**
+
+1. **Vercel `DATABASE_URL` / `DIRECT_URL` still point at the OLD Seoul project on `:6543`.** Production
+   has neither the pooler fix nor the region move until those are updated.
+2. **Set the Vercel function region to `bom1`** so the function sits beside the database.
+3. **The Seoul project is still alive and is the rollback.** Delete it only after production is
+   verified on Mumbai — and take a backup first.
 
 #### `[ ]` **15. Data API surface — an owner decision, not a leak**
 
