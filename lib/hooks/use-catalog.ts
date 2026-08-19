@@ -62,8 +62,11 @@ export type Product = {
   unit: string | null;
   isActive: boolean;
   subCategoryId: string;
-  createdAt: string;
-  updatedAt: string;
+  /**
+   * ⚠️ NOT returned by `/api/products` — see the note on PRODUCT_SELECT. No UI
+   * reads them, and they cost payload on every catalog and till load. Left off
+   * the type so a component cannot start depending on `undefined`.
+   */
   subCategory: { id: string; name: string; category: { id: string; name: string } };
 };
 

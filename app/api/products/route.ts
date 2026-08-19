@@ -27,8 +27,22 @@ const PRODUCT_SELECT = {
   unit: true,
   isActive: true,
   subCategoryId: true,
-  createdAt: true,
-  updatedAt: true,
+  /**
+   * ⚠️ `createdAt` / `updatedAt` are NOT selected, deliberately.
+   *
+   * Nothing in the UI reads them — grep `components/catalog` and
+   * `components/sales`. They were 75 × two ISO strings on the catalog's list
+   * response for nobody.
+   *
+   * That matters more than it sounds. Measured 2026-08-19: row COUNT is free
+   * (75 products by id costs the same 218ms as one row), but PAYLOAD is not —
+   * the same 75 products with their relations took 944ms, because ~45KB over a
+   * 230ms link is bounded by round trips, not bandwidth. Dead fields are paid
+   * for on every catalog and till load.
+   *
+   * If a screen ever needs them, add them back to a narrower endpoint rather
+   * than to this list.
+   */
   subCategory: {
     select: {
       id: true,
