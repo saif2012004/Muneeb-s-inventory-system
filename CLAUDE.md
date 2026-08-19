@@ -7,6 +7,34 @@
 
 ---
 
+## 📦 STATUS: the BUILD is complete. The HANDOVER is not.
+
+**Every development phase (1–8) and every stage of the unified-sale rework (S1–S9) has shipped,
+been verified, and is live in production.** There is no feature work outstanding and no migration
+pending.
+
+**Three things still stand between this and the owner running his shop on it**, and none of them
+is code:
+
+| | What | Whose job |
+|---|---|---|
+| 🔴 | **The data reset** — the database still holds the working set this was built against | Ours to run, ONCE, with his confirmed delete set — CHECKLIST #2 |
+| 🔴 | **Vercel Pro + Supabase Pro** — Hobby FORBIDS commercial use and the free Supabase tier keeps ZERO backups | A billing action at handover — CHECKLIST #3 |
+| 🟡 | **Prices and shelf counts** — 73 of 75 products sit at Rs. 0 and stock is a placeholder | His, at handover |
+
+**Do not read "build complete" as "ready to hand over".** The full, current picture is in
+`REMAINING-WORK.md`.
+
+> **📁 The `docs/` folder was removed on 2026-08-19, deliberately.** It held 112 phase reports and
+> dated response files — a build diary that had served its purpose. **Every one of them is still in
+> git history** (they were committed immediately before deletion), so `git log -- docs/` recovers
+> anything you need. Nothing in this file or in the source depends on them any more: every claim
+> that used to end in "evidence: docs/…" now stands on its own, and the pointers were stripped
+> rather than left dangling — a reference to a file that no longer exists is exactly the kind of
+> confident, specific, wrong instruction the process rule below exists to prevent.
+
+---
+
 ## 🔁 PROCESS RULE: updating this file is PART OF the change, not a follow-up
 
 **If a change alters a rule documented here, the CLAUDE.md edit ships in the SAME commit as the
@@ -930,8 +958,7 @@ stored snapshot, never the client. The override survives on **create** only, and
 
 **Verified over authenticated HTTP** (there is still no edit UI, so the route was exercised
 directly): a PATCH sending a bogus `unitPrice` on a quantity-only change left the stored snapshot
-untouched. See the create/update asymmetry note above, and
-`docs/responses/2026-08-11-snapshot-hole-7-closed.md`.
+untouched. See the create/update asymmetry note above.
 
 ### Discounts, russ, eggs
 - **Discount is a SALE-TIME PERCENTAGE, not a product variant** (reworked 2026-08-09). It is
@@ -1086,8 +1113,7 @@ Three things about that route are deliberate and easy to break:
   else's account.
 
 **Re-test with JavaScript actually disabled.** The bug is invisible with JS on — that is how it
-survived seven phases. Evidence and method:
-`docs/responses/2026-08-10-login-post-only-security-fix.md`.
+survived seven phases.
 
 ---
 
@@ -1206,8 +1232,7 @@ ERROR:  permission denied for schema realtime
 **None of these affect your data.** The signal to watch is the **`COPY n` row counts for the
 `public` schema** — `COPY 27` for `Product` and so on. Those are the restore actually landing.
 
-**Verify after — all read-only** (worked example:
-`docs/responses/2026-08-12-post-restore-verification.md`):
+**Verify after — all read-only:**
 
 1. **Row counts** against known expectations.
 2. **The product fingerprint** — far stronger than a count, because it proves the *contents*
@@ -1363,8 +1388,7 @@ Both halves are load-bearing and cover different failures:
 | Connected but stalled | `fetch` never settles, so the catch in `api-client` never runs — same permanent "Saving…" | Aborts at 15s into the existing catch |
 
 Found the hard way in Phase 3.2: the new-sale Save button hung indefinitely offline with no
-feedback. Verified fixed in-browser — recovery in ~305ms. See
-`docs/phase-3.2-fixes-verified.md` §4.
+feedback. Verified fixed in-browser — recovery in ~305ms.
 
 ### 🔴 A round trip costs ~96ms — Mumbai, since 2026-08-19
 
@@ -1668,9 +1692,11 @@ and Next reads both.
 | 5  | Milk shop: farmers, deliveries, purchases, quick-entry, milk sales | ✅ Done |
 | 6  | Farmer net-balance ledger + all-farmers balance sheet | ✅ Done |
 | 7  | Reports dashboard + charts + CSV export | ✅ Done |
-| 8  | Polish: mobile nav, states, a11y, PWA, ~~login POST-only security fix~~ (✅ done 2026-08-10), final validation | ⬜ Todo |
+| 8  | Polish: mobile nav, states, a11y, PWA, login POST-only security fix, final validation | ✅ Done |
 
-Update this table as phases complete. Change ⬜ to ✅.
+**Every phase is complete, and so is the unified-sale rework below.** What is left is not
+development — it is the handover sitting (the owner's own data and his billing plan). See
+`REMAINING-WORK.md`, which is now the handover document rather than a build roadmap.
 
 ### The UNIFIED SALE rework — its own track, running alongside Phase 8
 
@@ -1715,7 +1741,7 @@ table. Phase 8 is polish; the checklist is everything that must be true at hando
 | | Blocker | Status | Full item |
 |---|---|---|---|
 | ✅ | **Login POST-only security fix.** ~~With JS absent the form submits GET and puts the owner's email and password in the URL.~~ Fixed and verified with JavaScript disabled on 2026-08-10. **No longer blocks go-live or Phase 8.** | `[x]` closed | CHECKLIST #1 |
-| 🔴 | **Data reset before go-live**, and with it **the owner's real shop details saved in Settings** (the seeded `SET SHOP NAME IN SETTINGS` placeholders must be gone — `configuredAt IS NOT NULL`). The owner must start on a database holding only his own real records. Once, deliberately, with the delete set confirmed first. | `[ ]` open | CHECKLIST #2 + #2b |
+| 🔴 | **Data reset before go-live.** The owner must start on a database holding only his own real records, not the working set this was built against. Once, deliberately, with the delete set confirmed first. *(The other half of this row — his real shop details in Settings — was DONE on 2026-08-19: `configuredAt` is non-NULL and the shop is "Mateen Traders".)* | `[ ]` open | CHECKLIST #2 |
 
 (The other go-live blocker — the Vercel Pro / Supabase backup upgrade, CHECKLIST #3 — is not
 duplicated here: it is a billing action at handoff rather than something that can be silently
@@ -1730,8 +1756,7 @@ would start diluting the two that matter.)
   (sidebar + mobile bottom nav + shared components), and a deployed Vercel project.
   Live: `https://muneeb-inventory-system.vercel.app`
 - **Phase 2 delivered:** catalog API with guarded deletes, the catalog UI at `/catalog`, and
-  the seed. Reports: `docs/phase-2.1-api-routes.md`, `docs/phase-2.1-deploy-verification.md`,
-  `docs/phase-2.2-catalog-ui.md`, `docs/phase-2.3-seed-run.md`. Three things Phase 3 inherits:
+  the seed. Three things Phase 3 inherits:
   - **The catalog is seeded.** 2 categories, 11 sub-categories, 62 products, all at `price 0`
     and `isActive true`. The seed is additive (`upsert` with `update: {}` on deterministic
     ids), so re-running never duplicates or resets an owner-set price — but it WILL recreate
@@ -1742,32 +1767,26 @@ would start diluting the two that matter.)
     **✅ CLOSED — re-tested against real sale history on 4 Aug 2026 and passed at all three
     levels** (category 409, sub-category 409, product 200 + soft delete). The `blockedBy`
     field was proven to be consumed structurally rather than parsed from the prose: the UI
-    renders a per-product sale count that appears nowhere in the sentence. Evidence:
-    `docs/responses/2026-08-04-delete-guard-retest.md`. Keep it working; it no longer needs
-    re-testing.
+    renders a per-product sale count that appears nowhere in the sentence. Keep it working; it
+    no longer needs re-testing.
   - **`tailwind.config.ts` content globs must include `./lib`.** The `ACCENTS` map in
     `lib/nav.ts` is the only place module accent classes appear as literals; dropping `./lib`
     silently strips them from the CSS and colours fall back to default foreground. This bit
-    us once already — see `docs/phase-2.3-seed-run.md` §6.
+    us once already.
 - **Phase 3 delivered:** the beverages sale API (3.1) and UI (3.2) — `/beverages` and
-  `/beverages/new-sale`. Reports: `docs/phase-3.1-beverages-api.md`,
-  `docs/phase-3.1-review-signoff.md`, `docs/phase-3.2-beverages-ui.md`,
-  `docs/phase-3.2-browser-verification.md`, `docs/phase-3.2-fixes-verified.md`.
-  Four things Phase 4 (Bakery) inherits:
+  `/beverages/new-sale`. Four things Phase 4 (Bakery) inherits:
   - **`reconcileSaleLines()` in `lib/sales.ts` is THE price-snapshot implementation.** Reuse
     it; do not re-derive the predicate. Same for `SALE_DETAIL_SELECT` and `loadSaleProducts`,
     which are written generically because BakerySale has the same relation names.
   - **The global TanStack Query settings above are not optional.** See the client
     data-fetching note in API Route Conventions.
   - **The delete-guard 409 / soft-delete re-test is DONE** — run 4 Aug 2026, all three levels
-    passed, DB restored to baseline. See the Phase 2 note above and
-    `docs/responses/2026-08-04-delete-guard-retest.md`. No longer an open item.
+    passed, DB restored to baseline. See the Phase 2 note above. No longer an open item.
   - **Verify UI in a real browser, not on a build.** Phase 3.2 type-checked, linted and built
     green while still carrying three real bugs — one of which trapped the owner with no way to
     recover. The build proves it compiles, nothing more.
 - **Phase 4 delivered:** the bakery module — `/bakery`, `/bakery/new-sale`, and
-  `/api/bakery/sales`. Reports: `docs/phase-4-bakery-module.md`,
-  `docs/responses/2026-08-07-phase-4-browser-verification.md`. What later modules inherit:
+  `/api/bakery/sales`. What later modules inherit:
   - **The sale components are SHARED, in `/components/sales/`**, parameterised by a
     `SaleModule` from `lib/sale-modules.ts` (endpoint, catalog category, accent, copy).
     Milk sales should add a config row, NOT a third copy of the form. If you find yourself
@@ -1783,9 +1802,7 @@ would start diluting the two that matter.)
     discount) and fall back to the brand when it carries none. Composing from size+discount
     alone made `Biscuits Premium`/`Simple` and all four Russ variants indistinguishable.
 - **Phase 4b delivered:** the customers hub + receivables — `/customers`, `/customers/[id]`,
-  and the `/api/customers/*` tree. Report:
-  `docs/responses/2026-08-07-phase-4b-customers-receivables.md`. Three things that carry
-  forward:
+  and the `/api/customers/*` tree. Three things that carry forward:
   - **`lib/receivables.ts` is THE receivables calculation**, the way `reconcileSaleLines` is
     THE price snapshot. `outstanding = billed − paid`, billed spans beverages + bakery +
     **milk**. Reports and dashboards must call it, not re-derive it.
@@ -1793,8 +1810,7 @@ would start diluting the two that matter.)
     when milk sales start being recorded the balances are correct with no change here.
   - **A customer is never hard-deleted** — soft only, like a Product with sale history.
 - **Phase 5 delivered:** the milk shop — `/milk`, `/milk/quick-entry`, `/milk/farmers/[id]`,
-  `/milk/sales`, and the `/api/milk/*` tree. Report:
-  `docs/responses/2026-08-08-phase-5-milk-shop.md`. **No migration was needed** — all four
+  `/milk/sales`, and the `/api/milk/*` tree. **No migration was needed** — all four
   milk tables already existed. Zero existing files were modified. What Phase 6 inherits:
   - **`lib/milk.ts` is THE farmer net-balance calculation**, the way `lib/receivables.ts` is
     THE customer balance. `netBalanceOwed = milkValue − purchases`. Phase 6's balance sheet
@@ -1822,8 +1838,8 @@ would start diluting the two that matter.)
   - **`components/shared/ConfirmDialog.tsx`** is the new generic destructive-action confirm.
     `DeleteSaleDialog` was deliberately left alone — it is shipped and verified.
 - **Phase 6 delivered:** the all-farmers balance sheet at `/milk/balances`, plus the hub link.
-  Report: `docs/responses/2026-08-08-phase-6-balance-sheet.md`. **No new API route, no new
-  query, no new arithmetic** — it consumes the existing `/api/milk/farmers` response, which
+  **No new API route, no new query, no new arithmetic** — it consumes the existing
+  `/api/milk/farmers` response, which
   already carried both the per-farmer balances and the summary. What carries forward:
   - **The fixed-query claim is now MEASURED, not just asserted.** `getFarmerBalances()` issues
     **exactly 2 SQL statements for 2 farmers and for 7** — two `SUM … GROUP BY` aggregates.
@@ -1851,7 +1867,7 @@ would start diluting the two that matter.)
     the farmers ON the sheet, not every farmer fetched, or it reads "7 farmers" above 6 rows.
 - **Phase 7 delivered:** the reports dashboard at `/reports`, `/api/reports/{summary,trend,
   top-products,export}`, `lib/reports.ts`, `lib/csv.ts`, and Export CSV buttons on six
-  screens. Report: `docs/responses/2026-08-08-phase-7-reports.md`. What carries forward:
+  screens. What carries forward:
   - **`lib/reports.ts` owns the NEW aggregates only** (revenue per period, top products).
     Balances are delegated: `getTotalOutstanding()` lives in `lib/receivables.ts` and
     `getAllFarmerTotals()` in `lib/milk.ts`, so the reports figures are the SAME calculation
@@ -1890,8 +1906,7 @@ would start diluting the two that matter.)
   screen — that screen would have been built against a structure the unified rework was about to
   replace. **S9 deleted the routes along with everything else per-module**, and the behaviour they
   proved (stock reconciled BY DELTA: 12 → 8 frees 4) lives on in `reconcileSaleLines` /
-  `computeStockDeltas`, reached through the unified edit screen. Evidence for the original
-  verification: `docs/responses/2026-08-09-stock-tracking-shipped.md` §3–4.
+  `computeStockDeltas`, reached through the unified edit screen.
 - **The one deliberate data reset before go-live → PRE-HANDOFF CHECKLIST item 2** (a blocker).
   The habit that supports it stays here: **every verification pass `ZZ_TEST_`-scopes what it
   creates and removes only that**, precisely so the reset can be one decision at the end rather
@@ -1919,8 +1934,18 @@ close it here.** If you find an open item somewhere else in this file, it is a l
 The failure this section exists to prevent: **a BLOCKER getting lost in prose.** Two of these
 cannot be handed to the client under any circumstances, and one of them is a credential exposure.
 
-**Verified against the repo and the live database on 2026-08-10.** Status is what is TRUE now, not
-what was planned.
+**Re-verified against the repo and the live database on 2026-08-19.** Status is what is TRUE now,
+not what was planned.
+
+**Everything in this checklist is now closed except four items**, and none of the four is
+development work:
+
+| | Item | |
+|---|---|---|
+| 🔴 | **#2** data reset | **BLOCKS GO-LIVE** — ours to run, with his confirmed delete set |
+| 🔴 | **#3** Vercel Pro + Supabase Pro | **BLOCKS GO-LIVE** — a billing action |
+| 🟡 | **#13** on-device check on a real phone | the last untested surface |
+| ⚪ | **#15** Supabase Data API surface | the owner's decision, not a leak |
 
 Legend: `[ ]` open · `[~]` in flight · `[x]` closed · **[BLOCKS GO-LIVE]** = do not hand over
 
@@ -1950,8 +1975,7 @@ query string, `303` to the callback target, and a `Set-Cookie` session; the addr
 read `http://localhost:3000/beverages` with no credentials anywhere. Wrong password → 
 `/login?error=CredentialsSignin` rendering "Incorrect email or password." server-side. JS-on flow
 re-verified unchanged (still `/api/auth/callback/credentials`, no console errors, bad password
-rejected in place, good password lands on `/`). Full evidence:
-`docs/responses/2026-08-10-login-post-only-security-fix.md`.
+rejected in place, good password lands on `/`).
 
 #### `[ ]` **2. [BLOCKS GO-LIVE] One deliberate data reset before go-live**
 
@@ -1966,35 +1990,54 @@ accumulated while the app was built.
 products) with real prices, and real customers/farmers — versus everything transactional (sales,
 deliveries, purchases, payments), which almost certainly should not.
 
-**Stock is the subtle one.** All 27 products sit at the migration's temporary default of **100**,
-which is not a real count. The reset is the moment the owner walks the shelf and enters actual
-numbers — **his task, not a figure for us to invent.**
+**Stock is the subtle one.** Products still carry the seed's placeholder count, which is not a real
+number. The reset is the moment the owner walks the shelf and enters actual figures — **his task,
+not a figure for us to invent.** The same goes for price: **73 of the 75 products are still at
+Rs. 0**, because the S8 seed created the multi-unit matrix at zero for him to price.
 
 **Confirm the exact delete set with the owner before running it**, the same way the 36-variant
 delete and every other destructive step here was confirmed.
 
-> ⚠️ **Confirm the count against the environment actually being handed over.** In the database this
-> repo points at (project `wcfdtxalwlztfsbepkrr`, the ref in `.env`), **re-verified 2026-08-11**:
+> ⚠️ **COUNT THE ENVIRONMENT YOU ARE ACTUALLY HANDING OVER, THE DAY YOU DO IT.** The figures below
+> were true on **2026-08-19**, in the Mumbai database the `.env` points at. **They will not be true
+> when you read this** — the app is live and in use.
 >
 > | | rows |
 > |---|---|
-> | `BakerySale` | **1** — Rs. 5,000, customer Saif, still in the OLD table |
-> | `MilkSale` | **1** — Rs. 6,000 |
-> | `BeverageSale` | **0** |
-> | `Sale` (unified) | **2 as of S5 (2026-08-14)** — migration A's bakery copy + the milk copy. NEITHER is a new sale; both are copies excluded from every total by `notAMigrationCopy()` |
-> | `Customer` | **1** — Saif |
+> | `Sale` | **10** |
+> | `SaleItem` | **14** |
+> | `Customer` | **3** |
 > | `CustomerPayment` | 0 |
+> | `Farmer` | **2** |
+> | `MilkDelivery` | **3** |
+> | `FarmerPurchase` | **4** |
+> | `Product` | **75** (73 at Rs. 0) |
 >
-> **Two real sales, one customer.** Session briefs have now described **5 sales across 3 customers**
-> seven times, and no query has ever reproduced it. Do not run a delete set sized from the wrong
-> environment, and do not treat "only 1 row in `Sale`" as data loss — it is correct.
+> ⚠️ **This table replaced one that had gone badly stale** — it still listed `BakerySale`,
+> `MilkSale` and `BeverageSale`, three tables Migration B **dropped on 2026-08-18**, and put `Sale`
+> at 2 when it now holds 10. A delete set sized from those numbers would have been written against
+> a database that no longer exists. **Re-run the counts; do not trust this table either.**
+>
+> The mixture is the whole difficulty: some of these rows are the owner's genuine records (the
+> farmer ledger especially — that is real money owed) and some are ours from building and testing.
+> **Nobody but the owner can tell you which is which.** Go through it with him row by row before
+> deleting anything.
 
-#### `[ ]` **2b. [BLOCKS GO-LIVE] Owner sets his real shop details in Settings**
+#### `[x]` **2b. Owner's real shop details — DONE 2026-08-19. No longer blocks go-live.**
 
-**Status:** open. **The Settings table and screen SHIPPED 2026-08-10** (`/settings`, migration
-`20260810120000_add_settings`) — what remains is the owner typing his own details in. Sits with #2
-deliberately: both are "the owner's real data replaces our build-time stand-ins", and they are done
-in the same sitting at handoff.
+**The owner has saved his own details.** Verified against the database rather than the screen, which
+is what this item always insisted on:
+
+```
+shopName     = "Mateen Traders"
+configuredAt = 2026-08-19T06:53:57Z        -- non-NULL: he has saved at least once
+```
+
+The placeholders are gone, so the receipt and the farmer statement both print a real letterhead.
+**#2 (the data reset) is still open and still blocks** — these two used to sit together as one
+handover sitting, and only this half is finished.
+
+The rules below are kept because they are still load-bearing for anyone editing Settings.
 
 `Settings` seeds with **deliberately unmistakable placeholders** —
 `SET SHOP NAME IN SETTINGS`, `SET PHONE IN SETTINGS`, `SET ADDRESS IN SETTINGS`. That is a design
@@ -2126,8 +2169,7 @@ shipped together in commit `8847fff`; the analysis below is what predicted them.
 
 Milk sells in fractional litres, so `Product.stock` had to widen from `Int` to `Decimal(10,2)`, the
 same way `SaleItem.quantity` did in Migration C. **It was not a schema-only change**, and anyone
-scoping it as "one `ALTER TABLE`, no code" would have got a red build. Analysed 2026-08-12 (evidence:
-`docs/responses/2026-08-12-INCIDENT-live-database-wiped-by-shadow-db-flag.md`).
+scoping it as "one `ALTER TABLE`, no code" would have got a red build. Analysed 2026-08-12.
 
 The widening is **lossless** — all 27 rows are whole numbers, and `Product.price` in the same table
 is already `numeric(10,2)`. The problem is entirely on the code side:
@@ -2168,8 +2210,7 @@ making a reference a compile error rather than a runtime surprise; a fresh backu
 CONTENTS; and a read-only pre-flight confirmed no old bill was missing from `Sale`. Only then was
 `migrate deploy` run.
 
-Full write-up and the post-drop verification: **the "ONE SALE TABLE" section**, and
-`docs/responses/2026-08-18-s9-per-module-path-retired.md`.
+Full write-up and the post-drop verification: **the "ONE SALE TABLE" section**.
 
 #### `[x]` **6. `lib/receivables.ts` — reads `Sale` ALONE. Closed 2026-08-18 (S9).**
 
@@ -2263,8 +2304,7 @@ sales untouched; RLS 18/18 with FORCE RLS 0 and advisors clean at INFO; catalog 
 Discount column and no discount field in either dialog; product **create and edit** both still
 work; and a discounted sale round-tripped exactly — 3 × 275.50 → 10% line → 743.85 → 5% bill →
 706.66, stock 100→97, receipt printing `3 × 275.50  Rs. 743.85` in paise while the screen showed
-`3 × Rs. 276  Rs. 744`. Evidence:
-`docs/responses/2026-08-10-discount-column-dropped-and-verified.md`.
+`3 × Rs. 276  Rs. 744`.
 
 #### `[x]` **10. Touch targets — DONE 2026-08-14, in the primitives**
 

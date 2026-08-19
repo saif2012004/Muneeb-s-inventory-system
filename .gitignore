@@ -40,9 +40,10 @@ yarn-error.log*
 next-env.d.ts
 
 # scratch
-# The working file phase prompts get pasted into. It is an INPUT, not a
-# deliverable — the phase reports in docs/ and the run-by-run record in
-# docs/responses/ are what belong in the repo.
+# The docs/ folder was removed on 2026-08-19, once the build it documented was
+# finished; every file remains in git history. This entry is kept so that a
+# prompt scratch file recreated at that path is still ignored rather than
+# accidentally committed.
 docs/prompt.txt
 
 # database backups — NEVER commit a dump. Root-anchored so prisma/migrations/*.sql

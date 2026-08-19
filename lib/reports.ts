@@ -435,7 +435,7 @@ export type ReportSummary = {
  * The cost saving is the point of the change as much as the semantics:
  * `getTotalOutstanding()` is FOUR queries, and at the measured ~1.05s per round
  * trip that was 4+ seconds on every cold dashboard load. Measured before and
- * after — see docs/responses/2026-08-09-batch-2-receivables-removed.md.
+ * after.
  */
 export type BalanceTotals = {
   farmers: { totalOwed: Prisma.Decimal; totalAdvanced: Prisma.Decimal };
