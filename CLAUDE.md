@@ -2309,21 +2309,33 @@ layout group contributing nothing to the URL, and no `/dashboard` route exists. 
 **404s every installed home-screen launch and only breaks after install** — easy to miss, because
 it cannot be seen in the browser.
 
-#### `[~]` **12. Native date input locale — DONE on the unified list, open elsewhere**
+#### `[x]` **12. Native date input locale — CLOSED. Verified 2026-08-19, no screen uses one.**
 
-**Confirmed as a real defect and fixed where it matters (2026-08-14).** The native
-`<input type="date">` rendered **mm/dd/yyyy** on this machine, so the sales filters read American
-while every date the app prints is `DD/MM/YYYY` — leaving `08/14` genuinely ambiguous on a money
-screen. A native input takes the DEVICE's locale; no formatter of ours can change it.
+**Confirmed as a real defect and fixed everywhere.** The native `<input type="date">` renders in the
+DEVICE's locale — **mm/dd/yyyy** on this machine — so it read American while every date the app
+prints is DD/MM/YYYY, leaving `08/14` genuinely ambiguous on a money screen. No formatter of ours can
+change a native input.
 
-**`/sales` now uses `components/sales/DateRangeFilter.tsx`** — the same `Calendar` +
-`formatPickedDate` the sale form uses, with a per-field clear button. Values on the wire stay
-`yyyy-MM-dd`, so Karachi-day filtering is untouched. Browser-verified.
+**Every date control in the app is now one of two shared components**, both built on `Calendar` +
+`formatPickedDate`:
 
-**`/beverages` and `/bakery` were the other offenders and no longer exist** (S9 deleted them rather
-than fixing them, which was the plan). **Still raw `<input type="date">`: the milk screens** — quick
-entry and the farmer profile. Fix them by swapping in `DateRangeFilter`, the same component `/sales`
-uses.
+| Component | Used by |
+|---|---|
+| `SaleDatePicker` | the till, milk quick entry, delivery and purchase dialogs, customer payments |
+| `DateRangeFilter` | the sales list, the farmer statement |
+
+Values on the wire stay `yyyy-MM-dd`, so Karachi-day filtering is untouched.
+
+**The check, if you ever need to re-run it:**
+
+```bash
+# Must return only the comment in DateRangeFilter explaining why it is not used.
+grep -rn 'type="date"' app components --include=*.tsx
+```
+
+⚠️ **This item said "open on the milk screens" for a while after it was already fixed.** The milk
+screens were migrated when their dialogs were built on `SaleDatePicker`; the checklist simply never
+caught up. Verified by grep, not by memory.
 
 #### `[ ]` **13. On-device mobile check — a real phone**
 
