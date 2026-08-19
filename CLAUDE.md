@@ -1274,29 +1274,34 @@ pending decision for the owner; it would not affect Prisma, which never goes thr
 - Every route checks the session with `auth()` first; reject unauthenticated with 401.
 - `export const runtime = "nodejs"` on routes using Prisma/bcrypt.
 
-### Never fan out Prisma queries with Promise.all (pooled connection = 1)
+### Prefer awaiting Prisma queries in SERIES — but the reason changed in 2026-08-19
 
-**`DATABASE_URL` carries `connection_limit=1`, so a `Promise.all` of Prisma queries does NOT
-run in parallel — the first executes and the rest QUEUE for the single connection. Await
-multiple queries in SERIES.**
-
-Past ~8 concurrent queries the ones at the back exceed the 10s pool timeout and the request
-fails outright:
+**`DATABASE_URL` used to carry `connection_limit=1` against the TRANSACTION pooler, which made a
+`Promise.all` actively dangerous: the first query executed and the rest queued for the single
+connection, and past ~8 the ones at the back blew the 10s pool timeout.**
 
 ```
 Timed out fetching a new connection from the connection pool.
 (Current connection pool timeout: 10, connection limit: 1)
 ```
 
-Found in Phase 4b: the customer profile fanned out 12 concurrent queries and 500'd in the
-browser while `tsc` and `next lint` were both clean. Sequential costs nothing real — with one
-connection there was never any parallelism to lose — and it cannot time out waiting for
-itself. The same limit applies on Vercel, so this is not a dev-only concern.
+Found in Phase 4b: the customer profile fanned out 12 concurrent queries and 500'd in the browser
+while `tsc` and `next lint` were both clean.
 
-Two or three concurrent queries are fine in practice; the rule is to prefer series and never
-nest a `Promise.all` inside another. Where a route needs many rows, fetch them ONCE and derive
-everything from that set — the profile route was also fetching every sale twice, once for the
-ledger and once for the purchases list. See `getCustomerActivity()` in `lib/receivables.ts`.
+**That specific failure is gone** — the app moved to the SESSION pooler with `connection_limit=5`
+(see the section below). A small fan-out will no longer deadlock on itself.
+
+**Keep awaiting in series anyway, as the default.** Not because concurrency breaks now, but because:
+
+- the pool is still small, and a wide `Promise.all` can still queue;
+- every route in this codebase is written that way, and mixed conventions are how the ones that
+  matter get missed;
+- **round trips, not concurrency, are the budget** — five queries in parallel still cost five round
+  trips of database work, and the fix that actually pays is issuing fewer of them.
+
+So: prefer series, never nest a `Promise.all` inside another, and where a route needs many rows fetch
+them ONCE and derive everything from that set. See `getCustomerActivity()` in `lib/receivables.ts`,
+which was also fetching every sale twice — once for the ledger and once for the purchases list.
 
 ### Client data fetching (GLOBAL — applies to every module, not just beverages)
 
@@ -1316,32 +1321,66 @@ Found the hard way in Phase 3.2: the new-sale Save button hung indefinitely offl
 feedback. Verified fixed in-browser — recovery in ~305ms. See
 `docs/phase-3.2-fixes-verified.md` §4.
 
-### One database round trip costs ~1.1s — the QUERY COUNT is the whole budget
+### 🔴 A round trip costs ~230ms, NOT ~1.1s — corrected 2026-08-19
 
-**Measured, Phase 7: a single Prisma query against this Supabase project takes about
-1.1 seconds.** Not the query — the round trip. That number, multiplied by
-`connection_limit=1` forcing everything into series, is the performance model for this app:
+**This section said ~1.1s for months and blamed the Washington↔Seoul split. The number was real; the
+attribution was wrong, and it shaped the architecture.** Nearly a second of it was the **transaction
+pooler**, and it was removable.
+
+Benchmarked from the dev machine — same database, same host, same trivial `SELECT 1`, six samples
+each:
+
+| Connection | Median per query |
+|---|---|
+| `:6543` pgbouncer **transaction** pooler + `connection_limit=1` (the old `DATABASE_URL`) | **1,175 ms** |
+| `:6543` transaction pooler, no `connection_limit` | 1,116 ms |
+| **`:5432` Supavisor SESSION pooler (what `DATABASE_URL` is now)** | **230 ms** |
+
+`connection_limit=1` was NOT the cause — removing it changed nothing. The transaction pooler was
+adding ~950 ms to every single query.
+
+**End-to-end, same screens, before → after:**
+
+| | Transaction pooler | Session pooler |
+|---|---|---|
+| `/api/settings` (1 query) | 1,104–1,158 ms | **231–234 ms** |
+| `/api/customers` | 3,209–3,318 ms | **612 ms** |
+| `/api/milk/farmers?withBalances=true` | 2,773–3,042 ms | **620 ms** |
+
+**Why session mode is safe HERE, and would not be everywhere.** The transaction pooler exists so that
+many concurrent serverless functions can share few Postgres connections. This is a **single-owner
+app** — the owner confirmed on 2026-08-19 that only one person ever uses it at a time — so the
+concurrency the transaction pooler protects against does not exist. On a multi-user product this
+trade would be wrong.
+
+**The remaining 230 ms is real network** — Pakistan to `ap-northeast-2` (Seoul), ~5,000 km. It is the
+floor until the database moves; see CHECKLIST #14, which is now about **`ap-south-1` (Mumbai)**, the
+nearest region, not about moving the Vercel function.
+
+#### The budget model, restated
+
+**Round trips are still the whole budget — they just cost 230 ms each now.**
 
 | Queries in a request | Roughly |
 |---|---|
-| 3 (a normal screen) | ~3s |
-| 7 | ~9s |
-| 18 | **~19s — past the 15s client timeout in `lib/api-client.ts`** |
+| 3 (a normal screen) | ~0.7s |
+| 12 (one sale save) | **~2.9s — measured** |
+| 18 | ~4.1s |
 
-The reports summary shipped its first draft at **18 queries / 19.2s** and the dashboard
-rendered *"Can't reach the server. Check your connection."* against a perfectly healthy
-database. Cutting it to **7 queries / 9.5s** fixed it. Two techniques did the work, and both
-are reusable:
+**A sale save is 12 round trips**, measured by logging every statement. Four of them are one
+`findMany` with `include: { subCategory: { include: { category: true } }, units: true }` — Prisma
+issues a separate query per relation level. `relationJoins` (a Prisma 6 preview feature, plus
+`relationLoadStrategy: "join"` per query) collapses those into one JOIN and is the obvious next win.
 
-- **Collapse independent aggregates into ONE statement.** Five `prisma.aggregate` calls over
-  five tables became one `SELECT (subquery), (subquery), …` — five round trips to one. See
-  `getReportSummary` in `lib/reports.ts`.
-- **Don't compute the same thing twice.** The summary was calculating each module's top
-  product (4 queries) that the dashboard was already fetching for its charts.
+The old lessons still hold and are still the technique:
 
-**Before adding a query to an existing route, count what is already there.** A route that
-creeps past ~12 queries will start failing in the browser while every test you have still
-passes, because `tsc`, lint and the API itself are all perfectly happy at 19 seconds.
+- **Collapse independent aggregates into ONE statement.** Five `prisma.aggregate` calls over five
+  tables became one `SELECT (subquery), (subquery), …`. See `getReportSummary` in `lib/reports.ts`.
+- **Don't compute the same thing twice.**
+
+⚠️ **Some of those collapses were bought at the price of readability** — hand-written SQL where
+Prisma would have read better — because a round trip cost 1.1s. At 230 ms that trade is worth
+revisiting; do not add MORE hand-rolled SQL on the old justification without re-measuring.
 
 ### Structural sharing: a refetch that changes nothing keeps the SAME object reference
 
@@ -1366,7 +1405,9 @@ background/window-focus refetches and would wipe half-typed input mid-entry.
 
 ## Environment Variables
 ```env
-DATABASE_URL=     # Supabase pooled connection (?pgbouncer=true&connection_limit=1)
+DATABASE_URL=     # Supabase SESSION pooler, port 5432 (?connection_limit=5)
+                  # NOT :6543 — the transaction pooler adds ~950ms per query here.
+                  # See "A round trip costs ~230ms" in API Route Conventions.
 DIRECT_URL=       # Supabase direct connection (for migrations)
 NEXTAUTH_SECRET=  # random 32+ char string
 NEXTAUTH_URL=     # http://localhost:3000 dev, production URL on Vercel
@@ -1406,15 +1447,18 @@ The trigger is *the client starting to enter real records and rely on the app*. 
 commercial use, and the free Supabase tier keeps zero backups.
 **→ PRE-HANDOFF CHECKLIST item 3.** Not tracked here.
 
-### ⚠️ HANDOFF INFRA ITEM — the function and the database are on different continents
+### ⚠️ HANDOFF INFRA ITEM — the database is in the wrong region
 
-Function in **`iad1`** (Washington DC), Supabase in **`ap-northeast-2`** (Seoul): ~11,000 km on
-every query, measured at **≈1.07s each** against the deployed function. **This is the ~1.1s/query
-floor the whole app is designed around** — see "One database round trip costs ~1.1s" in API Route
-Conventions, which is the practical consequence, and the progressive load on `/reports`, which is
-the mitigation already in place.
+Supabase sits in **`ap-northeast-2`** (Seoul), ~5,000 km from Pakistan, and the production function
+in **`iad1`** (Washington DC) is further still. **Measured at 230 ms per round trip** from the dev
+machine after the pooler fix of 2026-08-19.
 
-**→ Measurements, the fix (`icn1`), and its go-live timing: PRE-HANDOFF CHECKLIST item 14.**
+⚠️ **The old figure here was ≈1.07s and it was blamed entirely on distance. That was wrong** — ~950 ms
+of it was the transaction pooler, and it is gone. What remains is real geography. The nearest region
+is **`ap-south-1` (Mumbai)**.
+
+**→ Both moves, and why the database one matters more than the function one: PRE-HANDOFF CHECKLIST
+item 14.**
 
 ### Deployment reality check — read before trusting a green deploy
 
@@ -2332,28 +2376,36 @@ summary said 62.5, and the owner would have to pick which of his own screens to 
 
 ### ⚪ Handoff infra
 
-#### `[ ]` **14. Region co-location — the function and the database are on different continents**
+#### `[~]` **14. Geography — the POOLER half is fixed; the DATABASE is still in the wrong region**
 
-**Do not fix mid-build. Do it at go-live, with the Pro upgrade.** Measured on a real deployment,
-not inferred:
+**Half of this closed on 2026-08-19, and it was the half nobody had identified.** The item used to
+read "the function and the database are on different continents" and treated ~1.1s per query as the
+consequence. Benchmarking showed **~950 ms of that was the transaction pooler, not distance**, and
+switching `DATABASE_URL` to the session pooler took every query to **230 ms**. See "A round trip
+costs ~230ms" in API Route Conventions.
+
+**What is left is genuine distance, and it is now the whole remaining cost:**
 
 | | |
 |---|---|
-| Serverless function region | **`iad1` — Washington DC** |
 | Supabase region | **`ap-northeast-2` — Seoul** |
-| Distance | ~11,000 km, every single query |
+| Distance from Pakistan | ~5,000 km — **measured at 230 ms per round trip** |
+| Nearest available region | **`ap-south-1` — Mumbai**, ~1,300 km from Lahore |
+| Serverless function region | `iad1` — Washington DC (production only) |
+
+**Two separate moves, and the DATABASE one matters more:**
+
+1. **Move the Supabase project to `ap-south-1` (Mumbai).** This helps **local development too**,
+   because the dev server runs in Pakistan and talks to Seoul today. Expect ~230 ms → roughly 40–60 ms.
+   ⚠️ **Supabase cannot change a project's region in place.** It requires creating a new project in
+   the target region and migrating into it (their documented path: `/docs/guides/platform/migrating-within-supabase`).
+   That means a new project ref, new connection strings and new keys — a gated operation with a
+   verified backup, exactly like Migration B.
+2. **Set the Vercel function region to `bom1`/`icn1`** to match wherever the database ends up.
+   Production only; does nothing for local.
 
 `X-Vercel-Id: bom1::iad1::…` — the first segment is only the edge PoP that accepted the request
 (Mumbai, nearest to Pakistan); the second is where the function actually ran.
-
-**This is the ~1.1s/query floor, and it is not a dev-machine artifact.** Measured warm against the
-deployed function: `/api/reports/summary` (1 query) **~1.75s**; `/api/reports/balances` (6 queries)
-**~6.4s ≈ 1.07s per query**. Production is no faster than local.
-
-**The fix:** set the project's function region to `icn1` (Seoul), or move the Supabase project near
-`iad1`. **Single highest-value performance change available** — everything else in the app is a
-workaround for it (see "One database round trip costs ~1.1s" in API Route Conventions, and the
-progressive load on `/reports`).
 
 #### `[ ]` **15. Data API surface — an owner decision, not a leak**
 
