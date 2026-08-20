@@ -12,23 +12,36 @@ export const SETTINGS_ID = "app";
 /**
  * THE RECEIPT PAPER WIDTH, as a character budget. One line, ESC/POS Font A.
  *
- * **58mm roll: 384-dot print head / 12 dots per character = 32 characters.**
+ * **80mm roll: 576-dot print head / 12 dots per character = 48 characters.**
+ * The owner CONFIRMED an 80mm printer on 2026-08-20.
  *
- * 58mm is the DEFAULT-WHEN-UNSURE choice, and the reason is asymmetric risk: a
- * layout built for 58mm also prints on 80mm (it just leaves margin), while an
- * 80mm layout OVERFLOWS 58mm and wraps into nonsense. The owner's actual printer
- * is unknown — nothing in this repo has ever recorded one — so the narrow
- * assumption is the safe one.
+ * ---------------------------------------------------------------------------
+ * 🔴 THIS IS THE ONLY PLACE THE WIDTH IS DECIDED. NEVER HARDCODE 48.
+ * ---------------------------------------------------------------------------
+ * Dividers, text wrapping, centring, padded money rows, the line clamp AND the
+ * `shopName` length cap all derive from this one number. That is precisely why
+ * changing paper size is a one-line edit here instead of a layout rewrite —
+ * keep it that way.
  *
- * If the printer is later confirmed as 80mm, this becomes 48 (576-dot head) and
- * the shop-name cap moves with it, because it is derived from this constant
- * rather than copied. Full reasoning: "Receipt printing" in CLAUDE.md.
+ * ⚠️ **`.receipt-paper { width }` in app/globals.css is the OTHER half and does
+ * NOT derive from this.** This constant is the character grid; the CSS is the
+ * physical paper the browser prints onto. Change one without the other and you
+ * get 48-character lines squeezed into a 58mm page, or a 32-character receipt
+ * marooned in the middle of an 80mm one.
  *
- * NOTE for the receipt renderer: double-width header text halves this to 16.
+ * Until 2026-08-20 this was 32 (58mm, 384-dot head). 58mm was the
+ * DEFAULT-WHEN-UNSURE choice — no printer had ever been recorded — and the
+ * reason was asymmetric risk: a 58mm layout also prints on 80mm, just leaving
+ * margin, whereas an 80mm layout OVERFLOWS 58mm and wraps every line into
+ * nonsense. That asymmetry has not changed; it is simply resolved now. **If the
+ * printer is ever swapped for a 58mm one, this must go back to 32** or every
+ * receipt becomes unreadable.
+ *
+ * NOTE for the receipt renderer: double-width header text halves this to 24.
  * That is a RENDERING decision — print a long name at normal width rather than
  * letting the validator reject a real shop name that would fit perfectly.
  */
-export const RECEIPT_LINE_CHARS = 32;
+export const RECEIPT_LINE_CHARS = 48;
 
 /**
  * THE SEEDED PLACEHOLDERS. Deliberately jarring, and they must stay that way.

@@ -126,7 +126,12 @@
 }
 
 .receipt-paper {
-  width: 58mm;
+  /* 🔴 THE PHYSICAL PAPER. Owner confirmed an 80mm printer on 2026-08-20.
+     This does NOT derive from RECEIPT_LINE_CHARS and must be changed with it:
+     that constant is the CHARACTER GRID (48 chars), this is the paper the
+     browser prints onto. Change one without the other and you get 48-character
+     lines squeezed into a 58mm page. Was 58mm / 32 chars until 2026-08-20. */
+  width: 80mm;
   padding: 2mm;
   margin: 0;
   background: #fff;
@@ -198,7 +203,12 @@
     position: absolute;
     top: 0;
     left: 0;
-    width: 58mm;
+    /* 🔴 THE WIDTH THAT ACTUALLY REACHES THE PRINTER. Must match the screen
+       rule above — 80mm since 2026-08-20. This is a SECOND copy of the width
+       and it is the one that matters: getting the screen preview right while
+       leaving this at 58mm would print a wrapped, unreadable roll while the
+       preview looked perfect. Was 58mm until 2026-08-20. */
+    width: 80mm;
     box-shadow: none;
     /* Thermal paper is white and the head prints black — force it, so a dark
        theme or a "background graphics off" driver setting cannot produce a

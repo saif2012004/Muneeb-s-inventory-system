@@ -154,15 +154,23 @@ Then a **read-only** row count. Do not trust any number written in a document, i
 
 ---
 
-## 4. STILL PENDING A DECISION, NOT A BUILD
+## 4. ✅ RESOLVED — receipt paper width
 
-**Receipt paper width.** `RECEIPT_LINE_CHARS` is **32** (58mm). The owner is buying a new printer and
-**80mm is recommended** — once confirmed, set the constant to **48** and the `shopName` cap follows
-automatically, because it is derived rather than hardcoded.
+**The owner confirmed an 80mm printer on 2026-08-20**, and the code was changed to match the same
+day: `RECEIPT_LINE_CHARS = 48` and `.receipt-paper { width: 80mm }`.
 
-**Confirm the actual roll first.** A 58mm layout prints fine on 80mm, leaving margin; an 80mm layout
-wraps every line of a 58mm roll into nonsense. The risk is asymmetric, which is why it defaults
-narrow.
+**THREE edits, not one** — the constant (character grid), the screen CSS width, and a second CSS
+width inside `@media print`. Only the constant propagates; the `shopName` cap moved 32 → 48 by
+itself. **The print-media copy was nearly missed**, and missing it fails silently: the on-screen
+preview looks perfect while the physical roll wraps into nonsense. Caught by grepping for residual
+`58mm`, not by looking at the page.
+
+Verified three ways: a fixture through `buildReceiptLines` (longest line exactly 48, none over), a
+browser measurement of the real stylesheet (281.3px of text in 287.2px of content — 6px headroom),
+and a real rendered receipt with the money column landing on column 48 every row.
+
+**If the printer is ever swapped back to 58mm, both values must go back** (32 and 58mm). An 80mm
+layout wraps every line of a 58mm roll into nonsense.
 
 ---
 

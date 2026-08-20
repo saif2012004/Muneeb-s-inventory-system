@@ -436,45 +436,62 @@ unambiguous from the total on the same line.)*
   as is any per-module bill sold at full price. A discounted bill still prints Subtotal → Discount →
   TOTAL, unchanged. Matches the owner's answer on the mixed receipt: **one flat list, one total.**
 
-### Receipt printing (thermal) — ⚠️ 58mm SUPERSEDED PENDING CONFIRMATION (2026-08-13)
+### Receipt printing (thermal) — ✅ 80mm CONFIRMED AND SHIPPED (2026-08-20)
 
-> **🔴 UPDATE 2026-08-13 — DESIGN THE RECEIPT FOR 80mm.**
-> The owner is **buying a new printer**, and **80mm thermal is RECOMMENDED**. The 58mm decision below
-> was made when we had no information about the printer at all; that is no longer the situation.
->
-> **This is superseded PENDING CONFIRMATION, not yet changed in code.** `RECEIPT_LINE_CHARS` is still
-> **32**. **When the printer is confirmed, set `RECEIPT_LINE_CHARS = 48`** — and the `shopName` cap
-> follows automatically, because it is derived from that constant rather than hardcoded (which is
-> exactly why it was built that way).
->
-> **The 58mm reasoning below is kept, not deleted.** It still documents why the constant exists, why
-> everything derives from it, and the asymmetric-risk argument — which remains correct and is the
-> reason changing this is a one-line change rather than a layout rewrite.
-
-**The receipt layout is built for a 58mm roll: `RECEIPT_LINE_CHARS = 32`, in
-`lib/settings-display.ts`. Derive every width from that constant — never hardcode 32.**
+**The owner confirmed an 80mm printer on 2026-08-20, and the code now matches:
+`RECEIPT_LINE_CHARS = 48`.**
 
 | Roll | Print head | Font A (12 dots/char) | Font B (9 dots/char) |
 |---|---|---|---|
-| **58mm (assumed)** | 384 dots | **32 chars/line** | 42 |
-| 80mm | 576 dots | 48 chars/line | 64 |
+| 58mm | 384 dots | 32 chars/line | 42 |
+| **80mm (confirmed)** | 576 dots | **48 chars/line** | 64 |
 
-*(Standard ESC/POS figures. **Not measured against the owner's printer** — see below.)*
+#### 🔴 CHANGING PAPER SIZE IS **THREE** EDITS. Miss one and it fails silently.
 
-**Why 58mm when we do not know the printer: the risk is asymmetric.** A 58mm layout also prints
-on 80mm — it just leaves margin. An 80mm layout **overflows** 58mm and wraps every line into
-nonsense. Default to the narrow assumption; the failure mode of guessing narrow is a bit of white
-space, and the failure mode of guessing wide is an unreadable receipt.
+| # | What | Where | Now |
+|---|---|---|---|
+| 1 | The **character grid** the money columns align to | `RECEIPT_LINE_CHARS`, `lib/settings-display.ts` | **48** |
+| 2 | The **screen** paper width | `.receipt-paper { width }`, `app/globals.css` (~:134) | **80mm** |
+| 3 | The **PRINT** paper width | `.receipt-paper { width }` inside `@media print`, same file (~:211) | **80mm** |
 
-~~**We have no information about the actual printer.**~~ **Superseded 2026-08-13 — see the update at
-the top of this section.** As of 2026-08-10 nothing in the repo had ever recorded a model, an
-interface, or a paper width, which is what forced the narrow default. **The owner is now buying a new
-printer and 80mm is recommended**, so the expected end state is
-`RECEIPT_LINE_CHARS = 48` with the shop-name cap following automatically. **Still confirm the actual
-roll before changing the constant** — the risk asymmetry above is unchanged, and a wrong guess in the
-wide direction wraps every line into nonsense.
+**Only #1 propagates.** Dividers, wrapping, centring, padded money rows, the line clamp and the
+`shopName` cap all derive from the constant — which is why this is a three-line change and not a
+layout rewrite. **Never hardcode 48.**
 
-**Double-width header text halves the budget to 16 characters.** That is a RENDERING decision for
+**#3 is the dangerous one and was nearly missed on 2026-08-20.** It is a SECOND copy of the width
+inside the print media query, and it is the one that actually reaches the printer. Getting #1 and #2
+right while leaving #3 at 58mm gives you a preview that looks perfect on screen and a physical roll
+that wraps every line into nonsense — with nothing on screen to warn you, because the screen is
+using the other rule. It was caught by grepping for residual `58mm` after the change, not by looking
+at the page.
+
+Change one without the others and you get: 48-character lines squeezed into a 58mm page (#1 alone),
+a 32-character receipt marooned in the middle of an 80mm roll (#2 alone), or the silent failure
+above (#3 forgotten).
+
+**Verified at 80mm, three ways** (2026-08-20), because a green build has never once caught a receipt
+bug in this project:
+
+1. **The text layer**, via a fixture through `buildReceiptLines` — 21 lines, longest exactly 48, none
+   over.
+2. **The physical fit**, measured in the browser against the app's own stylesheet: 48 chars = 281.3px
+   of text inside 287.2px of content width. **6px of headroom.** The monospace advance turned out to
+   be 5.86px, not the 6.0px a back-of-envelope estimate gives — which would have predicted an
+   overflow that does not happen. Measured, not assumed.
+3. **A real rendered receipt** in the browser: money column ending at column 48 on every row, no
+   horizontal scroll, and the arithmetic multiplying out (`2 peti × 7,000.00 → Rs. 14,000.00`).
+
+**What the extra 16 characters bought:** the phone line (three numbers, 35 chars) and the address
+(46 chars) each now fit on **ONE** line instead of wrapping to two — so the header is 3 lines
+instead of 5.
+
+**⚠️ If the printer is ever swapped back to 58mm, BOTH values must go back** (32 and 58mm). The
+asymmetric-risk argument that made 58mm the default-when-unsure is unchanged and still correct — it
+is simply resolved now. It was: a 58mm layout also prints on 80mm, just leaving margin, whereas an
+80mm layout overflows 58mm and wraps every line into nonsense. That is why this stayed at 32 for a
+week after 80mm was *recommended*, and only moved when it was *confirmed*.
+
+**Double-width header text halves the budget to 24 characters.** That is a RENDERING decision for
 the receipt, not a validation one: print a long shop name at normal width rather than letting the
 validator reject a real name that would fit perfectly.
 
@@ -482,9 +499,9 @@ validator reject a real name that would fit perfectly.
 
 | Field | Cap | Why |
 |---|---|---|
-| `shopName` | **32** | Exactly one 58mm line |
-| `shopPhone` | 60 | ~2 lines; enough for two numbers as free text |
-| `shopAddress` | 200 | Wraps to ~6 lines; a paste guard, not a format rule |
+| `shopName` | **48** | Exactly one 80mm line — moved from 32 automatically when the constant changed, because it is DERIVED |
+| `shopPhone` | 60 | Now ~1.5 lines at 48 chars; enough for three numbers as free text |
+| `shopAddress` | 200 | Wraps to ~4 lines at 48 chars; a paste guard, not a format rule |
 
 ---
 
@@ -2086,9 +2103,11 @@ Caps are **32 / 60 / 200** (name / phone / address) and exist only so the receip
 see **Receipt printing** in the Design System for where the numbers come from. Two of them have a
 reason that must not be lost:
 
-- **`shopName` = 32** is not a taste judgement, it is one line of a 58mm receipt
-  (`RECEIPT_LINE_CHARS`). If the paper width is ever confirmed as 80mm, change that constant to 48
-  and this cap follows — do not edit the cap directly.
+- **`shopName` = 48** is not a taste judgement, it is one line of an 80mm receipt
+  (`RECEIPT_LINE_CHARS`). **It was 32 until 2026-08-20 and moved by itself** when the printer was
+  confirmed as 80mm and the constant changed — which is the whole point: **never edit this cap
+  directly.** Change `RECEIPT_LINE_CHARS` and the cap, its validation message and the Settings
+  form's helper text all follow.
 - **`shopPhone` = 60, and MULTIPLE NUMBERS ARE ALLOWED as free text.** Owners routinely list two.
   `0300-1234567 / 042-35678901` is already 27 characters, so the earlier 30 would have rejected an
   ordinary two-number listing — the same false rejection, arriving through a length check instead of
