@@ -5,7 +5,7 @@ import { Printer, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatSize, titleCase } from "@/lib/catalog-display";
+import { composeProductDetail } from "@/lib/catalog-display";
 import { formatPKR } from "@/lib/format";
 import { useUnifiedSale } from "@/lib/hooks/use-unified-sales";
 import { formatQuantityWithUnit } from "@/lib/sale-catalog";
@@ -67,15 +67,12 @@ export function UnifiedSaleLineItems({ saleId }: { saleId: string }) {
   return (
     <div className="space-y-2 border-t border-zinc-100 bg-zinc-50/60 p-4">
       {sale.items.map((item) => {
-        // Same attributes the picker shows, so a line reads the way it was
-        // chosen — without these, all four Russ variants look identical here.
-        const detail = [
-          formatSize(item.product.size) !== "—" ? formatSize(item.product.size) : null,
-          item.product.qualityTier ? titleCase(item.product.qualityTier) : null,
-          item.product.shape ? titleCase(item.product.shape) : null,
-        ]
-          .filter(Boolean)
-          .join(" · ");
+        // The attributes the picker shows, so a line reads the way it was
+        // chosen — MINUS anything the product name already says. Rendering them
+        // blindly next to the name gave "Biscuits Simple · Simple" and
+        // "Pepsi 1L · 1L" (the receipt had the identical bug). One shared
+        // implementation, so the two cannot drift apart again.
+        const detail = composeProductDetail(item.product);
 
         const moduleStyle = MODULE_STYLE[item.moduleKey];
 

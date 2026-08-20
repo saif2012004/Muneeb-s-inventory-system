@@ -52,6 +52,65 @@ export function titleCase(value: string): string {
 }
 
 /**
+ * The size / tier / shape suffix for ONE PRODUCT LINE — **with anything the
+ * product's own NAME already says stripped out.**
+ *
+ * ---------------------------------------------------------------------------
+ * 🔴 WHY THE NAME CHECK EXISTS. Do not "simplify" it away.
+ * ---------------------------------------------------------------------------
+ * The attributes were being appended blindly, so a receipt printed:
+ *
+ *     Biscuits Simple  Simple
+ *     Pepsi 1L  1L
+ *
+ * Every product name in this catalog ALREADY carries its own attributes — the
+ * seed names them that way ("Biscuits Simple", "Pepsi 1L", "Russ Large
+ * Circle"). Checked against all 69 products that carry a size, tier or shape:
+ * every single one duplicated. So the suffix was pure noise on a 48-character
+ * roll, and worse, it read as a second product.
+ *
+ * The suffix is still BUILT rather than deleted, because it is genuinely useful
+ * for a product whose name does not carry the attribute — a future "Russ" with
+ * shape `circle` would still print `Russ · Circle`. It is the DUPLICATION that
+ * is wrong, not the concept.
+ *
+ * ⚠️ Comparison is on letters and digits only, lowercased, so `0.5L` matches a
+ * name written `0.5 L`. That means a substring match: a product named
+ * "Smalltown Cola" carrying size `small` would have its "Small" suppressed.
+ * Accepted deliberately — the cost is one missing disambiguator, whereas the
+ * bug it fixes was on every line of every bill. No product in the catalog hits
+ * it today.
+ *
+ * ⚠️ `formatSize` is used rather than title-casing the raw value, and that
+ * matters: it maps `half_litre` → **"0.5L"**, which is what the names actually
+ * say. The receipt used to title-case it into "Half Litre", which then failed
+ * to match "Pepsi 0.5L" and printed anyway. Same bug, twelve products.
+ */
+export function composeProductDetail(product: {
+  name: string;
+  size: string | null;
+  qualityTier: string | null;
+  shape: string | null;
+}): string | null {
+  const size = formatSize(product.size);
+  const parts = [
+    size !== "—" ? size : null,
+    product.qualityTier ? titleCase(product.qualityTier) : null,
+    product.shape ? titleCase(product.shape) : null,
+  ].filter((part): part is string => Boolean(part));
+
+  const name = squash(product.name);
+  const kept = parts.filter((part) => !name.includes(squash(part)));
+
+  return kept.length > 0 ? kept.join(" · ") : null;
+}
+
+/** Letters and digits only, lowercased — so "0.5 L", "0.5L" and "0.5l" agree. */
+function squash(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
  * The Quality/Shape column carries whichever attribute a product uses:
  * bakery tiers (Premium/Simple) or russ shapes (Circle/Rectangular Round).
  */

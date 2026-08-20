@@ -33,6 +33,7 @@
  */
 import { Prisma } from "@prisma/client";
 
+import { composeProductDetail } from "@/lib/catalog-display";
 import { prisma } from "@/lib/prisma";
 import { UNIFIED_SALE_DETAIL_SELECT } from "@/lib/unified-sales";
 import { getSettings } from "@/lib/settings";
@@ -86,23 +87,6 @@ export type ReceiptData = {
   /** The shop header. Placeholders are passed through UNCHANGED — see below. */
   settings: Settings;
 };
-
-/** The size/tier/shape suffix, composed exactly as the sale detail composes it. */
-function composeDetail(product: {
-  size: string | null;
-  qualityTier: string | null;
-  shape: string | null;
-}): string | null {
-  const parts = [product.size, product.qualityTier, product.shape]
-    .filter((part): part is string => Boolean(part))
-    .map((part) =>
-      part
-        .split("_")
-        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(" ")
-    );
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
 
 /**
  * Load one UNIFIED sale, ready to print (S4.2).
@@ -159,7 +143,7 @@ export async function loadUnifiedReceipt(
     lines: sale.items.map((item) => ({
       id: item.id,
       name: item.product.name,
-      detail: composeDetail(item.product),
+      detail: composeProductDetail(item.product),
       unit: item.product.unit,
       coolingRate: serializeMoney(item.coolingRate),
       unitName: item.unitName,

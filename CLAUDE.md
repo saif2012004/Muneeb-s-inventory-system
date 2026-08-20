@@ -1816,6 +1816,18 @@ would start diluting the two that matter.)
   - **Query keys are module-scoped** — `["sales", module.key, …]` in `lib/hooks/use-sales.ts`.
     Without the module segment, opening one module's list shows the other's rows from cache.
     Verified behaviourally: 12 samples across rapid switches, no leak.
+  - **🔴 A size/tier/shape suffix is shown only when the NAME does not already say it.**
+    `composeProductDetail()` in `lib/catalog-display.ts` is the ONE implementation, used by the
+    receipt (`lib/receipt.ts`) and the sale line list
+    (`components/sales/UnifiedSaleLineItems.tsx`). Both used to append the attributes blindly and
+    printed **`Biscuits Simple  Simple`** and **`Pepsi 1L  1L`** — on a customer's bill, where the
+    repeat reads as a second product. Checked against the catalog: **all 69 products carrying a
+    size, tier or shape duplicated it**, because the seed names them that way. The suffix is still
+    BUILT, not deleted — a product genuinely named `Russ` still gets `Russ · Large · Circle`. It is
+    the DUPLICATION that was wrong. Fixed 2026-08-20; same family as the unit rule below.
+    ⚠️ Note the trap that hid twelve of them: the receipt title-cased `half_litre` into
+    `"Half Litre"`, which then failed to match a name reading `0.5L` and printed anyway. The shared
+    helper uses `formatSize`, which maps it to `"0.5L"`.
   - **A unit suffix is shown only when the unit ADDS information.** `SELF_EVIDENT_UNITS` in
     `lib/sale-catalog.ts` suppresses "bottle"/"piece"; eggs keep "Quantity (cottons)" because
     a bare "3" is genuinely ambiguous. It is a property of the unit, not the module — do not
