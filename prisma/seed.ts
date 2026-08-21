@@ -413,10 +413,24 @@ const bakeryProducts: ProductSeed[] = [
   // Quality-tier pairs.
   ...(
     [
-      { base: "Cake Rusk", subCategoryId: "sub_cake_rusk" },
-      { base: "Biscuits", subCategoryId: "sub_biscuits" },
+      { base: "Cake Rusk", subCategoryId: "sub_cake_rusk", unit: "piece" },
+      /**
+       * 🔴 BISCUITS ARE WEIGHED, NOT COUNTED (2026-08-21, the owner's rule).
+       *
+       * The base unit is the KILOGRAM and the stock pool is kilograms, so a
+       * 200 g sale is the ordinary decimal quantity 0.2 — exactly the shape
+       * milk has used since it became a catalog product. `price` is therefore
+       * a price PER KG.
+       *
+       * `stock: 0` for the same reason `prod_milk` overrides it: a measured
+       * quantity must be counted, never invented. The seed's default of 100
+       * would claim a hundred kilograms of biscuits that nobody weighed, and
+       * the till would sell against it. Zero blocks the sale and puts the
+       * inline stock editor in front of the owner instead.
+       */
+      { base: "Biscuits", subCategoryId: "sub_biscuits", unit: "kg", stock: 0 },
     ] as const
-  ).flatMap(({ base, subCategoryId }) =>
+  ).flatMap(({ base, subCategoryId, unit, ...rest }) =>
     (["premium", "simple"] as const).map((qualityTier) => ({
       id: `prod_${slug(base)}_${qualityTier}`,
       name: `${base} ${qualityTier === "premium" ? "Premium" : "Simple"}`,
@@ -424,7 +438,8 @@ const bakeryProducts: ProductSeed[] = [
       size: null,
       qualityTier,
       shape: null,
-      unit: "piece",
+      unit,
+      ...("stock" in rest ? { stock: rest.stock } : {}),
     }))
   ),
 

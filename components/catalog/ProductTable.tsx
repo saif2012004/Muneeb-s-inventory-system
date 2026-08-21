@@ -145,6 +145,7 @@ export function ProductTable({
                     productId={product.id}
                     productName={product.name}
                     stock={product.stock}
+                    unit={product.unit}
                     includeInactive={includeInactive}
                     disabled={!product.isActive}
                   />

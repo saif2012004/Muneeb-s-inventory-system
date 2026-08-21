@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { ApiError } from "@/lib/api-client";
 import { useUpdateProductStock } from "@/lib/hooks/use-catalog";
+import { pluralizeUnit } from "@/lib/sale-catalog";
 import { cn } from "@/lib/utils";
 
 /**
@@ -33,6 +34,7 @@ export function InlineStockEditor({
   productId,
   productName,
   stock,
+  unit = null,
   includeInactive,
   disabled,
   autoFocus,
@@ -40,6 +42,16 @@ export function InlineStockEditor({
   productId: string;
   productName: string;
   stock: number;
+  /**
+   * The product's BASE UNIT, so the confirmation names what was counted —
+   * "12.5 kg in stock" rather than "12.5 units in stock", which on a weighed
+   * product reads as twelve and a half packets.
+   *
+   * Optional because `StockBlockAlert` mounts this from a stock-shortfall
+   * payload that carries no unit; it falls back to the generic wording, which
+   * is exactly what it printed before this prop existed.
+   */
+  unit?: string | null;
   includeInactive: boolean;
   disabled?: boolean;
   /** Opens straight into edit mode — used by the Restock action. */
@@ -85,8 +97,18 @@ export function InlineStockEditor({
 
     // Mirrors the server rule in lib/validations/catalog.ts, so an obviously bad
     // value never costs a round trip.
-    if (!Number.isFinite(next) || !Number.isInteger(next) || next < 0) {
-      toast.error("Enter a whole number of units, 0 or more.");
+    //
+    // 🔴 DECIMALS ARE ALLOWED, and were not until 2026-08-21. Two of this
+    // catalog's base units are MEASURED rather than counted — litres of milk
+    // and kilograms of biscuits — so a whole-number rule made the one editor
+    // that can SET stock unable to express the very figures the sale path
+    // writes. Two decimals, matching `Product.stock numeric(10,2)`.
+    if (!Number.isFinite(next) || next < 0) {
+      toast.error("Enter a number, 0 or more.");
+      return;
+    }
+    if (Math.round(next * 100) !== next * 100) {
+      toast.error("Stock can have at most 2 decimals.");
       return;
     }
     if (next === stock) return;
@@ -96,7 +118,9 @@ export function InlineStockEditor({
       {
         onSuccess: () =>
           toast.success(
-            `${productName}: ${next} ${next === 1 ? "unit" : "units"} in stock`
+            `${productName}: ${next} ${
+              unit ? pluralizeUnit(unit, next) : next === 1 ? "unit" : "units"
+            } in stock`
           ),
         onError: (error) =>
           toast.error(
@@ -113,8 +137,10 @@ export function InlineStockEditor({
       <input
         ref={inputRef}
         type="text"
-        // Design System: numeric inputs open the phone's number pad.
-        inputMode="numeric"
+        // Design System: numeric inputs open the phone's number pad. "decimal"
+        // rather than "numeric" — a weighed product's stock is 12.5, and
+        // "numeric" offers no decimal point on some Android keyboards.
+        inputMode="decimal"
         value={draft}
         aria-label={`Stock for ${productName}`}
         onChange={(event) => setDraft(event.target.value)}

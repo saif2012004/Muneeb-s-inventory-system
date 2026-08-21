@@ -990,6 +990,46 @@ untouched. See the create/update asymmetry note above.
   wanting a product-level discount, that is the variant model coming back; don't.
 - Russ = 2 sizes (large/small) x 2 shapes (circle/rectangular_round) = 4 products, differentiated by `size` and `shape`.
 - Eggs sold by the cotton: `unit: "cotton"`, quantity = number of cottons.
+  ⚠️ **Stale line — `prod_eggs.unit` has been `"egg"` since 2026-08-18** (CHECKLIST #19). The pool
+  is single eggs; a cotton/dozen/tray/peti is a `ProductUnit` with a `baseFactor`.
+
+### ⚖️ WEIGHED GOODS: the biscuits are sold by the KILOGRAM (2026-08-21)
+
+**`prod_biscuits_premium` and `prod_biscuits_simple` carry `unit: "kg"`, their `stock` is a number
+of kilograms, and `price` is a price PER KG.** A customer buying 200 g is the ordinary decimal
+quantity `0.2` — there is no gram unit, no conversion step and no new concept:
+
+```
+0.2 kg × Rs. 1,200.00  =  Rs. 240.00      stock 10.50 -> 10.30
+```
+
+**This is the shape milk has had since 2026-08-13, reused.** `SaleItem.quantity` is
+`Decimal(10,2)` (Migration C) and `Product.stock` is `Decimal(10,2)` (Migration D) precisely so a
+measured base unit works, so **weighing needed no migration** — only the zod enum, which is
+application-level.
+
+Three rules follow:
+
+- **🔴 `Product.stock` IS NO LONGER VALIDATED AS AN INTEGER.** `lib/validations/catalog.ts` accepted
+  whole numbers only, on the reasoning "you cannot have 2.5 bottles on a shelf" — true of a bottle
+  and false of a litre or a kilogram. **The one editor that can SET stock could not express the
+  figures the sale path was already writing**, which also made the documented escape hatch for
+  correcting milk stock unable to say `4,050.5`. It is now 2 decimals, matching the column.
+  `InlineStockEditor` mirrors that client-side; both were `.int()` and both had to change.
+- **Granularity is 10 g.** `Decimal(10,2)` in kilograms means `0.01 kg` is the smallest
+  representable sale. Fine for loose biscuits; if anything is ever sold finer than that, the base
+  unit must be the gram, not a wider column.
+- **`"kg" NEVER takes an "s"`** — `UNPLURALISED_UNITS` in `lib/sale-catalog.ts`, mirrored by the
+  receipt's own `formatQuantity`. `0.2 kgs` and `Quantity (kgs)` are wrong the way `5 kms` is.
+  Same family as the VERBATIM rule for a `ProductUnit` name: do not apply English pluralisation to
+  a token that is not an English singular noun.
+
+**Fixed-weight packets are possible but were NOT added**, deliberately. A `ProductUnit` of
+`baseFactor 0.5` priced as a 500 g packet works with the existing machinery — but a weight pack's
+price is normally just proportional to the kg price, so storing it separately creates a second
+place the price lives and it goes stale the day the kg price changes. That is the opposite of the
+eggs case, where a peti genuinely is NOT 360 × the single-egg price, which is why that one is
+stored. Add weight packs only if the owner wants a packet priced independently of his per-kg rate.
 
 ### Out of scope (do not build unless asked)
 - ~~Physical stock / inventory counts~~ — **STOCK SHIPPED 2026-08-09.** `Product.stock`, decremented
@@ -2418,6 +2458,47 @@ else is network-first.
 Verified in the browser: **30 static entries cached, 0 API entries**, nothing outside
 `/_next/static/` and the offline page.
 
+##### 🔴 THE SERVICE WORKER IS REGISTERED IN PRODUCTION ONLY. It used to register in dev, and that COST REAL TIME (2026-08-21)
+
+**"Content-hashed, so stale code can never be served" is true of `next build` and FALSE of
+`next dev`.** The dev server emits STABLE, unhashed chunk names — the URL
+
+```
+/_next/static/chunks/app/(dashboard)/sales/new/page.js
+```
+
+is byte-for-byte the same after every edit. **Cache-first on a stable URL is cache-forever.**
+
+What it looked like: a change to `lib/sale-catalog.ts` that `tsx` proved correct kept rendering the
+OLD label in the browser through a hard reload, `location.reload(true)`, a **full `.next` wipe** and
+a dev-server restart. Every one of those is a legitimate fix for staleness and none of them touches
+a service-worker cache, because the SW answers before the request reaches Next. The natural
+conclusion — "the fix didn't work" — was the wrong one, and it was only caught by fetching the
+served chunk and reading the function body out of it.
+
+**Why this mattered more here than it would elsewhere:** *"verify UI in a real browser, not on a
+build"* is this repo's standing rule (Phase 3 carried-forward note) — it is how essentially every
+UI bug in this project was found. A dev browser silently serving week-old JavaScript attacks the
+primary verification method itself, and it fails in the direction of a FALSE PASS as easily as a
+false fail.
+
+**The fix** (`components/providers/pwa-provider.tsx`): registration is skipped unless
+`NODE_ENV === "production"`, and the dev branch actively **unregisters and deletes the caches**, so
+a browser already poisoned heals itself on one visit instead of needing someone to know to clear it
+by hand in DevTools.
+
+⚠️ **The trade-off is real and was the old comment's actual point:** the service worker is now never
+exercised locally. Its behaviour is a **production/preview** check, not a `npm run dev` one. If you
+change `public/sw.js`, verify it on a deployed build.
+
+**If you ever see a browser rendering code you know you changed**, check for a registered service
+worker before you doubt the code:
+
+```js
+await navigator.serviceWorker.getRegistrations()   // expect [] on localhost
+await caches.keys()                                // expect [] on localhost
+```
+
 ##### It does NOT work offline, deliberately
 
 Queuing sales offline means two queued sales of the last 5 bottles both succeed locally and one has
@@ -2727,7 +2808,9 @@ after, to confirm git and `_prisma_migrations` agree.
 **Bakery:**
 - Cake Rusk Premium, Cake Rusk Simple
 - Buns
-- Biscuits Premium, Biscuits Simple
+- Biscuits Premium, Biscuits Simple — **`unit: "kg"`, stock in kilograms, `stock: 0`** (2026-08-21).
+  Weighed goods; see the WEIGHED GOODS rule above. Zero rather than the seed's default of 100
+  because a measured quantity must be counted, never invented.
 - Russ Large Circle, Russ Large Rectangular Round, Russ Small Circle, Russ Small Rectangular Round
 - Eggs (unit: cotton)
 

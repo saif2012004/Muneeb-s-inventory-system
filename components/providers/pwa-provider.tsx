@@ -42,11 +42,49 @@ export function PwaProvider() {
     if (!("serviceWorker" in navigator)) return;
 
     /**
-     * Registered in DEV TOO, deliberately — but see `public/sw.js`: it caches
-     * only `/_next/static/`, which is content-hashed, so it cannot serve stale
-     * code. Skipping dev registration would mean the one thing most likely to
-     * break in production is the one thing never exercised locally.
+     * 🔴 PRODUCTION ONLY. It was registered in dev too until 2026-08-21, on a
+     * premise that turned out to be FALSE.
+     *
+     * The old comment here read: "it caches only `/_next/static/`, which is
+     * content-hashed, so it cannot serve stale code". That is true of a
+     * production build and NOT of `next dev`, which emits STABLE, unhashed
+     * chunk names — `/_next/static/chunks/app/(dashboard)/sales/new/page.js`
+     * keeps that exact URL across every edit. Cache-first on a stable URL is
+     * cache-forever.
+     *
+     * What that cost: a verified-correct change to `lib/sale-catalog.ts` kept
+     * rendering the OLD label in the browser through a hard reload, a `.next`
+     * wipe and a dev-server restart, because the service worker was answering
+     * from `static-v1` before the request ever reached Next. It looked exactly
+     * like a code bug, and the opposite conclusion — "the fix didn't work" —
+     * was the natural one to draw.
+     *
+     * This matters more here than in most projects: "verify UI in a real
+     * browser, not on a build" is this repo's standing rule (Phase 3), so a
+     * dev browser that can silently serve week-old JavaScript undermines the
+     * primary way anything gets verified.
+     *
+     * The dev branch below actively UNREGISTERS and clears the caches, so a
+     * browser already poisoned by the old behaviour heals itself on one visit
+     * rather than needing someone to know to do it by hand in DevTools.
      */
+    if (process.env.NODE_ENV !== "production") {
+      void navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) =>
+          Promise.all(registrations.map((registration) => registration.unregister()))
+        )
+        .then(() =>
+          typeof caches !== "undefined"
+            ? caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+            : undefined
+        )
+        .catch(() => {
+          // Best effort. Failing to clean up a dev cache must never break dev.
+        });
+      return;
+    }
+
     const register = () => {
       navigator.serviceWorker.register("/sw.js").catch((error) => {
         // A failed registration must never break the app — it is an

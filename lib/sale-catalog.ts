@@ -202,14 +202,29 @@ export function indexSaleProducts(
  */
 const SELF_EVIDENT_UNITS = new Set(["bottle", "piece"]);
 
+/**
+ * Units that DO NOT TAKE AN "s", ever.
+ *
+ * "kg" is a symbol, not a word — `0.2 kgs` and `Quantity (kgs)` are wrong the
+ * way `5 kms` is wrong, and on a weighed product that label is the main thing
+ * telling the owner what number to type. Every other unit here is a countable
+ * English noun ("cotton", "egg", "litre") and pluralises normally.
+ *
+ * Same family as the VERBATIM rule for a selling unit's name below: the point
+ * in both cases is that we do not apply English pluralisation to a token that
+ * is not an English singular noun.
+ */
+const UNPLURALISED_UNITS = new Set(["kg"]);
+
 /** True when naming this unit tells the owner something the product doesn't. */
 export function unitIsInformative(unit: string | null): unit is string {
   return Boolean(unit) && !SELF_EVIDENT_UNITS.has(unit as string);
 }
 
-/** Plural form of a selling unit: `"cottons"`. Empty when there's no unit. */
+/** Plural form of a selling unit: `"cottons"`, but `"kg"`. Empty with no unit. */
 export function pluralizeUnit(unit: string | null, quantity: number): string {
   if (!unit) return "";
+  if (UNPLURALISED_UNITS.has(unit)) return unit;
   return quantity === 1 ? unit : `${unit}s`;
 }
 
@@ -236,8 +251,10 @@ export function formatQuantityWithUnit(
 
 /** `"Quantity (cottons)"` for an informative unit, else plain `"Quantity"`. */
 export function quantityFieldLabel(unit: string | null): string {
-  // Always plural on the label — it names the unit, not a specific count.
-  return unitIsInformative(unit) ? `Quantity (${unit}s)` : "Quantity";
+  // Always plural on the label — it names the unit, not a specific count. The
+  // `2` is that "some number other than one"; `pluralizeUnit` is what keeps
+  // "kg" from becoming "kgs" here as well as on the line total.
+  return unitIsInformative(unit) ? `Quantity (${pluralizeUnit(unit, 2)})` : "Quantity";
 }
 
 /** `"Price per cotton"` for an informative unit, else plain `"Unit price"`. */

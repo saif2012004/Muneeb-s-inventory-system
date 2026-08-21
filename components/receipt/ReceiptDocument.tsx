@@ -99,6 +99,11 @@ function formatQuantity(
   if (unitName) return `${quantity} ${unitName}`;
   if (!unit || unit === "piece" || unit === "bottle") return String(quantity);
   if (unit === "litre") return `${quantity} L`;
+  // "kg" is a symbol and never takes an "s" — `0.2 kgs` is wrong the way
+  // `5 kms` is. It is also already short, so unlike "litres" it costs the line
+  // budget nothing to print as-is. Mirrors UNPLURALISED_UNITS in
+  // lib/sale-catalog.ts, which is the screen's copy of the same rule.
+  if (unit === "kg") return `${quantity} kg`;
   return `${quantity} ${unit}${quantity === 1 ? "" : "s"}`;
 }
 

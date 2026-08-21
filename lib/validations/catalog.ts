@@ -23,15 +23,33 @@ const price = z
   .max(99_999_999.99, { message: "Price is too large" });
 
 /**
- * Units on hand. A WHOLE, NON-NEGATIVE count — you cannot have 2.5 bottles on a
- * shelf, and negative stock is the exact state the sale block exists to prevent,
- * so it must not be reachable through the editor either.
+ * Units on hand, in the product's BASE UNIT. Non-negative, at most 2 decimals.
+ *
+ * ---------------------------------------------------------------------------
+ * 🔴 IT WAS `.int()` UNTIL 2026-08-21, AND THAT WAS WRONG FOR WEIGHT AND VOLUME
+ * ---------------------------------------------------------------------------
+ * The old rule read "you cannot have 2.5 bottles on a shelf" — true of a
+ * bottle, and false of the two base units this catalog actually holds that are
+ * measured rather than counted:
+ *
+ *   litre   `prod_milk` — the delivery bridge writes fractional litres all day
+ *   kg      the biscuits, added 2026-08-21
+ *
+ * So the editor could not SET a stock figure that the sale path was perfectly
+ * happy to WRITE. `Product.stock` has been `Decimal(10,2)` since Migration D
+ * (2026-08-12) precisely so it could hold these; this validator was the last
+ * thing still insisting otherwise, and it was the documented escape hatch for
+ * correcting milk stock — which could not express 4,050.5 L.
+ *
+ * Two decimals, matching the column, so what validates is what gets stored.
+ * Negative is still refused: it is the exact state the sale block exists to
+ * prevent, so it must not be reachable through the editor either.
  */
 const stock = z
   .number({ message: "Stock must be a number" })
-  .int({ message: "Stock must be a whole number" })
   .min(0, { message: "Stock cannot be negative" })
-  .max(1_000_000, { message: "Stock is too large" });
+  .max(1_000_000, { message: "Stock is too large" })
+  .multipleOf(0.01, { message: "Stock can have at most 2 decimals" });
 
 const id = z.string().min(1, { message: "A valid id is required" });
 
@@ -88,6 +106,11 @@ export const PRODUCT_UNITS = [
   "piece",
   "bottle",
   "litre",
+  // WEIGHT (2026-08-21). The biscuits are sold loose off a scale, so the pool
+  // is kilograms and a 200 g sale is the ordinary decimal quantity 0.2 — the
+  // same shape milk has used since 2026-08-13. Nothing else about a weighed
+  // product is special: one stock pool, one base unit, `quantity × unitFactor`.
+  "kg",
 ] as const;
 
 /** Display labels. "half_litre" is stored; "0.5L" is what the owner reads. */

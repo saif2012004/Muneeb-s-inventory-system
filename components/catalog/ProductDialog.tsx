@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select";
 import { formatSize, titleCase } from "@/lib/catalog-display";
 import type { Product, ProductWriteInput } from "@/lib/hooks/use-catalog";
+import { pluralizeUnit } from "@/lib/sale-catalog";
 import {
   PRODUCT_SHAPES,
   PRODUCT_SIZES,
@@ -298,7 +299,11 @@ export function ProductDialog({
                 <div>
                   <p className="text-sm font-medium text-zinc-900">Selling units</p>
                   <p className="text-xs text-zinc-500">
-                    Stock is counted in {form.getValues("unit") !== NONE ? `${form.getValues("unit")}s` : "single units"}.
+                    Stock is counted in{" "}
+                    {form.getValues("unit") !== NONE
+                      ? pluralizeUnit(form.getValues("unit"), 2)
+                      : "single units"}
+                    .
                     A pack takes that many out of the same pool.
                   </p>
                 </div>
