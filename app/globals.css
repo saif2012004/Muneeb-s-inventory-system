@@ -99,10 +99,12 @@
 }
 
 /* ---------------------------------------------------------------------------
-   THERMAL RECEIPT (58mm roll)
+   THERMAL RECEIPT (80mm roll — confirmed 2026-08-20, printer bought 2026-08-22)
    ---------------------------------------------------------------------------
    Paper width is a recorded decision — see "Receipt printing" in CLAUDE.md.
-   58mm also prints on an 80mm roll (leaving margin); the reverse overflows.
+   A 58mm layout also prints on an 80mm roll (leaving margin); the reverse
+   overflows, which is why 58mm was the safe default until the printer was
+   confirmed.
 
    The receipt is fixed-width TEXT in a <pre>, so the font must be monospaced
    and must not be re-wrapped by the browser: every line was already measured
@@ -110,8 +112,10 @@
    pre-wrap) is what keeps a rounding difference in font metrics from silently
    re-flowing a line and destroying the money column.
 
-   10px monospace ≈ 6px per character, so 32 chars ≈ 192px ≈ 51mm, which fits
-   inside 58mm with the 2mm padding either side. */
+   10px monospace measures 5.86px per character (MEASURED in the browser, not
+   the 6.0px a back-of-envelope estimate gives), so 48 chars ≈ 281px ≈ 74mm,
+   which fits inside 80mm with the 2mm padding either side — about 6px of
+   headroom. */
 .receipt-page {
   display: flex;
   flex-direction: column;
@@ -152,12 +156,13 @@
    🔴 This is the ONLY element on the receipt allowed to leave the character
    grid, and it can only because it is rendered from the raw shop name rather
    than from a space-padded line (see ReceiptDocument). Every other line is
-   aligned by counting characters at 32 per line; enlarging any of them would
-   break the money columns.
+   aligned by counting characters at RECEIPT_LINE_CHARS (48) per line;
+   enlarging any of them would break the money columns.
  
    `display: block` + `text-align: center` replaces the space padding.
    `white-space: normal` lets a long name WRAP instead of running off the roll:
-   the field is capped at 32 characters, which at this size is wider than 58mm. */
+   the field is capped at RECEIPT_LINE_CHARS (48), which at 1.6em is wider than
+   80mm. */
 .receipt-shop-name {
   display: block;
   font-size: 1.6em;
@@ -171,10 +176,24 @@
 
 @media print {
   /* The roll: full bleed, continuous length, no driver margins. Without
-     `margin: 0` most drivers add ~10mm and the 58mm content is scaled down or
-     clipped. */
+     `margin: 0` most drivers add ~10mm and the content is scaled down or
+     clipped.
+
+     🔴 THIS IS THE PAGE BOX HANDED TO THE PRINTER, AND IT IS THE FOURTH COPY
+     OF THE PAPER WIDTH — the one CLAUDE.md's "three edits" table missed.
+
+     It was left at `58mm` when the printer was confirmed as 80mm on
+     2026-08-20, so the page box was 58mm while `.receipt-paper` inside it was
+     80mm. Chrome resolves that by clipping the right ~22mm or shrinking the
+     whole receipt to fit, depending on the "Fit to page"/scale setting — i.e.
+     a lost money column, or unreadably small print. Found 2026-08-22, before
+     the first real print, by grepping for residual `58mm` rather than by
+     looking at the preview: at the time it was written the preview looked
+     right, because the on-SCREEN rule is a different declaration entirely.
+
+     Keep this equal to `.receipt-paper { width }` in both places. */
   @page {
-    size: 58mm auto;
+    size: 80mm auto;
     margin: 0;
   }
 

@@ -446,19 +446,29 @@ unambiguous from the total on the same line.)*
 | 58mm | 384 dots | 32 chars/line | 42 |
 | **80mm (confirmed)** | 576 dots | **48 chars/line** | 64 |
 
-#### 🔴 CHANGING PAPER SIZE IS **THREE** EDITS. Miss one and it fails silently.
+#### 🔴 CHANGING PAPER SIZE IS **FOUR** EDITS. Miss one and it fails silently.
+
+> ⚠️ **This table said THREE until 2026-08-22, and the missing fourth row had
+> already bitten.** `@page { size }` was left at `58mm` through the 80mm change, so the page box
+> was 58mm while the receipt inside it was 80mm — Chrome clips the right ~22mm or shrinks the whole
+> roll, depending on the scale setting. It was caught the day the printer arrived, by grepping for
+> residual `58mm`, **not** by looking at the print preview: the preview is governed by the *screen*
+> rule, which was correct. A table that under-counts the edits is worse than no table, because it
+> is read as a completed checklist.
 
 | # | What | Where | Now |
 |---|---|---|---|
 | 1 | The **character grid** the money columns align to | `RECEIPT_LINE_CHARS`, `lib/settings-display.ts` | **48** |
 | 2 | The **screen** paper width | `.receipt-paper { width }`, `app/globals.css` (~:134) | **80mm** |
-| 3 | The **PRINT** paper width | `.receipt-paper { width }` inside `@media print`, same file (~:211) | **80mm** |
+| 3 | The **PRINT** paper width | `.receipt-paper { width }` inside `@media print`, same file | **80mm** |
+| 4 | The **PAGE BOX** given to the printer | `@page { size }` inside `@media print`, same file | **80mm auto** |
 
 **Only #1 propagates.** Dividers, wrapping, centring, padded money rows, the line clamp and the
 `shopName` cap all derive from the constant — which is why this is a three-line change and not a
 layout rewrite. **Never hardcode 48.**
 
-**#3 is the dangerous one and was nearly missed on 2026-08-20.** It is a SECOND copy of the width
+**#3 and #4 are the dangerous ones. #3 was nearly missed on 2026-08-20; #4 WAS missed, and stayed
+wrong until 2026-08-22.** It is a SECOND copy of the width
 inside the print media query, and it is the one that actually reaches the printer. Getting #1 and #2
 right while leaving #3 at 58mm gives you a preview that looks perfect on screen and a physical roll
 that wraps every line into nonsense — with nothing on screen to warn you, because the screen is
