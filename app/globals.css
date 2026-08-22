@@ -130,19 +130,34 @@
 }
 
 .receipt-paper {
-  /* 🔴 THE PHYSICAL PAPER. Owner confirmed an 80mm printer on 2026-08-20.
+  /* 🔴 THE PRINTABLE WIDTH — 72mm, NOT the 80mm of the paper.
+     Printer: Speed-X SP-90A, bought 2026-08-22. 576 dots/line at 203 DPI
+     (8 dots/mm) = a 72mm PRINT HEAD on 80mm paper. The remaining ~8mm is
+     paper the head physically cannot reach.
+
      This does NOT derive from RECEIPT_LINE_CHARS and must be changed with it:
-     that constant is the CHARACTER GRID (48 chars), this is the paper the
-     browser prints onto. Change one without the other and you get 48-character
-     lines squeezed into a 58mm page. Was 58mm / 32 chars until 2026-08-20. */
-  width: 80mm;
-  padding: 2mm;
+     that constant is the CHARACTER GRID (48 chars), this is how wide those
+     characters are allowed to be drawn.
+
+     Both numbers describe the same 576 dots — 48 chars x 12 dots. They agreed
+     on the dot grid and DISAGREED in millimetres: at the old 10px the 48
+     characters measured 74.4mm, 2.4mm wider than the head, so the last two or
+     three characters of every money figure sat outside the printable area. The
+     font size below is what makes the CSS millimetre match the hardware. */
+  width: 72mm;
+  padding: 1mm;
   margin: 0;
   background: #fff;
   color: #000;
   font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono",
     Menlo, Consolas, monospace;
-  font-size: 10px;
+  /* Sized so 48 characters fit INSIDE the 72mm head with headroom to spare —
+     measured in the browser, not calculated. Deliberately not sized to fill
+     the width exactly: `ui-monospace` resolves to a different face on a
+     different machine, and a receipt that fits by 0.1mm here would clip the
+     money column on a laptop that picks a slightly wider font. Was 10px, which
+     overflowed the head by 2.4mm. */
+  font-size: 9.2px;
   line-height: 1.35;
   white-space: pre;
   /* Screen-only affordance so the preview reads as a paper roll. Removed in
@@ -221,13 +236,23 @@
   .receipt-paper {
     position: absolute;
     top: 0;
-    left: 0;
+    /* CENTRED on the 80mm page, not pinned left. The head's 72mm sits inside
+       80mm of paper with an unprintable margin either side, so content flush to
+       the left edge would put its first millimetres where the head cannot
+       reach. Centring is the placement that survives the driver reporting its
+       imageable area either centred or left-origin.
+       ⚠️ Provisional: replace with the driver's REPORTED imageable origin once
+       the printer's driver is installed and `Get-PrintCapabilities` can be
+       read. Guessing is what this comment exists to flag. */
+    left: 50%;
+    transform: translateX(-50%);
     /* 🔴 THE WIDTH THAT ACTUALLY REACHES THE PRINTER. Must match the screen
-       rule above — 80mm since 2026-08-20. This is a SECOND copy of the width
-       and it is the one that matters: getting the screen preview right while
-       leaving this at 58mm would print a wrapped, unreadable roll while the
-       preview looked perfect. Was 58mm until 2026-08-20. */
-    width: 80mm;
+       rule above — 72mm (the SP-90A's print head) since 2026-08-22. This is a
+       SECOND copy of the width and it is the one that matters: getting the
+       screen preview right while leaving this behind would print a wrapped,
+       unreadable roll while the preview looked perfect. 58mm until 2026-08-20,
+       80mm until 2026-08-22. */
+    width: 72mm;
     box-shadow: none;
     /* Thermal paper is white and the head prints black — force it, so a dark
        theme or a "background graphics off" driver setting cannot produce a

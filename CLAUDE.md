@@ -436,10 +436,37 @@ unambiguous from the total on the same line.)*
   as is any per-module bill sold at full price. A discounted bill still prints Subtotal → Discount →
   TOTAL, unchanged. Matches the owner's answer on the mixed receipt: **one flat list, one total.**
 
-### Receipt printing (thermal) — ✅ 80mm CONFIRMED AND SHIPPED (2026-08-20)
+### Receipt printing (thermal) — ✅ PRINTER BOUGHT 2026-08-22: Speed-X SP-90A
 
-**The owner confirmed an 80mm printer on 2026-08-20, and the code now matches:
-`RECEIPT_LINE_CHARS = 48`.**
+**The physical printer is a Speed-X SP-90A** (USB + Bluetooth + WiFi), 80mm paper,
+`RECEIPT_LINE_CHARS = 48`.
+
+#### 🔴 THE PAPER IS 80mm. THE PRINT HEAD IS 72mm. Those are different numbers and both matter.
+
+**576 dots/line at 203 DPI = 8 dots/mm = a 72mm print head**, on 79.5 ± 0.5mm paper. The remaining
+~8mm is paper the head physically cannot reach.
+
+| | Value | It describes |
+|---|---|---|
+| `RECEIPT_LINE_CHARS` | **48** | the DOT grid — 48 chars × 12 dots = exactly 576 |
+| `@page { size }` | **80mm auto** | the PAPER, so the driver prints 1:1 with no scaling |
+| `.receipt-paper { width }` | **72mm** | the HEAD — how wide those 48 chars may be drawn |
+
+**48 is right and always was** — it is the hardware's own dot grid. What was wrong was the
+*millimetres*: at `font-size: 10px` those 48 characters measured **74.4mm**, 2.4mm wider than the
+head, so the last two or three characters of every money figure sat outside the printable area.
+Both numbers describe the same 576 dots and they agreed on the grid while disagreeing in
+millimetres — which is exactly the kind of mismatch a character-count check cannot see.
+
+`font-size: 9.2px` is what reconciles them. **Measured in the browser, not calculated:** the real
+advance is 5.391px/char, so 48 chars = **68.46mm inside the 72mm head — 3.54mm of headroom.** It is
+deliberately NOT sized to fill the width: `ui-monospace` resolves to a different face on a different
+machine, and a receipt that fits by 0.1mm here would clip the money column on another laptop.
+
+The receipt is **centred** on the 80mm page rather than pinned left, because the head's 72mm sits
+inside 80mm of paper with an unprintable margin either side. ⚠️ **That centring is a considered
+guess and is labelled as one in the CSS** — replace it with the driver's REPORTED imageable origin
+(`Get-PrintCapabilities`) once the driver is installed.
 
 | Roll | Print head | Font A (12 dots/char) | Font B (9 dots/char) |
 |---|---|---|---|
@@ -459,9 +486,14 @@ unambiguous from the total on the same line.)*
 | # | What | Where | Now |
 |---|---|---|---|
 | 1 | The **character grid** the money columns align to | `RECEIPT_LINE_CHARS`, `lib/settings-display.ts` | **48** |
-| 2 | The **screen** paper width | `.receipt-paper { width }`, `app/globals.css` (~:134) | **80mm** |
-| 3 | The **PRINT** paper width | `.receipt-paper { width }` inside `@media print`, same file | **80mm** |
-| 4 | The **PAGE BOX** given to the printer | `@page { size }` inside `@media print`, same file | **80mm auto** |
+| 2 | The **screen** width (= the print head) | `.receipt-paper { width }`, `app/globals.css` | **72mm** |
+| 3 | The **PRINT** width (= the print head) | `.receipt-paper { width }` inside `@media print`, same file | **72mm** |
+| 4 | The **PAGE BOX** given to the printer (= the paper) | `@page { size }` inside `@media print`, same file | **80mm auto** |
+| 5 | The **font size** that makes 48 chars fit #2 | `.receipt-paper { font-size }`, same file | **9.2px** |
+
+⚠️ **#5 joined the list on 2026-08-22** and is the one a character-count check cannot catch — see the
+print-head note above. Changing the paper without re-measuring the font leaves the grid correct and
+the millimetres wrong.
 
 **Only #1 propagates.** Dividers, wrapping, centring, padded money rows, the line clamp and the
 `shopName` cap all derive from the constant — which is why this is a three-line change and not a
