@@ -151,13 +151,23 @@
   color: #000;
   font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono",
     Menlo, Consolas, monospace;
-  /* Sized so 48 characters fit INSIDE the 72mm head with headroom to spare —
-     measured in the browser, not calculated. Deliberately not sized to fill
-     the width exactly: `ui-monospace` resolves to a different face on a
-     different machine, and a receipt that fits by 0.1mm here would clip the
-     money column on a laptop that picks a slightly wider font. Was 10px, which
-     overflowed the head by 2.4mm. */
-  font-size: 9.2px;
+  /* Sized so RECEIPT_LINE_CHARS (32) fills the 72mm head — measured in the
+     browser, not calculated.
+
+     🔴 THIS MOVES WITH RECEIPT_LINE_CHARS AND NOTHING ENFORCES THAT. The
+     constant decides how many characters share the head; this decides how big
+     each one is drawn. Set the constant lower without raising this and the
+     receipt prints small in the middle of the roll; raise the constant without
+     lowering this and the money column runs off the right.
+
+     Was 9.2px at 48 chars — which fit, and which the owner could not read on
+     the real paper (2026-08-22). At 32 chars each character gets 2.19mm
+     instead of 1.43mm, so this rises with it.
+
+     Deliberately NOT sized to fill the width exactly: `ui-monospace` resolves
+     to a different face on a different machine, and a receipt that fits by
+     0.1mm here would clip the money column on another laptop. */
+  font-size: 13.8px;
   line-height: 1.35;
   white-space: pre;
   /* Screen-only affordance so the preview reads as a paper roll. Removed in
@@ -195,7 +205,15 @@
      clipped.
 
      🔴 THIS IS THE PAGE BOX HANDED TO THE PRINTER, AND IT IS THE FOURTH COPY
-     OF THE PAPER WIDTH — the one CLAUDE.md's "three edits" table missed.
+     OF THE WIDTH — the one CLAUDE.md's "three edits" table missed.
+
+     ⚠️ 72mm, NOT the 80mm of the physical roll. Read from the installed driver
+     on 2026-08-22, not assumed: the POS-80-Series driver offers three paper
+     sizes named "Thermal Paper(80 x 210 / 297 / 3276)" and EVERY ONE of them
+     reports a page width of 72.14mm with printable origin X = 0, printable
+     width 72.07mm and a hard margin of 0. The driver models the page AS the
+     print head; the "80" in the name is the roll it is cut from. Asking for an
+     80mm page would leave Chrome scaling a page the driver does not have.
 
      It was left at `58mm` when the printer was confirmed as 80mm on
      2026-08-20, so the page box was 58mm while `.receipt-paper` inside it was
@@ -208,7 +226,7 @@
 
      Keep this equal to `.receipt-paper { width }` in both places. */
   @page {
-    size: 80mm auto;
+    size: 72mm auto;
     margin: 0;
   }
 
@@ -236,16 +254,15 @@
   .receipt-paper {
     position: absolute;
     top: 0;
-    /* CENTRED on the 80mm page, not pinned left. The head's 72mm sits inside
-       80mm of paper with an unprintable margin either side, so content flush to
-       the left edge would put its first millimetres where the head cannot
-       reach. Centring is the placement that survives the driver reporting its
-       imageable area either centred or left-origin.
-       ⚠️ Provisional: replace with the driver's REPORTED imageable origin once
-       the printer's driver is installed and `Get-PrintCapabilities` can be
-       read. Guessing is what this comment exists to flag. */
-    left: 50%;
-    transform: translateX(-50%);
+    /* LEFT-ALIGNED, because the driver reports printable origin X = 0.
+       This was briefly CENTRED on an 80mm page — a reasoned guess made before
+       the driver existed, on the theory that a 72mm head sits inside 80mm of
+       paper with an unprintable margin either side. The driver says otherwise:
+       its page IS the printable area, 72.14mm wide, origin 0, hard margin 0.
+       Centring would have pushed the receipt right by ~4mm and clipped the
+       money column. Measured, not reasoned — which is why the guess was
+       labelled as one instead of left to look like a decision. */
+    left: 0;
     /* 🔴 THE WIDTH THAT ACTUALLY REACHES THE PRINTER. Must match the screen
        rule above — 72mm (the SP-90A's print head) since 2026-08-22. This is a
        SECOND copy of the width and it is the one that matters: getting the

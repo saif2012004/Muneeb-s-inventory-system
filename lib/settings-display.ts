@@ -12,8 +12,25 @@ export const SETTINGS_ID = "app";
 /**
  * THE RECEIPT PAPER WIDTH, as a character budget. One line, ESC/POS Font A.
  *
- * **80mm roll: 576-dot print head / 12 dots per character = 48 characters.**
- * The owner CONFIRMED an 80mm printer on 2026-08-20.
+ * **32 characters — a LEGIBILITY choice, not a hardware limit (2026-08-22).**
+ *
+ * The hardware would take 48: the Speed-X SP-90A has a 576-dot head and Font A
+ * is 12 dots wide, so 576/12 = 48 fits exactly. It was set to 48 for two days
+ * and the owner printed it. **His verdict on the real paper: too small to
+ * read.** He is right, and the arithmetic says why — 48 characters across a
+ * 72mm head is 1.43mm per character, and a browser's monospace font at that
+ * advance stands only ~2.4mm tall, noticeably shorter than the printer's own
+ * Font A.
+ *
+ * **Characters per line is the ONLY lever on printed text size.** The head is
+ * 72mm no matter what; the only way a character gets bigger is for fewer of
+ * them to share that width. At 32 each character gets 2.19mm instead of 1.43mm
+ * — **1.5x taller and 1.5x wider, so 2.35x the ink area.**
+ *
+ * The cost, and it is real: the phone line and the address no longer fit on one
+ * line and wrap to two, which is exactly what moving 32 -> 48 bought on
+ * 2026-08-20. That trade is now reversed deliberately. **A receipt the owner
+ * cannot read is not made better by fitting his address on one line.**
  *
  * ---------------------------------------------------------------------------
  * 🔴 THIS IS THE ONLY PLACE THE WIDTH IS DECIDED. NEVER HARDCODE 48.
@@ -29,19 +46,22 @@ export const SETTINGS_ID = "app";
  * get 48-character lines squeezed into a 58mm page, or a 32-character receipt
  * marooned in the middle of an 80mm one.
  *
- * Until 2026-08-20 this was 32 (58mm, 384-dot head). 58mm was the
- * DEFAULT-WHEN-UNSURE choice — no printer had ever been recorded — and the
- * reason was asymmetric risk: a 58mm layout also prints on 80mm, just leaving
- * margin, whereas an 80mm layout OVERFLOWS 58mm and wraps every line into
- * nonsense. That asymmetry has not changed; it is simply resolved now. **If the
- * printer is ever swapped for a 58mm one, this must go back to 32** or every
- * receipt becomes unreadable.
+ * History: 32 until 2026-08-20 (58mm assumed), 48 for two days once an 80mm
+ * printer was confirmed, back to 32 on 2026-08-22 once one was actually
+ * PRINTED FROM. The number is the same as the original by coincidence, not by
+ * reversal — it was a paper-width guess then and it is a legibility decision
+ * now, and 32 is comfortably inside what the 72mm head can render.
+ *
+ * ⚠️ **Going lower is possible and gets bigger still — 24 characters would be
+ * 2.9mm each, a true doubling — but 24 is where the money column starts to
+ * break.** `TOTAL` plus `Rs. 3,500.00` is already 22 of those 24. Do not go
+ * below 32 without rebuilding the line layout.
  *
  * NOTE for the receipt renderer: double-width header text halves this to 24.
  * That is a RENDERING decision — print a long name at normal width rather than
  * letting the validator reject a real shop name that would fit perfectly.
  */
-export const RECEIPT_LINE_CHARS = 48;
+export const RECEIPT_LINE_CHARS = 32;
 
 /**
  * THE SEEDED PLACEHOLDERS. Deliberately jarring, and they must stay that way.

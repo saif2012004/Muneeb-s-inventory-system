@@ -448,9 +448,51 @@ unambiguous from the total on the same line.)*
 
 | | Value | It describes |
 |---|---|---|
-| `RECEIPT_LINE_CHARS` | **48** | the DOT grid — 48 chars × 12 dots = exactly 576 |
-| `@page { size }` | **80mm auto** | the PAPER, so the driver prints 1:1 with no scaling |
-| `.receipt-paper { width }` | **72mm** | the HEAD — how wide those 48 chars may be drawn |
+| `RECEIPT_LINE_CHARS` | **32** | characters per line — a LEGIBILITY choice, see below |
+| `@page { size }` | **72mm auto** | the driver's page, which IS its printable area |
+| `.receipt-paper { width }` | **72mm** | the HEAD — how wide those characters may be drawn |
+| `.receipt-paper { font-size }` | **13.8px** | how big each character is drawn |
+
+#### 📏 What the DRIVER actually reports (read on 2026-08-22, not assumed)
+
+`POS-80-Series` offers three paper sizes — "Thermal Paper(80 x 210 / 297 / 3276)" — and **every one
+of them reports a page width of 72.14mm, printable origin X = 0, printable width 72.07mm, hard
+margin 0**, at 203×203 DPI. The driver models the page **as** the print head; the "80" in the name
+is the roll it is cut from.
+
+Two consequences, both of which corrected earlier guesses:
+
+- **`@page { size }` is 72mm, not 80mm.** Asking for an 80mm page makes Chrome scale to a page the
+  driver does not have.
+- **The receipt is LEFT-ALIGNED, not centred.** It was briefly centred on the theory that a 72mm
+  head sits inside 80mm of paper with margin either side. The driver says origin 0. Centring would
+  have pushed it ~4mm right and clipped the money column. **The guess was labelled as a guess in the
+  CSS, which is why it was cheap to correct** — do that with any value you cannot yet measure.
+
+#### 🔴 48 CHARACTERS FIT THE HARDWARE AND WERE TOO SMALL TO READ
+
+The head takes 48 (576 dots ÷ 12 per Font A character). It was set to 48, printed on the real
+printer on 2026-08-22, and **the owner could not read it.** The arithmetic agrees: 48 characters
+across 72mm is 1.43mm each, and a browser monospace at that advance stands ~2.4mm tall — shorter
+than the printer's own Font A.
+
+**Characters per line is the ONLY lever on printed text size.** The head is 72mm regardless; a
+character only gets bigger when fewer of them share that width.
+
+| Chars | Per character | Verdict |
+|---|---|---|
+| 48 | 1.43mm | fits the dot grid, **too small on paper** |
+| **32** | **2.19mm** | **1.5× taller and wider = 2.35× the ink area** |
+| 24 | 2.92mm | a true doubling, but `TOTAL` + `Rs. 3,500.00` is 22 of the 24 — the money column starts to break |
+
+**The cost of 32 is real and was paid knowingly:** the phone line and address wrap to two lines
+again, which is exactly what moving to 48 had bought. **A receipt the owner cannot read is not
+improved by fitting his address on one line.**
+
+⚠️ **`font-size` must move WITH `RECEIPT_LINE_CHARS` and nothing enforces it.** The constant decides
+how many characters share the head; the CSS decides how big each is drawn. Lower the constant
+without raising the font and the receipt prints small in the middle of the roll. Measured at 32 /
+13.8px: **68.46mm inside the 72mm head, 3.54mm headroom.**
 
 **48 is right and always was** — it is the hardware's own dot grid. What was wrong was the
 *millimetres*: at `font-size: 10px` those 48 characters measured **74.4mm**, 2.4mm wider than the
@@ -488,8 +530,8 @@ guess and is labelled as one in the CSS** — replace it with the driver's REPOR
 | 1 | The **character grid** the money columns align to | `RECEIPT_LINE_CHARS`, `lib/settings-display.ts` | **48** |
 | 2 | The **screen** width (= the print head) | `.receipt-paper { width }`, `app/globals.css` | **72mm** |
 | 3 | The **PRINT** width (= the print head) | `.receipt-paper { width }` inside `@media print`, same file | **72mm** |
-| 4 | The **PAGE BOX** given to the printer (= the paper) | `@page { size }` inside `@media print`, same file | **80mm auto** |
-| 5 | The **font size** that makes 48 chars fit #2 | `.receipt-paper { font-size }`, same file | **9.2px** |
+| 4 | The **PAGE BOX** given to the printer (= the driver's page) | `@page { size }` inside `@media print`, same file | **72mm auto** |
+| 5 | The **font size** that makes #1 fill #2 | `.receipt-paper { font-size }`, same file | **13.8px** |
 
 ⚠️ **#5 joined the list on 2026-08-22** and is the one a character-count check cannot catch — see the
 print-head note above. Changing the paper without re-measuring the font leaves the grid correct and
@@ -541,7 +583,7 @@ validator reject a real name that would fit perfectly.
 
 | Field | Cap | Why |
 |---|---|---|
-| `shopName` | **48** | Exactly one 80mm line — moved from 32 automatically when the constant changed, because it is DERIVED |
+| `shopName` | **32** | Exactly one line — it tracks `RECEIPT_LINE_CHARS` automatically, because it is DERIVED. 32 → 48 → 32 without anyone editing this cap |
 | `shopPhone` | 60 | Now ~1.5 lines at 48 chars; enough for three numbers as free text |
 | `shopAddress` | 200 | Wraps to ~4 lines at 48 chars; a paste guard, not a format rule |
 
