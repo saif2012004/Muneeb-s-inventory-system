@@ -85,6 +85,33 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className={cn("min-h-dvh bg-background font-sans antialiased")}>
+        {/**
+         * 🔴 CATCH `beforeinstallprompt` BEFORE REACT HYDRATES. Do not move this
+         * into a component.
+         *
+         * Chrome fires the event ONCE, as soon as it decides the app is
+         * installable, and never replays it. `PwaProvider` attaches its listener
+         * in a `useEffect`, which runs only after hydration — and on a return
+         * visit the service worker is already controlling the page, so Chrome
+         * decides "installable" almost immediately. On a cheap Android the event
+         * therefore fires and is GONE before React is listening, and the install
+         * prompt silently never appears.
+         *
+         * That is exactly how it failed (2026-08-23): the prompt showed when the
+         * app was new — first visit, no service worker yet, so installability was
+         * decided late enough to be caught — and stopped once the worker was
+         * installed. It then failed on a never-installed phone too, which is what
+         * ruled out the "already installed" and localStorage explanations.
+         *
+         * This runs during HTML parsing, long before hydration, and parks the
+         * event on `window` for `PwaProvider` to pick up. The custom event covers
+         * the other order — React mounting first and the event arriving later.
+         */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){window.__pwaInstallEvent=null;window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__pwaInstallEvent=e;window.dispatchEvent(new Event("pwa-install-available"));});window.addEventListener("appinstalled",function(){window.__pwaInstallEvent=null;});})();`,
+          }}
+        />
         <QueryProvider>
           {children}
           <Toaster position="top-center" richColors closeButton />

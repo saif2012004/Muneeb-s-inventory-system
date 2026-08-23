@@ -30,6 +30,17 @@ type InstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
+declare global {
+  interface Window {
+    /**
+     * Set by the inline script in `app/layout.tsx`, which catches
+     * `beforeinstallprompt` during HTML parsing — before this component exists.
+     * See the comment there; without it the prompt never shows on a return visit.
+     */
+    __pwaInstallEvent: InstallPromptEvent | null;
+  }
+}
+
 const DISMISSED_KEY = "pwa-install-dismissed";
 
 export function PwaProvider() {
@@ -109,10 +120,30 @@ export function PwaProvider() {
     if (typeof window === "undefined") return;
     if (window.localStorage.getItem(DISMISSED_KEY) === "1") return;
 
+    /**
+     * 🔴 THE EVENT HAS USUALLY ALREADY FIRED BY THE TIME THIS RUNS.
+     *
+     * Chrome fires `beforeinstallprompt` once and never replays it, and this
+     * effect only runs after hydration — so on a return visit (service worker
+     * already controlling, installability decided immediately) the event is long
+     * gone. The inline script in `app/layout.tsx` catches it during HTML parsing
+     * and parks it here; picking it up is what makes the prompt appear at all.
+     *
+     * Both orders are covered: the buffered event for "fired before React", and
+     * the listeners below for "fires after React".
+     */
+    const buffered = window.__pwaInstallEvent;
+    if (buffered) setInstallEvent(buffered);
+
     function onBeforeInstall(event: Event) {
       // Stop Chrome's own mini-infobar so there are not two prompts.
       event.preventDefault();
       setInstallEvent(event as InstallPromptEvent);
+    }
+
+    /** The inline script re-broadcasts under this name once it has buffered. */
+    function onAvailable() {
+      if (window.__pwaInstallEvent) setInstallEvent(window.__pwaInstallEvent);
     }
 
     // Fires when the install completes — by our button or the browser menu.
@@ -122,9 +153,11 @@ export function PwaProvider() {
     }
 
     window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("pwa-install-available", onAvailable);
     window.addEventListener("appinstalled", onInstalled);
     return () => {
       window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("pwa-install-available", onAvailable);
       window.removeEventListener("appinstalled", onInstalled);
     };
   }, []);
