@@ -527,11 +527,35 @@ guess and is labelled as one in the CSS** — replace it with the driver's REPOR
 
 | # | What | Where | Now |
 |---|---|---|---|
-| 1 | The **character grid** the money columns align to | `RECEIPT_LINE_CHARS`, `lib/settings-display.ts` | **48** |
+| 1 | The **character grid** the money columns align to (BROWSER path) | `RECEIPT_LINE_CHARS`, `lib/settings-display.ts` | **32** |
 | 2 | The **screen** width (= the print head) | `.receipt-paper { width }`, `app/globals.css` | **72mm** |
 | 3 | The **PRINT** width (= the print head) | `.receipt-paper { width }` inside `@media print`, same file | **72mm** |
 | 4 | The **PAGE BOX** given to the printer (= the driver's page) | `@page { size }` inside `@media print`, same file | **72mm auto** |
 | 5 | The **font size** that makes #1 fill #2 | `.receipt-paper { font-size }`, same file | **13.8px** |
+| 6 | The **character grid** for the NATIVE ESC/POS path | `ESCPOS_LINE_CHARS`, `lib/escpos.ts` | **48** |
+
+⚠️ **Row 1 said `48` until 2026-08-22 while the code said `32`** — stale, and caught only by reading
+the constant. If a row here disagrees with the source, the source wins; fix the row in the same
+change.
+
+#### 🔴 #1 AND #6 ARE DIFFERENT NUMBERS ON PURPOSE. Do not converge them.
+
+**Browser `window.print()` = 32 columns. Native ESC/POS = 48 columns.** Same paper, same 72mm head,
+two renderers with different legible densities:
+
+| | Character size | Verdict |
+|---|---|---|
+| Browser @ 48 | 1.43 × ~2.4mm | rasterised web font — **the owner could not read it** |
+| **Browser @ 32** | 2.19 × ~3.5mm | **what the browser path uses** |
+| **Native Font A @ 48** | **1.5 × 3.0mm** | **12×24 dots of the printer's own font — he reads it fine** |
+
+Verified on paper 2026-08-22 with a three-way comparison print (normal / double-height /
+double-both); the owner picked normal Font A. **The 32-column compromise is a browser-rendering
+artifact, not a limit of the hardware or his eyesight** — which is why the native path gets the
+phone number and address back on one line each.
+
+`buildReceiptLines(receipt, width)` in `lib/receipt-lines.ts` takes the width as a parameter, so
+both paths share one implementation of the money, rounding and column rules.
 
 ⚠️ **#5 joined the list on 2026-08-22** and is the one a character-count check cannot catch — see the
 print-head note above. Changing the paper without re-measuring the font leaves the grid correct and
@@ -539,7 +563,26 @@ the millimetres wrong.
 
 **Only #1 propagates.** Dividers, wrapping, centring, padded money rows, the line clamp and the
 `shopName` cap all derive from the constant — which is why this is a three-line change and not a
-layout rewrite. **Never hardcode 48.**
+layout rewrite. **Never hardcode 32 or 48; read the constant for the path you are on.**
+
+#### 🔴 THE NATIVE PATH IS ASCII-ONLY, AND THE RECEIPT USES NON-ASCII CHARACTERS
+
+The printer decodes single-byte code pages, not UTF-8. **The quantity row is built with `×`
+(U+00D7) and a product detail with `·` (U+00B7)** — both outside ASCII, and both encoded to `?`
+in the first build of `lib/escpos.ts`:
+
+```
+2 peti ? 7,000.00                Rs. 14,000.00
+```
+
+That destroys the receipt's only real job — letting a customer check the arithmetic with a
+calculator (the paise rule). **`tsc`, `next lint` and a production build were all green.** It was
+caught by running a fixture through the encoder and asserting no `?` survived.
+
+`ASCII_SUBSTITUTES` in `lib/escpos.ts` transliterates the ones the receipt actually uses.
+⚠️ **Every mapping must be exactly ONE character long** — lines arrive already padded and clamped
+to the grid, so a 1→2 substitution would push the money column out of alignment. That is why `…`
+maps to `.` and not `...`.
 
 **#3 and #4 are the dangerous ones. #3 was nearly missed on 2026-08-20; #4 WAS missed, and stayed
 wrong until 2026-08-22.** It is a SECOND copy of the width
@@ -636,6 +679,15 @@ contributes a shared layout and contributes NOTHING to the URL. There is no lite
   /auth.config.ts         → Edge-safe NextAuth config for middleware
   /routes.ts              → Route constants (dependency-free, client+edge safe)
   /serialize.ts           → Decimal → number serializers (money/liters)
+  /receipt-lines.ts       → THE fixed-width receipt text, shared by BOTH print
+                            paths. `buildReceiptLines(receipt, width)` — 32 for
+                            the browser, 48 for ESC/POS. Text only: no markup,
+                            no printer commands (both renderers depend on that)
+  /escpos.ts              → the receipt as NATIVE ESC/POS bytes, 48 columns.
+                            ⚠️ ASCII-only — see ASCII_SUBSTITUTES
+  /usb-print.ts           → WebUSB transport. The ONLY app-free route from the
+                            phone to the printer; needs an OTG cable. Fails on
+                            Windows by design (usbprint.sys owns the device)
   /format.ts              → formatPKR(), formatDate(), Karachi date helpers
   /utils.ts               → misc helpers
   /sales.ts               → THE money + stock + price-snapshot + line-reconciliation

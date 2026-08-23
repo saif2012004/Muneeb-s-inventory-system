@@ -43,7 +43,7 @@ export default async function UnifiedReceiptPage({
 
   return (
     <main className="receipt-page">
-      <PrintControls backHref="/sales" />
+      <PrintControls backHref="/sales" receipt={receipt} />
       <ReceiptDocument receipt={receipt} />
     </main>
   );
