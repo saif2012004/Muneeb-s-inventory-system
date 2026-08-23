@@ -126,7 +126,19 @@
 
 .receipt-controls {
   display: flex;
+  /* 🔴 MUST WRAP. `.receipt-page` centres its children, and a centred flex row
+     that is wider than the viewport overflows on BOTH sides — the left part
+     ends up at a negative offset, where the browser cannot scroll. So the
+     first button becomes permanently unreachable rather than merely off-screen.
+
+     Two buttons fitted a 360px phone, three do not: adding "Print over USB"
+     pushed the row to ~430px and "Back to sales" went off the left edge with
+     no way to reach it (2026-08-23). Any further button would do it again, so
+     this wraps rather than being tuned to a button count. */
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 0.75rem;
+  max-width: 100%;
 }
 
 .receipt-paper {
