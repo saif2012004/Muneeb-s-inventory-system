@@ -22,7 +22,11 @@ import {
 } from "@/components/ui/table";
 import { InlinePriceEditor } from "@/components/catalog/InlinePriceEditor";
 import { InlineStockEditor } from "@/components/catalog/InlineStockEditor";
-import { formatQualityShape, formatSize } from "@/lib/catalog-display";
+import {
+  formatCatalogPrice,
+  formatQualityShape,
+  formatSize,
+} from "@/lib/catalog-display";
 import type { Product } from "@/lib/hooks/use-catalog";
 import { rowInOut } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -107,14 +111,29 @@ export function ProductTable({
                       is the one value that silently drains a stock pool. */}
                   {product.units.length > 0 ? (
                     <span className="num block text-xs text-zinc-500">
-                      {product.units
-                        .map(
-                          (unit) =>
-                            `${unit.name} = ${unit.baseFactor} ${product.unit ?? "unit"}${
-                              unit.baseFactor === 1 ? "" : "s"
-                            }`
-                        )
-                        .join(" · ")}
+                      {product.units.map((unit, index) => (
+                        <span key={unit.name}>
+                          {index > 0 ? " · " : ""}
+                          {unit.name} = {unit.baseFactor}{" "}
+                          {product.unit ?? "unit"}
+                          {unit.baseFactor === 1 ? "" : "s"} @{" "}
+                          {/* The PACK's own price, independent of the base
+                              unit's — a pet is not bottles x bottle price.
+                              Shown here so the owner can check it without
+                              opening Edit, same reasoning as the factor
+                              beside it. Amber, unset placeholder, matches
+                              the base price cell's convention. */}
+                          <span
+                            className={
+                              unit.price === 0 ? "text-amber-600" : undefined
+                            }
+                          >
+                            {unit.price === 0
+                              ? "price not set"
+                              : formatCatalogPrice(unit.price)}
+                          </span>
+                        </span>
+                      ))}
                     </span>
                   ) : null}
                 </TableCell>

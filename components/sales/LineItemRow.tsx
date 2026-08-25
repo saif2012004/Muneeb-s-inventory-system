@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatPKR } from "@/lib/format";
 import {
+  defaultSellingUnit,
   formatQuantityWithUnit,
   quantityFieldLabel,
   unitIsInformative,
@@ -16,9 +17,19 @@ import {
   type SaleProductOption,
 } from "@/lib/sale-catalog";
 import { cn } from "@/lib/utils";
-import { previewLineTotal, type SaleFormValues } from "@/lib/validations/sale-form";
+import {
+  previewLineTotal,
+  type UnifiedSaleFormOutput,
+  type UnifiedSaleFormValues,
+} from "@/lib/validations/sale-form";
 
-type SaleForm = UseFormReturn<SaleFormValues, unknown, unknown>;
+/**
+ * The only sale form left since S9 deleted the per-module screens — this used
+ * to be the structurally-identical `SaleFormValues` so the (now-gone) per-module
+ * forms could share this row too. Typed against the real shape directly so the
+ * unit picker below can read and set `unitName`.
+ */
+type SaleForm = UseFormReturn<UnifiedSaleFormValues, unknown, UnifiedSaleFormOutput>;
 
 /**
  * One line of a sale: product, quantity, unit price, live total. Shared by
@@ -189,14 +200,28 @@ export function LineItemRow({
                 form.setValue(`items.${index}.productId`, option.product.id, {
                   shouldValidate: true,
                 });
-                // Pre-fill the catalog price, but only when the owner hasn't
-                // already typed one — re-picking must never silently discard a
-                // price they entered by hand.
+
+                // Beverages sell by the case far more often than one bottle
+                // at a time, so pre-select the pack rather than making the
+                // owner switch "Sold as" away from the single bottle on every
+                // line. Unconditional (not guarded by "already chosen"): a
+                // product SWAP has to replace whatever unit the PREVIOUS
+                // product had, or a stale unit name that doesn't exist on the
+                // new product would 400 on submit.
+                const unit = defaultSellingUnit(option.product.units);
+                form.setValue(`items.${index}.unitName`, unit?.name ?? "", {
+                  shouldDirty: true,
+                });
+
+                // Pre-fill the price — the chosen unit's own, or the base
+                // product's — but only when the owner hasn't already typed
+                // one — re-picking must never silently discard a price they
+                // entered by hand.
                 const current = form.getValues(`items.${index}.unitPrice`);
                 if (current.trim() === "") {
                   form.setValue(
                     `items.${index}.unitPrice`,
-                    String(option.product.price),
+                    String(unit ? unit.price : option.product.price),
                     { shouldValidate: false }
                   );
                 }

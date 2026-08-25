@@ -184,6 +184,28 @@ export function indexSaleProducts(
   return index;
 }
 
+/**
+ * The selling unit to pre-select the moment a product is chosen on a sale, so
+ * the owner isn't switching "Sold as" away from the base unit on every line.
+ *
+ * A catalog-level `isDefault` wins when the owner has set one on the product.
+ * Failing that, a pack literally named "pet" (or "pet 4"/"pet 6" — beverages'
+ * case unit, see the PET_MATRIX comment in prisma/seed.ts) is picked, because
+ * that is the far more common sale: bottles mostly move by the case, not one
+ * at a time. Any other product with units (eggs' dozen/tray/peti) is left
+ * unselected, exactly as before — nobody asked for that to change, and this is
+ * a property of the UNIT's name, not of the module, so it never needs a
+ * category check.
+ */
+export function defaultSellingUnit<T extends { name: string; isDefault: boolean }>(
+  units: T[]
+): T | undefined {
+  return (
+    units.find((unit) => unit.isDefault) ??
+    units.find((unit) => /^pet(\s|$)/i.test(unit.name))
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Quantity units
 // ---------------------------------------------------------------------------
