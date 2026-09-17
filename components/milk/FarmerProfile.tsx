@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   LogIn,
@@ -36,6 +37,7 @@ import {
   useCreateDelivery,
   useCreatePurchase,
   useDeleteDelivery,
+  useDeleteFarmer,
   useDeletePurchase,
   useFarmerProfile,
   useRetireFarmer,
@@ -71,8 +73,10 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
   const reduceMotion = useReducedMotion();
   const profileQuery = useFarmerProfile(farmerId);
 
+  const router = useRouter();
   const updateFarmer = useUpdateFarmer();
   const retireFarmer = useRetireFarmer();
+  const deleteFarmer = useDeleteFarmer();
   const createDelivery = useCreateDelivery(farmerId);
   const updateDelivery = useUpdateDelivery(farmerId);
   const deleteDelivery = useDeleteDelivery(farmerId);
@@ -82,6 +86,7 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
 
   const [editFarmerOpen, setEditFarmerOpen] = useState(false);
   const [retireOpen, setRetireOpen] = useState(false);
+  const [deleteFarmerOpen, setDeleteFarmerOpen] = useState(false);
   const [deliveryDialog, setDeliveryDialog] = useState<{
     open: boolean;
     target: Delivery | null;
@@ -220,25 +225,36 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
                 Retire
               </Button>
             ) : (
-              <Button
-                variant="outline"
-                className="h-11 rounded-lg"
-                disabled={updateFarmer.isPending}
-                onClick={() =>
-                  updateFarmer.mutate(
-                    { id: farmerId, isActive: true },
-                    {
-                      onSuccess: () => {
-                        toast.success(`"${farmer.name}" was reactivated.`);
-                      },
-                      onError: handleError("Couldn't reactivate the farmer."),
-                    }
-                  )
-                }
-              >
-                <UserPlus className="mr-2 size-4" aria-hidden />
-                Reactivate
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  className="h-11 rounded-lg"
+                  disabled={updateFarmer.isPending}
+                  onClick={() =>
+                    updateFarmer.mutate(
+                      { id: farmerId, isActive: true },
+                      {
+                        onSuccess: () => {
+                          toast.success(`"${farmer.name}" was reactivated.`);
+                        },
+                        onError: handleError("Couldn't reactivate the farmer."),
+                      }
+                    )
+                  }
+                >
+                  <UserPlus className="mr-2 size-4" aria-hidden />
+                  Reactivate
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="h-11 rounded-lg"
+                  disabled={deleteFarmer.isPending}
+                  onClick={() => setDeleteFarmerOpen(true)}
+                >
+                  <Trash2 className="mr-2 size-4" aria-hidden />
+                  Delete
+                </Button>
+              </>
             )}
           </div>
         }
@@ -660,6 +676,27 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
             setRetireOpen(false);
           } catch (error) {
             handleError("Couldn't retire the farmer.")(error);
+            throw error;
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        open={deleteFarmerOpen}
+        onOpenChange={setDeleteFarmerOpen}
+        title={`Delete ${farmer.name}?`}
+        description={`This permanently deletes ${farmer.name} and all of their recorded deliveries and purchases. This cannot be undone.`}
+        confirmLabel="Delete farmer"
+        pendingLabel="Deleting…"
+        requireConfirmationText="delete"
+        onConfirm={async () => {
+          try {
+            const result = await deleteFarmer.mutateAsync(farmerId);
+            toast.success(result.message, { duration: 8_000 });
+            setDeleteFarmerOpen(false);
+            router.push("/milk");
+          } catch (error) {
+            handleError("Couldn't delete the farmer.")(error);
             throw error;
           }
         }}

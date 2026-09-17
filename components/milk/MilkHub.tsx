@@ -93,6 +93,8 @@ export function MilkHub() {
     [farmers]
   );
 
+  const visibleFarmers = useMemo(() => farmers, [farmers]);
+
   /** Retired farmers who are still owed something — the tile says so out loud. */
   const retiredWithBalance = useMemo(
     () => farmers.filter((farmer) => !farmer.isActive && farmer.netBalanceOwed !== 0),
@@ -102,12 +104,12 @@ export function MilkHub() {
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     const filtered = term
-      ? activeFarmers.filter(
+      ? visibleFarmers.filter(
           (farmer) =>
             farmer.name.toLowerCase().includes(term) ||
             (farmer.phone ?? "").toLowerCase().includes(term)
         )
-      : activeFarmers;
+      : visibleFarmers;
 
     // Biggest debt first; ties broken by name so the order is stable.
     return [...filtered].sort((a, b) => {
@@ -116,7 +118,7 @@ export function MilkHub() {
       }
       return a.name.localeCompare(b.name);
     });
-  }, [activeFarmers, search]);
+  }, [visibleFarmers, search]);
 
   const header = (
     <PageHeader

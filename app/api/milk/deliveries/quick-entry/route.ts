@@ -67,10 +67,10 @@ export async function GET(request: Request): Promise<NextResponse> {
     const dayStart = startOfKarachiDay(dateKey);
     const dayEnd = endOfKarachiDay(dateKey);
 
-    // Only ACTIVE farmers get a row: a retired farmer should not be offered a
-    // fresh delivery, and the delivery routes refuse one anyway.
+    // Retired farmers remain visible here so the record does not disappear from
+    // the daily milk grid after retirement; the write routes still reject new
+    // entries for inactive farmers.
     const farmers = await prisma.farmer.findMany({
-      where: { isActive: true },
       select: { id: true, name: true, phone: true },
       orderBy: { name: "asc" },
     });

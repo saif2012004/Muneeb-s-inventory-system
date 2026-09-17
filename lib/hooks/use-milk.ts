@@ -297,6 +297,18 @@ export function useRetireFarmer() {
   });
 }
 
+export function useDeleteFarmer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.delete<{
+        deleted: "hard";
+        message: string;
+      }>(`/api/milk/farmers/${id}`),
+    onSuccess: () => invalidateMilk(queryClient),
+  });
+}
+
 export function useCreateDelivery(farmerId: string) {
   const queryClient = useQueryClient();
   return useMutation({

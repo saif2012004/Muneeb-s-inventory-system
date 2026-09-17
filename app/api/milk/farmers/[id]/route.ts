@@ -148,6 +148,19 @@ export async function DELETE(
     });
     if (!farmer) return fail("That farmer no longer exists.", 404);
 
+    if (!farmer.isActive) {
+      await prisma.$transaction(async (tx) => {
+        await tx.milkDelivery.deleteMany({ where: { farmerId: farmer.id } });
+        await tx.farmerPurchase.deleteMany({ where: { farmerId: farmer.id } });
+        await tx.farmer.delete({ where: { id: farmer.id } });
+      });
+
+      return ok({
+        deleted: "hard" as const,
+        message: `"${farmer.name}" was deleted permanently.`,
+      });
+    }
+
     const balance = await getFarmerBalance(farmer.id);
 
     const retired = await prisma.farmer.update({

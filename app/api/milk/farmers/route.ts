@@ -58,7 +58,6 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     const farmers = await prisma.farmer.findMany({
       where: {
-        ...(includeInactive ? {} : { isActive: true }),
         ...(search
           ? { name: { contains: search, mode: "insensitive" as const } }
           : {}),

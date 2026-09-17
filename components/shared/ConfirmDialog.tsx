@@ -30,6 +30,7 @@ export function ConfirmDialog({
   confirmLabel,
   pendingLabel = "Working…",
   variant = "destructive",
+  requireConfirmationText,
   onConfirm,
 }: {
   open: boolean;
@@ -39,15 +40,18 @@ export function ConfirmDialog({
   confirmLabel: string;
   pendingLabel?: string;
   variant?: "destructive" | "default";
+  requireConfirmationText?: string;
   onConfirm: () => Promise<void>;
 }) {
   const [isPending, setIsPending] = useState(false);
+  const [typedValue, setTypedValue] = useState("");
 
   async function confirm() {
     setIsPending(true);
     try {
       await onConfirm();
       onOpenChange(false);
+      setTypedValue("");
     } finally {
       // Runs even when onConfirm throws, so a failed action leaves a usable
       // dialog rather than a permanently spinning button.
@@ -55,13 +59,42 @@ export function ConfirmDialog({
     }
   }
 
+  const confirmationRequired =
+    requireConfirmationText !== undefined &&
+    requireConfirmationText.trim().length > 0;
+  const matchesConfirmationText =
+    !confirmationRequired || typedValue === requireConfirmationText;
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !isPending && onOpenChange(next)}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!isPending) {
+          onOpenChange(next);
+          if (!next) setTypedValue("");
+        }
+      }}
+    >
       <DialogContent className="rounded-xl sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
+
+        {confirmationRequired ? (
+          <div className="mt-2 space-y-2">
+            <label className="block text-sm font-medium text-zinc-700">
+              Type "{requireConfirmationText}" to confirm
+            </label>
+            <input
+              value={typedValue}
+              onChange={(event) => setTypedValue(event.target.value)}
+              placeholder={requireConfirmationText}
+              className="h-11 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none ring-0 placeholder:text-zinc-400 focus:border-emerald-500"
+              autoComplete="off"
+            />
+          </div>
+        ) : null}
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button
@@ -75,7 +108,7 @@ export function ConfirmDialog({
           <Button
             variant={variant}
             className="h-11 rounded-lg"
-            disabled={isPending}
+            disabled={isPending || !matchesConfirmationText}
             onClick={confirm}
           >
             {isPending ? (
