@@ -12,6 +12,7 @@ import {
   ShoppingBasket,
   Trash2,
   UserMinus,
+  UserPlus,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -218,7 +219,27 @@ export function FarmerProfile({ farmerId }: { farmerId: string }) {
                 <UserMinus className="mr-2 size-4" aria-hidden />
                 Retire
               </Button>
-            ) : null}
+            ) : (
+              <Button
+                variant="outline"
+                className="h-11 rounded-lg"
+                disabled={updateFarmer.isPending}
+                onClick={() =>
+                  updateFarmer.mutate(
+                    { id: farmerId, isActive: true },
+                    {
+                      onSuccess: () => {
+                        toast.success(`"${farmer.name}" was reactivated.`);
+                      },
+                      onError: handleError("Couldn't reactivate the farmer."),
+                    }
+                  )
+                }
+              >
+                <UserPlus className="mr-2 size-4" aria-hidden />
+                Reactivate
+              </Button>
+            )}
           </div>
         }
       />
