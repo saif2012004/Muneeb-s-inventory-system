@@ -84,7 +84,7 @@ export function ConfirmDialog({
         {confirmationRequired ? (
           <div className="mt-2 space-y-2">
             <label className="block text-sm font-medium text-zinc-700">
-              Type "{requireConfirmationText}" to confirm
+              Type &quot;{requireConfirmationText}&quot; to confirm
             </label>
             <input
               value={typedValue}

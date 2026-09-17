@@ -53,7 +53,6 @@ export async function GET(request: Request): Promise<NextResponse> {
   try {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search")?.trim();
-    const includeInactive = searchParams.get("includeInactive") === "true";
     const withBalances = searchParams.get("withBalances") !== "false";
 
     const farmers = await prisma.farmer.findMany({
